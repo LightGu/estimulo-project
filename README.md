@@ -23,6 +23,9 @@ REDIS_DB=0
 ```
 
 Na aplicacao Node.js, use `src/config/redis.js` como ponto unico de leitura dessas configuracoes para criar conexoes do BullMQ/ioredis.
+Os helpers de `src/queues/bullmq.js` devem ser usados para criar `Queue`, `Worker` e `QueueEvents` com a conexao Redis compartilhada.
+
+Mais detalhes e exemplos estao em `docs/filas.md`.
 
 ### Iniciar Redis
 
