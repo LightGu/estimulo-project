@@ -69,6 +69,56 @@ await contentDistributionQueue.add("send-content", {
 });
 ```
 
+## Fila campaign-trigger
+
+A fila `campaign-trigger` inicia o processamento assincrono de campanhas de
+envio de conteudos. Use o modulo `src/queues/campaign-trigger.js` para adicionar
+jobs sem instanciar BullMQ diretamente.
+
+Cada job contem pelo menos:
+
+- `campaign_id`: identificador da campanha.
+- `execution_at`: data/hora planejada para execucao em ISO 8601.
+- `status`: status inicial do processamento, por padrao `pending`.
+
+```js
+const { addCampaignTriggerJob } = require("../src/queues/campaign-trigger");
+
+await addCampaignTriggerJob({
+  campaign_id: "campaign-123",
+  execution_at: new Date(),
+});
+```
+
+Quando houver processamento de campanha implementado, crie o worker pelo mesmo
+modulo:
+
+```js
+const { createCampaignTriggerWorker } = require("../src/queues/campaign-trigger");
+
+const worker = createCampaignTriggerWorker(async (job) => {
+  const { campaign_id, execution_at, status } = job.data;
+
+  // Buscar grupos, etapas e conteudos da campanha aqui.
+  return { campaign_id, execution_at, status };
+});
+```
+
+Para testar manualmente com o Redis local ativo:
+
+```bash
+npm run queue:campaign-trigger:test -- campaign-123
+```
+
+Tambem e possivel informar uma data/hora de execucao:
+
+```bash
+npm run queue:campaign-trigger:test -- campaign-123 2026-07-09T15:00:00.000Z
+```
+
+Quando a data informada estiver no futuro, o job sera adicionado com `delay`
+nativo do BullMQ.
+
 Para jobs agendados ou repetiveis, use as opcoes nativas do BullMQ:
 
 ```js
