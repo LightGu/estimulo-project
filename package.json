@@ -8,6 +8,7 @@
     "test": "tests"
   },
   "scripts": {
+    "queue:campaign-trigger:test": "node scripts/enqueue-campaign-trigger.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
