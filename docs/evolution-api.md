@@ -18,6 +18,7 @@ Configure as variaveis abaixo antes de subir o ambiente:
 EVOLUTION_API_URL=http://localhost:8080
 EVOLUTION_API_KEY=change-me
 EVOLUTION_INSTANCE_NAME=estimulo-mvp
+EVOLUTION_API_TIMEOUT_MS=15000
 EVOLUTION_API_PORT=8080
 EVOLUTION_API_IMAGE=evoapicloud/evolution-api:latest
 EVOLUTION_DB_USER=evolution
@@ -29,6 +30,7 @@ EVOLUTION_DB_PORT=5433
 - `EVOLUTION_API_URL`: URL publica/local usada pela Evolution API para montar retornos e webhooks.
 - `EVOLUTION_API_KEY`: chave global de autenticacao da API. Troque o valor padrao antes de compartilhar o ambiente.
 - `EVOLUTION_INSTANCE_NAME`: nome da instancia de WhatsApp usada nos testes.
+- `EVOLUTION_API_TIMEOUT_MS`: tempo maximo, em milissegundos, para a aplicacao aguardar resposta da Evolution API.
 - `EVOLUTION_API_PORT`: porta exposta no host local.
 - `EVOLUTION_API_IMAGE`: imagem Docker da Evolution API usada pelo Compose.
 - `EVOLUTION_DB_USER`, `EVOLUTION_DB_PASSWORD`, `EVOLUTION_DB_NAME`: credenciais do PostgreSQL local usado pela Evolution API.
@@ -99,6 +101,38 @@ curl -X POST http://localhost:8080/message/sendText/estimulo-mvp \
 ```
 
 Substitua `5511999999999` por um numero autorizado para teste.
+
+## Uso pela aplicacao
+
+O codigo da aplicacao nao deve chamar a Evolution API diretamente. Toda entrega para WhatsApp deve passar pelo wrapper `src/services/evolution.js`, que centraliza autenticacao, montagem do payload, escolha do endpoint e tratamento basico de erros.
+
+Exemplo para texto:
+
+```js
+const { sendToEvolution } = require("../services/evolution");
+
+await sendToEvolution({
+  groupId: "120363000000000000@g.us",
+  message: "Mensagem de teste do MVP",
+});
+```
+
+Exemplo para conteudo com legenda:
+
+```js
+await sendToEvolution({
+  groupId: "120363000000000000@g.us",
+  message: "Material da trilha",
+  content: {
+    url: "https://example.com/material.pdf",
+    fileName: "material.pdf",
+    mimeType: "application/pdf",
+    type: "document",
+  },
+});
+```
+
+Tambem e possivel enviar um arquivo local informando `content.filePath`. Nesse caso, o wrapper converte o arquivo para base64 antes do envio.
 
 ## Ver logs e encerrar
 

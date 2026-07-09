@@ -24,6 +24,7 @@ REDIS_DB=0
 EVOLUTION_API_URL=http://localhost:8080
 EVOLUTION_API_KEY=change-me
 EVOLUTION_INSTANCE_NAME=estimulo-mvp
+EVOLUTION_API_TIMEOUT_MS=15000
 EVOLUTION_API_PORT=8080
 EVOLUTION_API_IMAGE=evoapicloud/evolution-api:latest
 EVOLUTION_DB_USER=evolution
@@ -34,6 +35,7 @@ EVOLUTION_DB_PORT=5433
 
 Na aplicacao Node.js, use `src/config/redis.js` como ponto unico de leitura dessas configuracoes para criar conexoes do BullMQ/ioredis.
 Os helpers de `src/queues/bullmq.js` devem ser usados para criar `Queue`, `Worker` e `QueueEvents` com a conexao Redis compartilhada.
+Para entregas no WhatsApp, use `src/services/evolution.js`; nenhuma outra parte da aplicacao deve chamar a Evolution API diretamente.
 
 Mais detalhes e exemplos estao em `docs/filas.md` e `docs/evolution-api.md`.
 
