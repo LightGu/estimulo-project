@@ -1,0 +1,40 @@
+{
+  "name": "estimulo-project",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LightGu/estimulo-project.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/LightGu/estimulo-project/issues"
+  },
+  "homepage": "https://github.com/LightGu/estimulo-project#readme",
+  "dependencies": {
+    "@langchain/core": "^1.2.2",
+    "@langchain/langgraph": "^1.4.7",
+    "@langchain/openai": "^1.5.4",
+    "@prisma/client": "^7.8.0",
+    "axios": "^1.18.1",
+    "bullmq": "^5.79.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "helmet": "^8.2.0",
+    "ioredis": "^5.11.1",
+    "pino": "^10.3.1",
+    "zod": "^4.4.3"
+  }
+}
