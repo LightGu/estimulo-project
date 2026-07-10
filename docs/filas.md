@@ -73,7 +73,8 @@ await contentDistributionQueue.add("send-content", {
 
 A fila `campaign-trigger` inicia o processamento assincrono de campanhas de
 envio de conteudos. Use o modulo `src/queues/campaign-trigger.js` para adicionar
-jobs sem instanciar BullMQ diretamente.
+jobs sem instanciar BullMQ diretamente. Ela suporta execucoes pontuais e
+agendamentos recorrentes por campanha.
 
 Cada job contem pelo menos:
 
@@ -118,6 +119,78 @@ npm run queue:campaign-trigger:test -- campaign-123 2026-07-09T15:00:00.000Z
 
 Quando a data informada estiver no futuro, o job sera adicionado com `delay`
 nativo do BullMQ.
+
+### Agendamento recorrente de campanhas
+
+Use `scheduleCampaign()` para criar ou atualizar um job repetivel na fila
+`campaign-trigger`. A chave do agendamento e deterministica por campanha
+(`campaign-trigger:<campaign_id>`), entao chamar a funcao novamente para a mesma
+campanha atualiza o agendamento existente.
+
+```js
+const {
+  disableCampaignSchedule,
+  removeCampaignSchedule,
+  scheduleCampaign,
+} = require("../src/queues/campaign-trigger");
+
+await scheduleCampaign({
+  campaign_id: "campaign-123",
+  cron_expression: "0 9 * * 1-5",
+  timezone: "America/Bahia",
+  window_start: "09:00",
+  window_end: "18:00",
+  active: true,
+});
+
+await disableCampaignSchedule({
+  campaign_id: "campaign-123",
+});
+
+await removeCampaignSchedule({
+  campaign_id: "campaign-123",
+});
+```
+
+Tambem e possivel usar uma regra em milissegundos:
+
+```js
+await scheduleCampaign({
+  campaign_id: "campaign-123",
+  recurrence_rule: {
+    every: 1000 * 60 * 60 * 24,
+    limit: 10,
+  },
+});
+```
+
+Cada job recorrente contem dados suficientes para o worker identificar e
+processar a campanha:
+
+- `campaign_id`: identificador da campanha.
+- `schedule_key`: chave repetivel usada pelo BullMQ.
+- `trigger_type`: `recurring`.
+- `recurrence`: cron, intervalo, fuso, limite e datas de inicio/fim.
+- `time_window`: janela operacional opcional.
+- `active` e `status`: estado do agendamento.
+- `dispatch_queue`: nome da fila `dispatch`, para o processador da campanha
+  preparar os envios individuais via `addDispatchJob()`.
+
+Quando uma campanha for marcada como inativa, chame `disableCampaignSchedule()`
+ou `scheduleCampaign({ campaign_id, active: false })`. Ambas as formas removem o
+job repetivel da fila.
+
+Para testar manualmente:
+
+```bash
+npm run queue:campaign-trigger:test -- campaign-123 --cron "0 9 * * 1-5" --timezone America/Bahia
+```
+
+Para remover o agendamento:
+
+```bash
+npm run queue:campaign-trigger:test -- campaign-123 --remove
+```
 
 ## Fila dispatch
 
