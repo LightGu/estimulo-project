@@ -119,6 +119,78 @@ npm run queue:campaign-trigger:test -- campaign-123 2026-07-09T15:00:00.000Z
 Quando a data informada estiver no futuro, o job sera adicionado com `delay`
 nativo do BullMQ.
 
+## Fila dispatch
+
+A fila `dispatch` processa os envios individuais de conteudos para grupos. Ela
+recebe jobs preparados pela `campaign-trigger` e executa cada entrega de forma
+isolada, sem interromper os demais envios quando um job falha.
+
+Use o modulo `src/queues/dispatch.js` para adicionar jobs:
+
+```js
+const { addDispatchJob } = require("../src/queues/dispatch");
+
+await addDispatchJob({
+  group_id: "120363000000000000@g.us",
+  campaign_id: "campaign-123",
+  link_video: "https://example.com/video.mp4",
+  legenda: "Conteudo da campanha",
+  scheduled_at: new Date(),
+});
+```
+
+Cada job contem pelo menos:
+
+- `group_id`: identificador do grupo de destino.
+- `campaign_id`: campanha associada ao envio.
+- `link_video`: URL do video que sera enviado.
+- `legenda`: texto usado como legenda/mensagem.
+- `scheduled_at`: data/hora planejada para envio em ISO 8601.
+- `status`: status inicial do processamento, por padrao `pending`.
+
+O worker padrao chama o wrapper `sendToEvolution` de
+`src/services/evolution.js`. Em sucesso, o job tem `status` atualizado para
+`sent` e retorna os dados do provedor. Em erro, o job tem `status` atualizado
+para `failed`, registra a mensagem de erro e relanca a excecao para o BullMQ
+marcar a tentativa como falha. Por padrao, jobs da `dispatch` usam uma unica
+tentativa; retries podem ser configurados nas opcoes do job quando necessario.
+
+Para iniciar o worker:
+
+```bash
+npm run queue:dispatch:worker
+```
+
+Para testar um envio manual para um grupo de teste com o Redis local ativo:
+
+```bash
+npm run queue:dispatch:test -- 120363000000000000@g.us campaign-123 https://example.com/video.mp4 "Legenda de teste"
+```
+
+Tambem e possivel informar uma data/hora de envio:
+
+```bash
+npm run queue:dispatch:test -- 120363000000000000@g.us campaign-123 https://example.com/video.mp4 "Legenda de teste" 2026-07-10T15:00:00.000Z
+```
+
+Quando a data informada estiver no futuro, o job sera adicionado com `delay`
+nativo do BullMQ.
+
+Para trocar o envio real por simulacao ou outro provedor no futuro, injete uma
+funcao `sender` ao criar o worker:
+
+```js
+const { createDispatchWorker } = require("../src/queues/dispatch");
+
+const worker = createDispatchWorker({
+  sender: async (payload) => ({
+    provider: "simulated",
+    status: 200,
+    payload,
+  }),
+});
+```
+
 Para jobs agendados ou repetiveis, use as opcoes nativas do BullMQ:
 
 ```js
