@@ -255,11 +255,13 @@ Cada job contem pelo menos:
   preenchidos quando o job foi criado por `addJitteredDispatchJobs()`.
 
 O worker padrao chama o wrapper `sendToEvolution` de
-`src/services/evolution.js`. Em sucesso, o job tem `status` atualizado para
-`sent` e retorna os dados do provedor. Em erro, o job tem `status` atualizado
-para `failed`, registra a mensagem de erro e relanca a excecao para o BullMQ
-marcar a tentativa como falha. Por padrao, jobs da `dispatch` usam uma unica
-tentativa; retries podem ser configurados nas opcoes do job quando necessario.
+`src/services/evolution.js`. Ao iniciar, o job tem `status` atualizado para
+`processing` e recebe `started_at`. Em sucesso, o job tem `status` atualizado
+para `sent`, recebe `completed_at` e retorna os dados do provedor. Em erro, o
+job tem `status` atualizado para `failed`, registra `failed_at` e
+`error_message`, e relanca a excecao para o BullMQ marcar a tentativa como
+falha. Por padrao, jobs da `dispatch` usam uma unica tentativa; retries podem
+ser configurados nas opcoes do job quando necessario.
 
 Para iniciar o worker:
 
