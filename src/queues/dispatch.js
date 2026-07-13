@@ -1,5 +1,6 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
+const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
@@ -44,6 +45,9 @@ function buildDispatchJobData(params) {
     legenda: params.legenda,
     scheduled_at: scheduledDate.toISOString(),
     status: params.status || DISPATCH_INITIAL_STATUS,
+    dispatch_order: params.dispatch_order,
+    jitter_delay_ms: params.jitter_delay_ms,
+    cumulative_delay_ms: params.cumulative_delay_ms,
   };
 }
 
@@ -75,6 +79,17 @@ async function addDispatchJob(params, options = {}) {
   const jobOptions = buildDispatchJobOptions(jobData, options);
 
   return dispatchQueue.add(DISPATCH_JOB_NAME, jobData, jobOptions);
+}
+
+async function addJitteredDispatchJobs(params, options = {}) {
+  const schedule = buildJitteredDispatchSchedule(params);
+  const jobs = [];
+
+  for (const jobData of schedule) {
+    jobs.push(await addDispatchJob(jobData, options));
+  }
+
+  return jobs;
 }
 
 function createDispatchWorker(options = {}) {
@@ -146,8 +161,10 @@ module.exports = {
   DISPATCH_JOB_NAME,
   DISPATCH_SUCCESS_STATUS,
   addDispatchJob,
+  addJitteredDispatchJobs,
   buildDispatchDeliveryPayload,
   buildDispatchJobData,
+  buildJitteredDispatchSchedule,
   createDispatchEvents,
   createDispatchWorker,
   dispatchQueue,

@@ -140,6 +140,8 @@ await scheduleCampaign({
   timezone: "America/Bahia",
   window_start: "09:00",
   window_end: "18:00",
+  jitter_delay_min_ms: 60_000,
+  jitter_delay_max_ms: 300_000,
   active: true,
 });
 
@@ -172,6 +174,8 @@ processar a campanha:
 - `trigger_type`: `recurring`.
 - `recurrence`: cron, intervalo, fuso, limite e datas de inicio/fim.
 - `time_window`: janela operacional opcional.
+- `dispatch_jitter`: faixa opcional de atraso randomico entre envios, em
+  milissegundos.
 - `active` e `status`: estado do agendamento.
 - `dispatch_queue`: nome da fila `dispatch`, para o processador da campanha
   preparar os envios individuais via `addDispatchJob()`.
@@ -183,7 +187,7 @@ job repetivel da fila.
 Para testar manualmente:
 
 ```bash
-npm run queue:campaign-trigger:test -- campaign-123 --cron "0 9 * * 1-5" --timezone America/Bahia
+npm run queue:campaign-trigger:test -- campaign-123 --cron "0 9 * * 1-5" --timezone America/Bahia --window-start 09:00 --window-end 18:00 --jitter-min-ms 60000 --jitter-max-ms 300000
 ```
 
 Para remover o agendamento:
@@ -212,6 +216,33 @@ await addDispatchJob({
 });
 ```
 
+Para campanhas com mais de um grupo, use `addJitteredDispatchJobs()` no
+processador da campanha. A funcao preserva a ordem recebida em `groups`, agenda
+o primeiro grupo no inicio da janela e soma um atraso randomico entre
+`jitter_delay_min_ms` e `jitter_delay_max_ms` antes de cada proximo grupo. O
+calculo ajusta o limite superior de cada sorteio para manter todos os envios
+dentro de `window_start` e `window_end`; quando a janela nao comporta a faixa
+minima configurada, a funcao falha antes de enfileirar.
+
+```js
+const { addJitteredDispatchJobs } = require("../src/queues/dispatch");
+
+await addJitteredDispatchJobs({
+  campaign_id: "campaign-123",
+  link_video: "https://example.com/video.mp4",
+  legenda: "Conteudo da campanha",
+  groups: [
+    "120363000000000001@g.us",
+    "120363000000000002@g.us",
+    "120363000000000003@g.us",
+  ],
+  window_start: "09:00",
+  window_end: "18:00",
+  jitter_delay_min_ms: 60_000,
+  jitter_delay_max_ms: 300_000,
+});
+```
+
 Cada job contem pelo menos:
 
 - `group_id`: identificador do grupo de destino.
@@ -220,6 +251,8 @@ Cada job contem pelo menos:
 - `legenda`: texto usado como legenda/mensagem.
 - `scheduled_at`: data/hora planejada para envio em ISO 8601.
 - `status`: status inicial do processamento, por padrao `pending`.
+- `dispatch_order`, `jitter_delay_ms` e `cumulative_delay_ms`: metadados
+  preenchidos quando o job foi criado por `addJitteredDispatchJobs()`.
 
 O worker padrao chama o wrapper `sendToEvolution` de
 `src/services/evolution.js`. Em sucesso, o job tem `status` atualizado para

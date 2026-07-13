@@ -25,10 +25,14 @@ function buildCampaignTriggerJobData(params) {
   }
 
   const executionDate = normalizeExecutionDate(params.execution_at || params.executionAt);
+  const timeWindow = normalizeTimeWindow(params);
+  const dispatchJitter = normalizeDispatchJitter(params);
 
   return {
     campaign_id: params.campaign_id,
     execution_at: executionDate.toISOString(),
+    time_window: timeWindow,
+    dispatch_jitter: dispatchJitter,
     status: params.status || CAMPAIGN_TRIGGER_INITIAL_STATUS,
   };
 }
@@ -102,6 +106,52 @@ function normalizeTimeWindow(params = {}) {
   };
 }
 
+function normalizeDispatchJitter(params = {}) {
+  const jitter = params.dispatch_jitter || params.dispatchJitter || params.jitter || {};
+  const minDelay =
+    params.jitter_delay_min_ms ??
+    params.jitterDelayMinMs ??
+    params.min_delay_ms ??
+    params.minDelayMs ??
+    jitter.min_ms ??
+    jitter.minDelayMs;
+  const maxDelay =
+    params.jitter_delay_max_ms ??
+    params.jitterDelayMaxMs ??
+    params.max_delay_ms ??
+    params.maxDelayMs ??
+    jitter.max_ms ??
+    jitter.maxDelayMs;
+
+  if (minDelay === undefined && maxDelay === undefined) {
+    return undefined;
+  }
+
+  if (minDelay === undefined || maxDelay === undefined) {
+    throw new Error("jitter_delay_min_ms e jitter_delay_max_ms devem ser informados juntos");
+  }
+
+  const minMs = Math.trunc(Number(minDelay));
+  const maxMs = Math.trunc(Number(maxDelay));
+
+  if (!Number.isFinite(minMs) || !Number.isFinite(maxMs)) {
+    throw new Error("jitter_delay_min_ms e jitter_delay_max_ms devem ser numeros validos");
+  }
+
+  if (minMs < 0 || maxMs < 0) {
+    throw new Error("jitter_delay_min_ms e jitter_delay_max_ms devem ser maiores ou iguais a zero");
+  }
+
+  if (maxMs < minMs) {
+    throw new Error("jitter_delay_max_ms deve ser maior ou igual a jitter_delay_min_ms");
+  }
+
+  return {
+    min_ms: minMs,
+    max_ms: maxMs,
+  };
+}
+
 function normalizeRepeatOptions(params = {}) {
   const recurrenceRule = params.recurrence_rule || params.recurrenceRule || params.repeat || {};
   const pattern =
@@ -169,6 +219,7 @@ function normalizeRepeatOptions(params = {}) {
 function buildCampaignScheduleJobData(params, repeatOptions) {
   const active = normalizeBooleanStatus(params);
   const timeWindow = normalizeTimeWindow(params);
+  const dispatchJitter = normalizeDispatchJitter(params);
   const now = new Date().toISOString();
 
   return {
@@ -184,6 +235,7 @@ function buildCampaignScheduleJobData(params, repeatOptions) {
       limit: repeatOptions.limit,
     },
     time_window: timeWindow,
+    dispatch_jitter: dispatchJitter,
     active,
     status: active ? CAMPAIGN_TRIGGER_ACTIVE_STATUS : CAMPAIGN_TRIGGER_INACTIVE_STATUS,
     dispatch_queue: queueNames.dispatch,

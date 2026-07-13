@@ -30,6 +30,12 @@ function parseArgs(argv) {
     } else if (value === "--window-end") {
       args.window_end = argv[index + 1];
       index += 1;
+    } else if (value === "--jitter-min-ms") {
+      args.jitter_delay_min_ms = argv[index + 1];
+      index += 1;
+    } else if (value === "--jitter-max-ms") {
+      args.jitter_delay_max_ms = argv[index + 1];
+      index += 1;
     } else if (value === "--inactive") {
       args.active = false;
     } else if (value === "--remove") {
@@ -70,11 +76,17 @@ async function main() {
           timezone: args.timezone,
           window_start: args.window_start,
           window_end: args.window_end,
+          jitter_delay_min_ms: args.jitter_delay_min_ms,
+          jitter_delay_max_ms: args.jitter_delay_max_ms,
           active: args.active,
         })
       : await addCampaignTriggerJob({
           campaign_id: campaignId,
           execution_at: executionAtArg || new Date(),
+          window_start: args.window_start,
+          window_end: args.window_end,
+          jitter_delay_min_ms: args.jitter_delay_min_ms,
+          jitter_delay_max_ms: args.jitter_delay_max_ms,
           status: CAMPAIGN_TRIGGER_INITIAL_STATUS,
         });
 
