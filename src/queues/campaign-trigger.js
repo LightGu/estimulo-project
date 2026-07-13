@@ -44,7 +44,7 @@ function assertCampaignId(params) {
 }
 
 function buildCampaignScheduleKey(campaignId) {
-  return `campaign-trigger:${campaignId}`;
+  return `campaign-trigger-${encodeURIComponent(String(campaignId))}`;
 }
 
 function normalizeBooleanStatus(params = {}) {
