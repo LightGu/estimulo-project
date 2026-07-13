@@ -5,6 +5,7 @@ const { sendToEvolution } = require("../services/evolution");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
 const DISPATCH_INITIAL_STATUS = "pending";
+const DISPATCH_PROCESSING_STATUS = "processing";
 const DISPATCH_SUCCESS_STATUS = "sent";
 const DISPATCH_FAILED_STATUS = "failed";
 
@@ -92,63 +93,80 @@ async function addJitteredDispatchJobs(params, options = {}) {
   return jobs;
 }
 
+function createDispatchProcessor(options = {}) {
+  const { sender = sendToEvolution } = options;
+
+  return async function dispatchWorker(job) {
+    const startedAt = new Date().toISOString();
+
+    await job.updateData({
+      ...job.data,
+      status: DISPATCH_PROCESSING_STATUS,
+      started_at: startedAt,
+    });
+
+    try {
+      const delivery = await sender(buildDispatchDeliveryPayload(job.data));
+      const completedAt = new Date().toISOString();
+
+      await job.updateData({
+        ...job.data,
+        status: DISPATCH_SUCCESS_STATUS,
+        started_at: startedAt,
+        completed_at: completedAt,
+      });
+
+      console.info(
+        JSON.stringify({
+          event: "dispatch.sent",
+          job_id: job.id,
+          campaign_id: job.data.campaign_id,
+          group_id: job.data.group_id,
+          started_at: startedAt,
+          completed_at: completedAt,
+        })
+      );
+
+      return {
+        status: DISPATCH_SUCCESS_STATUS,
+        delivery,
+        started_at: startedAt,
+        completed_at: completedAt,
+      };
+    } catch (error) {
+      const failedAt = new Date().toISOString();
+
+      await job.updateData({
+        ...job.data,
+        status: DISPATCH_FAILED_STATUS,
+        started_at: startedAt,
+        failed_at: failedAt,
+        error_message: error.message,
+      });
+
+      console.error(
+        JSON.stringify({
+          event: "dispatch.failed",
+          job_id: job.id,
+          campaign_id: job.data.campaign_id,
+          group_id: job.data.group_id,
+          started_at: startedAt,
+          failed_at: failedAt,
+          error_message: error.message,
+        })
+      );
+
+      throw error;
+    }
+  };
+}
+
+const dispatchWorker = createDispatchProcessor();
+
 function createDispatchWorker(options = {}) {
   const { sender = sendToEvolution, ...workerOptions } = options;
 
-  return createWorker(
-    queueNames.dispatch,
-    async (job) => {
-      try {
-        const delivery = await sender(buildDispatchDeliveryPayload(job.data));
-        const completedAt = new Date().toISOString();
-
-        await job.updateData({
-          ...job.data,
-          status: DISPATCH_SUCCESS_STATUS,
-          completed_at: completedAt,
-        });
-
-        console.info(
-          JSON.stringify({
-            event: "dispatch.sent",
-            job_id: job.id,
-            campaign_id: job.data.campaign_id,
-            group_id: job.data.group_id,
-            completed_at: completedAt,
-          })
-        );
-
-        return {
-          status: DISPATCH_SUCCESS_STATUS,
-          delivery,
-          completed_at: completedAt,
-        };
-      } catch (error) {
-        const failedAt = new Date().toISOString();
-
-        await job.updateData({
-          ...job.data,
-          status: DISPATCH_FAILED_STATUS,
-          failed_at: failedAt,
-          error_message: error.message,
-        });
-
-        console.error(
-          JSON.stringify({
-            event: "dispatch.failed",
-            job_id: job.id,
-            campaign_id: job.data.campaign_id,
-            group_id: job.data.group_id,
-            failed_at: failedAt,
-            error_message: error.message,
-          })
-        );
-
-        throw error;
-      }
-    },
-    workerOptions
-  );
+  return createWorker(queueNames.dispatch, createDispatchProcessor({ sender }), workerOptions);
 }
 
 function createDispatchEvents(options = {}) {
@@ -159,13 +177,16 @@ module.exports = {
   DISPATCH_FAILED_STATUS,
   DISPATCH_INITIAL_STATUS,
   DISPATCH_JOB_NAME,
+  DISPATCH_PROCESSING_STATUS,
   DISPATCH_SUCCESS_STATUS,
   addDispatchJob,
   addJitteredDispatchJobs,
   buildDispatchDeliveryPayload,
   buildDispatchJobData,
   buildJitteredDispatchSchedule,
+  createDispatchProcessor,
   createDispatchEvents,
   createDispatchWorker,
+  dispatchWorker,
   dispatchQueue,
 };
