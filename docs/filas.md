@@ -123,8 +123,9 @@ nativo do BullMQ.
 ### Agendamento recorrente de campanhas
 
 Use `scheduleCampaign()` para criar ou atualizar um job repetivel na fila
-`campaign-trigger`. A chave do agendamento e deterministica por campanha
-(`campaign-trigger:<campaign_id>`), entao chamar a funcao novamente para a mesma
+`campaign-trigger`. A chave do agendamento e deterministica por campanha e usa o
+formato `campaign-trigger-<campaign_id_url_encoded>`, compatível com a restricao
+do BullMQ para chaves customizadas. Chamar a funcao novamente para a mesma
 campanha atualiza o agendamento existente.
 
 ```js

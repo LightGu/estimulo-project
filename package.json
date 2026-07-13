@@ -9,6 +9,7 @@
   },
   "scripts": {
     "queue:campaign-trigger:test": "node scripts/enqueue-campaign-trigger.js",
+    "queue:campaign-trigger:recurring-test": "node scripts/test-campaign-trigger-recurring.js",
     "queue:dispatch:test": "node scripts/enqueue-dispatch.js",
     "queue:dispatch:worker": "node scripts/start-dispatch-worker.js",
     "test": "echo \"Error: no test specified\" && exit 1"
