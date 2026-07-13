@@ -2,18 +2,19 @@
 
 ## 1. Visão Geral
 
-O banco de dados do MVP organiza os grupos participantes, as trilhas de aprendizagem, os conteúdos disponíveis e o histórico de envios realizados.
+O banco de dados do MVP organiza as organizações atendidas, os grupos de WhatsApp, o catálogo de vídeos, as campanhas de agendamento, o progresso de cada grupo e o histórico das tentativas de envio.
 
-A estrutura permite que cada grupo avance de forma independente dentro de uma trilha de microlearning. Para identificar o conteúdo correto, o sistema considera a trilha associada ao grupo, sua etapa atual, sua maturidade e o histórico de conteúdos já enviados.
+A estrutura foi separada para que cada parte da plataforma tenha uma responsabilidade específica:
 
-As principais tabelas são:
+- `organizations`: armazena os clientes B2B;
+- `groups`: armazena os grupos de WhatsApp;
+- `video_catalog`: armazena as referências e classificações dos vídeos;
+- `campaigns`: armazena as campanhas de agendamento;
+- `campaign_groups`: relaciona campanhas e grupos;
+- `group_video_progress`: registra quais vídeos cada grupo já recebeu;
+- `dispatch_logs`: registra as tentativas de envio.
 
-- `groups`;
-- `campaigns`;
-- `trilhas`;
-- `categorias`;
-- `maturidades`;
-- `group_campaign_progress`.
+O arquivo de vídeo não é armazenado no banco. Apenas o identificador do arquivo no Google Drive e seus metadados são registrados.
 
 ---
 
@@ -21,409 +22,443 @@ As principais tabelas são:
 
 ```mermaid
 erDiagram
-    TRILHAS ||--o{ GROUPS : possui
-    TRILHAS ||--o{ CAMPAIGNS : organiza
-    MATURIDADES ||--o{ GROUPS : classifica
-    MATURIDADES ||--o{ CAMPAIGNS : direciona
-    CATEGORIAS ||--o{ CAMPAIGNS : categoriza
-    GROUPS ||--o{ GROUP_CAMPAIGN_PROGRESS : recebe
-    CAMPAIGNS ||--o{ GROUP_CAMPAIGN_PROGRESS : registra
+    ORGANIZATIONS ||--o{ GROUPS : possui
+    ORGANIZATIONS ||--o{ CAMPAIGNS : possui
+
+    CAMPAIGNS ||--o{ CAMPAIGN_GROUPS : inclui
+    GROUPS ||--o{ CAMPAIGN_GROUPS : participa
+
+    GROUPS ||--o{ GROUP_VIDEO_PROGRESS : recebe
+    VIDEO_CATALOG ||--o{ GROUP_VIDEO_PROGRESS : foi_enviado
+
+    CAMPAIGNS ||--o{ DISPATCH_LOGS : gera
+    GROUPS ||--o{ DISPATCH_LOGS : recebe
+    VIDEO_CATALOG ||--o{ DISPATCH_LOGS : registra
+
+    ORGANIZATIONS {
+        uuid id PK
+        varchar nome
+        timestamptz created_at
+        timestamptz updated_at
+    }
 
     GROUPS {
         uuid id PK
-        text nome
-        uuid trilha_id FK
-        uuid maturidade_id FK
+        uuid organization_id FK
+        varchar nome
+        text evolution_group_id
+        varchar segmento
+        boolean envia_video
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    VIDEO_CATALOG {
+        uuid id PK
+        text drive_file_id "UNIQUE"
         integer etapa
-        boolean ativo
+        varchar trilha_segmento
+        varchar status
+        timestamptz data_aprovacao
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     CAMPAIGNS {
         uuid id PK
-        uuid trilha_id FK
-        uuid maturidade_id FK
-        uuid categoria_id FK
-        integer etapa
-        text titulo
-        text link_video
-        text legenda
+        uuid organization_id FK
+        varchar nome
+        varchar cron_expression
         boolean ativo
+        timestamptz created_at
+        timestamptz updated_at
     }
 
-    TRILHAS {
-        uuid id PK
-        text nome
-        text descricao
-        boolean ativo
+    CAMPAIGN_GROUPS {
+        uuid campaign_id PK, FK
+        uuid group_id PK, FK
+        timestamptz created_at
     }
 
-    CATEGORIAS {
-        uuid id PK
-        text nome
-        text descricao
-        boolean ativo
-    }
-
-    MATURIDADES {
-        uuid id PK
-        text nome
-        integer nivel
-        text descricao
-        boolean ativo
-    }
-
-    GROUP_CAMPAIGN_PROGRESS {
+    GROUP_VIDEO_PROGRESS {
         uuid id PK
         uuid group_id FK
-        uuid campaign_id FK
+        uuid video_id FK
         timestamptz enviado_em
+    }
+
+    DISPATCH_LOGS {
+        uuid id PK
+        uuid campaign_id FK
+        uuid group_id FK
+        uuid video_id FK
+        varchar status
+        text mensagem_erro
+        timestamptz criado_em
     }
 ```
 
 ---
 
-## 3. Tabela `groups`
+## 3. Tabela `organizations`
 
 ### 3.1 Finalidade
 
-A tabela `groups` armazena os grupos participantes das trilhas de microlearning.
+A tabela `organizations` armazena os clientes B2B atendidos pela plataforma.
 
-Cada registro representa um grupo do WhatsApp ou uma comunidade atendida pela plataforma. Nessa tabela também é registrada a posição atual do grupo dentro da trilha.
+Exemplos:
 
-O campo `etapa` é utilizado para decidir qual conteúdo deve ser enviado em seguida.
+- Ambev;
+- Relay Trust.
+
+Essa tabela evita repetir o nome do cliente em todos os grupos e campanhas.
 
 ### 3.2 Campos
 
 | Campo | Significado |
 |---|---|
-| `id` | Identificador único do grupo |
-| `nome` | Nome utilizado para identificar o grupo |
-| `external_id` | Identificador do grupo no WhatsApp ou na Evolution API |
-| `projeto_id` | Projeto ao qual o grupo está relacionado |
-| `trilha_id` | Trilha de aprendizagem associada ao grupo |
-| `maturidade_id` | Nível de maturidade associado ao grupo |
-| `etapa` | Posição atual do grupo dentro da trilha |
-| `ativo` | Indica se o grupo pode receber conteúdos |
-| `cliente_b2b` | Empresa ou organização cliente, como Ambev ou Relay Trust |
-| `persona` | Persona que representa o público do grupo, como Paulo ou Maria |
-| `segmentacao` | Segmentação representada pela persona, como Pré-Infância ou Infância |
-| `setor` | Setor de atuação, como Bares e Restaurantes |
-| `abrangencia` | Alcance geográfico, como Brasil todo ou Nordeste |
-| `estado` | Estado relacionado ao grupo, quando aplicável |
-| `cidade` | Cidade relacionada ao grupo, quando aplicável |
-| `timezone` | Fuso horário utilizado no agendamento |
-| `janela_envio_inicio` | Horário inicial permitido para envios |
-| `janela_envio_fim` | Horário final permitido para envios |
-| `dias_envio` | Dias da semana permitidos para envio |
-| `proximo_envio_em` | Data e horário previstos para o próximo envio |
-| `ultimo_envio_em` | Data e horário do último envio |
-| `descricao` | Observações adicionais sobre o grupo |
-| `metadata` | Informações extras de configuração ou integração |
-| `criado_em` | Data e horário de criação do registro |
-| `atualizado_em` | Data e horário da última atualização |
+| `id` | Identificador único da organização |
+| `nome` | Nome da organização ou cliente B2B |
+| `created_at` | Data e horário de criação do registro |
+| `updated_at` | Data e horário da última atualização |
 
-### 3.3 Etapa Atual do Grupo
-
-O campo `groups.etapa` representa a posição atual do grupo dentro da trilha.
+### 3.3 Exemplo de Registro
 
 ```text
-etapa 1 → primeiro conteúdo
-etapa 2 → segundo conteúdo
-etapa 3 → terceiro conteúdo
-```
-
-Se um grupo está na etapa `2`, o sistema procura uma campanha da etapa `2`, pertencente à mesma trilha e compatível com sua maturidade.
-
-### 3.4 Exemplo de Registro
-
-```text
-id: 8f4d2b7a-3c21-4e8a-9a10-123456789abc
-nome: Grupo Ambev Nordeste
-trilha_id: 81a35071-d114-46df-b09c-d7743e009372
-maturidade_id: b15fc814-878e-4908-a80f-309d97b7bda1
-etapa: 2
-ativo: true
-cliente_b2b: Ambev
-persona: Paulo
-segmentacao: Pré-Infância
-setor: Bares e Restaurantes
-abrangencia: Nordeste
-estado: null
-cidade: null
+id: 9f841693-dfe7-4ce2-9709-78cd3dbb6afe
+nome: Ambev
+created_at: 2026-07-13 14:00:00-03
+updated_at: 2026-07-13 14:00:00-03
 ```
 
 ---
 
-## 4. Tabela `campaigns`
+## 4. Tabela `groups`
 
 ### 4.1 Finalidade
 
-A tabela `campaigns` armazena os conteúdos programados para as trilhas de microlearning.
+A tabela `groups` armazena os grupos reais do WhatsApp que participam da operação.
 
-Cada campanha representa um conteúdo que pode ser enviado a um grupo, contendo título, link do vídeo, legenda e etapa da trilha.
+Cada grupo pertence a uma organização e pode participar de uma ou mais campanhas.
 
 ### 4.2 Campos
 
 | Campo | Significado |
 |---|---|
-| `id` | Identificador único da campanha |
-| `trilha_id` | Trilha à qual o conteúdo pertence |
-| `maturidade_id` | Nível de maturidade indicado para o conteúdo |
-| `categoria_id` | Categoria ou tema do conteúdo |
-| `etapa` | Posição em que o conteúdo será enviado dentro da trilha |
-| `titulo` | Título do conteúdo |
-| `link_video` | Link do vídeo no Google Drive ou em outra plataforma |
-| `legenda` | Texto que acompanha o vídeo |
-| `ativo` | Indica se o conteúdo está disponível para envio |
+| `id` | Identificador único do grupo |
+| `organization_id` | Organização à qual o grupo pertence |
+| `nome` | Nome usado para identificar o grupo |
+| `evolution_group_id` | Identificador do grupo na Evolution API ou no WhatsApp |
+| `segmento` | Segmento ou perfil do público do grupo |
+| `envia_video` | Indica se o grupo pode receber vídeos |
+| `created_at` | Data e horário de criação |
+| `updated_at` | Data e horário da última atualização |
 
-### 4.3 Organização por Etapa
-
-```text
-Campanha A → etapa 1
-Campanha B → etapa 2
-Campanha C → etapa 3
-```
-
-A correspondência principal acontece por:
+### 4.3 Regras Importantes
 
 ```text
-groups.trilha_id = campaigns.trilha_id
-groups.etapa = campaigns.etapa
-groups.maturidade_id = campaigns.maturidade_id
+envia_video = true  → o grupo pode entrar no fluxo de envio
+envia_video = false → o grupo deve ser ignorado pelo agendador
 ```
+
+O campo `evolution_group_id` deve ser único para evitar o cadastro duplicado do mesmo grupo.
+
+O campo `last_message_sent_at` é atualizado quando um envio é concluído com status `sent`.
 
 ### 4.4 Exemplo de Registro
 
 ```text
-id: 773cdfe9-9b44-4ba7-857f-ad99048858bb
-trilha_id: 81a35071-d114-46df-b09c-d7743e009372
-maturidade_id: b15fc814-878e-4908-a80f-309d97b7bda1
-categoria_id: e6c7b04a-a229-49d9-87b9-000000000001
-etapa: 2
-titulo: Organização financeira para pequenos negócios
-link_video: https://drive.google.com/exemplo
-legenda: Confira este conteúdo sobre organização financeira.
-ativo: true
+id: a4ac594b-9f97-4d64-84a4-365338f13211
+organization_id: 9f841693-dfe7-4ce2-9709-78cd3dbb6afe
+nome: Grupo Ambev Nordeste
+evolution_group_id: 120363000000000000@g.us
+segmento: Pré-Infância
+envia_video: true
+trilha_override: null
 ```
 
 ---
 
-## 5. Tabela `trilhas`
+## 5. Tabela `video_catalog`
 
-### Finalidade
+### 5.1 Finalidade
 
-Representa as sequências de aprendizagem disponíveis na plataforma.
+A tabela `video_catalog` armazena as referências dos vídeos disponíveis no Google Drive e os metadados usados na curadoria.
 
-### Campos
+O arquivo de vídeo não é salvo no banco.
+
+A tabela armazena apenas:
+
+- o identificador do arquivo no Drive;
+- a etapa do conteúdo;
+- a trilha ou segmento ao qual ele pertence;
+- o status de revisão;
+- a data de aprovação.
+
+### 5.2 Campos
 
 | Campo | Significado |
 |---|---|
-| `id` | Identificador único da trilha |
-| `nome` | Nome da trilha |
-| `descricao` | Descrição resumida da trilha |
-| `ativo` | Indica se a trilha está disponível |
-| `criado_em` | Data e horário de criação |
+| `id` | Identificador interno do vídeo |
+| `drive_file_id` | Identificador único do arquivo no Google Drive |
+| `etapa` | Posição do vídeo dentro da sequência de conteúdos |
+| `trilha_segmento` | Trilha ou segmento para o qual o vídeo é indicado |
+| `status` | Situação atual do vídeo no processo de curadoria |
+| `data_aprovacao` | Data e horário em que o vídeo foi aprovado |
+| `created_at` | Data e horário de criação |
+| `updated_at` | Data e horário da última atualização |
 
-### Exemplo
+### 5.3 Valores Permitidos para `status`
 
 ```text
-id: 81a35071-d114-46df-b09c-d7743e009372
-nome: Trilha de Gestão Financeira
-descricao: Conteúdos introdutórios sobre organização financeira.
-ativo: true
+pendente_revisao
+aprovado
+reprovado
+inativo
+```
+
+O valor padrão é:
+
+```text
+pendente_revisao
+```
+
+Quando o status for `aprovado`, o campo `data_aprovacao` deve estar preenchido.
+
+### 5.4 Significado da Etapa
+
+A etapa indica a posição do vídeo na sequência de uma trilha ou segmento.
+
+```text
+etapa 1 → primeiro vídeo
+etapa 2 → segundo vídeo
+etapa 3 → terceiro vídeo
+```
+
+O próximo vídeo de um grupo é identificado a partir do segmento ou da trilha do grupo e dos vídeos que ainda não foram registrados em `group_video_progress`.
+
+### 5.5 Exemplo de Registro
+
+```text
+id: edafae61-2305-4552-bef6-1f20cfc6a8c0
+drive_file_id: 1AbCDeFGhijkLMNopQRstuVWXyz
+etapa: 1
+trilha_segmento: Pré-Infância
+status: aprovado
+data_aprovacao: 2026-07-13 14:30:00-03
 ```
 
 ---
 
-## 6. Tabela `categorias`
+## 6. Tabela `campaigns`
 
-### Finalidade
+### 6.1 Finalidade
 
-Organiza os conteúdos por tema ou área de conhecimento.
+A tabela `campaigns` armazena as campanhas responsáveis por definir quando o processo de envio deve ser executado.
 
-Exemplos: Marketing, Vendas, Gestão Financeira e Liderança.
+Uma campanha pertence a uma organização e pode ser associada a vários grupos.
 
-### Campos
+A campanha não armazena o vídeo. Ela controla o agendamento.
+
+### 6.2 Campos
 
 | Campo | Significado |
 |---|---|
-| `id` | Identificador único da categoria |
-| `nome` | Nome da categoria |
-| `descricao` | Descrição do tema |
-| `ativo` | Indica se a categoria está disponível |
+| `id` | Identificador único da campanha |
+| `organization_id` | Organização responsável pela campanha |
+| `nome` | Nome da campanha |
+| `cron_expression` | Expressão que define a frequência e o horário da execução |
+| `ativo` | Indica se a campanha pode ser executada |
+| `created_at` | Data e horário de criação |
+| `updated_at` | Data e horário da última atualização |
 
-### Exemplo
+### 6.3 Regra de Ativação
 
 ```text
-id: e6c7b04a-a229-49d9-87b9-000000000001
-nome: Gestão Financeira
-descricao: Conteúdos relacionados a controle financeiro e planejamento.
+ativo = true  → a campanha pode ser executada
+ativo = false → a campanha deve ser ignorada pelo agendador
+```
+
+### 6.4 Exemplo de Registro
+
+```text
+id: 26badcb0-e2ab-42e1-b49c-a8fe41a8e8d4
+organization_id: 9f841693-dfe7-4ce2-9709-78cd3dbb6afe
+nome: Envios Semanais Ambev
+cron_expression: 0 10 * * 1
 ativo: true
 ```
 
 ---
 
-## 7. Tabela `maturidades`
+## 7. Tabela `campaign_groups`
 
-### Finalidade
+### 7.1 Finalidade
 
-Representa os níveis de maturidade utilizados para classificar grupos e direcionar conteúdos.
+A tabela `campaign_groups` relaciona as campanhas aos grupos participantes.
 
-### Campos
+Ela é necessária porque uma campanha pode conter vários grupos e um grupo pode participar de mais de uma campanha.
+
+### 7.2 Campos
 
 | Campo | Significado |
 |---|---|
-| `id` | Identificador único da maturidade |
-| `nome` | Nome do nível |
-| `nivel` | Valor numérico utilizado para ordenação |
-| `descricao` | Explicação sobre o nível |
-| `ativo` | Indica se o nível está disponível |
+| `campaign_id` | Campanha associada |
+| `group_id` | Grupo participante |
+| `created_at` | Data e horário em que a associação foi criada |
 
-### Exemplo
+### 7.3 Regra de Duplicidade
 
 ```text
-id: b15fc814-878e-4908-a80f-309d97b7bda1
-nome: Inicial
-nivel: 1
-descricao: Grupo em fase inicial de desenvolvimento.
-ativo: true
+campaign_id + group_id
+```
+
+A combinação é a chave primária e impede que o mesmo grupo seja adicionado duas vezes à mesma campanha.
+
+### 7.4 Exemplo de Registro
+
+```text
+campaign_id: 26badcb0-e2ab-42e1-b49c-a8fe41a8e8d4
+group_id: a4ac594b-9f97-4d64-84a4-365338f13211
+created_at: 2026-07-13 15:00:00-03
 ```
 
 ---
 
-## 8. Tabela `group_campaign_progress`
+## 8. Tabela `group_video_progress`
 
 ### 8.1 Finalidade
 
-Registra o histórico de conteúdos enviados para cada grupo.
+A tabela `group_video_progress` registra quais vídeos já foram enviados para cada grupo.
 
-Essa tabela permite que grupos da mesma trilha avancem em ritmos diferentes e impede que o mesmo conteúdo seja enviado novamente ao mesmo grupo.
+Ela permite que cada grupo avance de forma independente e impede que o mesmo vídeo seja reenviado ao mesmo grupo.
 
 ### 8.2 Campos
 
 | Campo | Significado |
 |---|---|
-| `id` | Identificador único do registro de envio |
-| `group_id` | Grupo que recebeu o conteúdo |
-| `campaign_id` | Campanha enviada |
+| `id` | Identificador único do registro |
+| `group_id` | Grupo que recebeu o vídeo |
+| `video_id` | Vídeo enviado |
 | `enviado_em` | Data e horário do envio |
 
 ### 8.3 Regra de Duplicidade
 
-A combinação abaixo deve ser única:
-
 ```text
-group_id + campaign_id
+group_id + video_id
 ```
+
+Essa combinação deve ser única.
 
 ### 8.4 Exemplo de Registro
 
 ```text
-id: d1ef21c8-5010-4b4f-b7a8-000000000001
-group_id: 8f4d2b7a-3c21-4e8a-9a10-123456789abc
-campaign_id: 773cdfe9-9b44-4ba7-857f-ad99048858bb
-enviado_em: 2026-07-13 10:30:00-03
+id: 1a4a21eb-4600-436b-8a1b-6c820eb8a455
+group_id: a4ac594b-9f97-4d64-84a4-365338f13211
+video_id: edafae61-2305-4552-bef6-1f20cfc6a8c0
+enviado_em: 2026-07-13 15:10:00-03
 ```
 
 ---
 
-## 9. Como o Sistema Identifica o Conteúdo a Ser Enviado
+## 9. Tabela `dispatch_logs`
 
-O sistema considera:
+### 9.1 Finalidade
 
-1. a trilha do grupo;
-2. a etapa atual do grupo;
-3. a maturidade do grupo;
-4. se o grupo está ativo;
-5. se a campanha está ativa;
-6. se a campanha ainda não foi enviada ao grupo.
+A tabela `dispatch_logs` registra cada tentativa de envio feita pelo sistema.
 
-A lógica principal é:
+Ela permite identificar qual campanha iniciou a tentativa, qual grupo seria atendido, qual vídeo foi utilizado, se o envio funcionou ou falhou e quando a tentativa ocorreu.
+
+### 9.2 Campos
+
+| Campo | Significado |
+|---|---|
+| `id` | Identificador único do log |
+| `campaign_id` | Campanha que iniciou o envio |
+| `group_id` | Grupo que recebeu ou deveria receber o vídeo |
+| `video_id` | Vídeo relacionado à tentativa |
+| `status` | Situação da tentativa |
+| `mensagem_erro` | Detalhes do erro, quando houver |
+| `criado_em` | Data e horário do registro |
+
+### 9.3 Valores Permitidos para `status`
 
 ```text
-groups.trilha_id = campaigns.trilha_id
-groups.etapa = campaigns.etapa
-groups.maturidade_id = campaigns.maturidade_id
-groups.ativo = true
-campaigns.ativo = true
+pendente
+processando
+enviado
+falhou
 ```
 
-Depois, o sistema verifica se já existe um registro em `group_campaign_progress`.
+### 9.4 Exemplo de Registro
 
-### Exemplo de Consulta
+```text
+id: 89936959-b25c-44af-b061-b6d318c08efb
+campaign_id: 26badcb0-e2ab-42e1-b49c-a8fe41a8e8d4
+group_id: a4ac594b-9f97-4d64-84a4-365338f13211
+video_id: edafae61-2305-4552-bef6-1f20cfc6a8c0
+status: enviado
+mensagem_erro: null
+criado_em: 2026-07-13 15:10:00-03
+```
+
+---
+
+## 10. Como o Sistema Identifica o Próximo Vídeo
+
+O sistema pode seguir este processo:
+
+1. identificar uma campanha ativa;
+2. buscar seus grupos em `campaign_groups`;
+3. ignorar grupos com `envia_video = false`;
+4. identificar o segmento do grupo;
+5. buscar apenas vídeos aprovados no `video_catalog`;
+6. excluir os vídeos já registrados em `group_video_progress`;
+7. ordenar os vídeos por etapa;
+8. selecionar o primeiro vídeo disponível;
+9. registrar a tentativa em `dispatch_logs`;
+10. após o sucesso, registrar o vídeo em `group_video_progress`;
+11. atualizar `groups.last_message_sent_at`.
+
+### 10.1 Exemplo de Consulta
 
 ```sql
-select c.*
+select vc.*
 from public.groups g
-join public.campaigns c
-    on c.trilha_id = g.trilha_id
-   and c.etapa = g.etapa
-   and c.maturidade_id = g.maturidade_id
-left join public.group_campaign_progress gcp
-    on gcp.group_id = g.id
-   and gcp.campaign_id = c.id
+join public.video_catalog vc
+    on vc.trilha_segmento = coalesce(g.trilha_override, g.segmento)
+left join public.group_video_progress gvp
+    on gvp.group_id = g.id
+   and gvp.video_id = vc.id
 where g.id = 'ID_DO_GRUPO'
-  and g.ativo = true
-  and c.ativo = true
-  and gcp.id is null
+  and g.envia_video = true
+  and vc.status = 'aprovado'
+  and gvp.id is null
+order by vc.etapa
 limit 1;
 ```
 
 ---
 
-## 10. Regras Importantes
-
-### Grupo ativo ou inativo
-
-```text
-groups.ativo = true  → pode receber conteúdos
-groups.ativo = false → não deve receber conteúdos
-```
-
-### Campanha ativa ou inativa
-
-```text
-campaigns.ativo = true  → disponível para envio
-campaigns.ativo = false → não deve ser enviada
-```
-
-### Correspondência de etapa
-
-```text
-groups.etapa = campaigns.etapa
-```
-
-Um grupo na etapa `2` deve receber um conteúdo da etapa `2`.
-
-### Correspondência de trilha
-
-```text
-groups.trilha_id = campaigns.trilha_id
-```
-
-### Correspondência de maturidade
-
-```text
-groups.maturidade_id = campaigns.maturidade_id
-```
-
-### Histórico de envio
-
-Após o envio, o sistema deve criar um registro em `group_campaign_progress`.
-
----
-
-## 11. Fluxo Simplificado
+## 11. Fluxo Simplificado de Envio
 
 ```mermaid
 flowchart TD
-    A[Selecionar grupo ativo] --> B[Consultar trilha, etapa e maturidade]
-    B --> C[Buscar campanha compatível e ativa]
-    C --> D{Campanha já foi enviada?}
-    D -- Sim --> E[Buscar outro conteúdo]
-    D -- Não --> F[Enviar conteúdo]
-    F --> G[Registrar em group_campaign_progress]
-    G --> H[Atualizar progresso do grupo]
+    A[Agendador identifica campanha ativa] --> B[Busca grupos da campanha]
+    B --> C{Grupo pode receber vídeo?}
+    C -- Não --> D[Ignorar grupo]
+    C -- Sim --> E[Identificar segmento do grupo]
+    E --> F[Buscar vídeos aprovados]
+    F --> G[Excluir vídeos já enviados]
+    G --> H{Existe vídeo disponível?}
+    H -- Não --> I[Encerrar processamento do grupo]
+    H -- Sim --> J[Registrar tentativa em dispatch_logs]
+    J --> K[Enviar vídeo pelo WhatsApp]
+    K --> L{Envio funcionou?}
+    L -- Não --> M[Atualizar log como falhou]
+    L -- Sim --> N[Atualizar log como enviado]
+    N --> O[Registrar em group_video_progress]
+    O --> P[Atualizar último envio do grupo]
 ```
 
 ---
@@ -432,28 +467,98 @@ flowchart TD
 
 | Origem | Destino | Finalidade |
 |---|---|---|
-| `groups.trilha_id` | `trilhas.id` | Identificar a trilha do grupo |
-| `groups.maturidade_id` | `maturidades.id` | Identificar a maturidade do grupo |
-| `campaigns.trilha_id` | `trilhas.id` | Identificar a trilha do conteúdo |
-| `campaigns.maturidade_id` | `maturidades.id` | Direcionar o conteúdo por maturidade |
-| `campaigns.categoria_id` | `categorias.id` | Classificar o conteúdo por tema |
-| `group_campaign_progress.group_id` | `groups.id` | Identificar o grupo que recebeu |
-| `group_campaign_progress.campaign_id` | `campaigns.id` | Identificar o conteúdo enviado |
+| `groups.organization_id` | `organizations.id` | Identificar a organização do grupo |
+| `campaigns.organization_id` | `organizations.id` | Identificar a organização da campanha |
+| `campaign_groups.campaign_id` | `campaigns.id` | Identificar a campanha |
+| `campaign_groups.group_id` | `groups.id` | Identificar o grupo participante |
+| `group_video_progress.group_id` | `groups.id` | Identificar o grupo que recebeu o vídeo |
+| `group_video_progress.video_id` | `video_catalog.id` | Identificar o vídeo enviado |
+| `dispatch_logs.campaign_id` | `campaigns.id` | Identificar a campanha que iniciou a tentativa |
+| `dispatch_logs.group_id` | `groups.id` | Identificar o grupo da tentativa |
+| `dispatch_logs.video_id` | `video_catalog.id` | Identificar o vídeo da tentativa |
 
 ---
 
-## 13. Considerações Finais
+## 13. Regras Importantes
 
-A estrutura inicial permite:
+### Organização
 
-- cadastrar grupos;
-- associar grupos a trilhas;
-- classificar grupos por maturidade;
-- organizar conteúdos por etapa;
-- classificar conteúdos por categoria;
-- identificar o conteúdo correto para cada grupo;
-- impedir envios duplicados;
-- registrar o histórico de envios;
+O nome da organização deve ser único.
+
+### Grupo
+
+- `evolution_group_id` deve ser único;
+- grupos com `envia_video = false` não recebem novos vídeos;
+- todo grupo pertence a uma organização;
+- `last_message_sent_at` registra o último envio concluído.
+
+### Vídeo
+
+- `drive_file_id` deve ser único;
+- nenhum conteúdo binário é armazenado no banco;
+- somente vídeos com status `aprovado` podem ser enviados;
+- vídeos aprovados devem possuir `data_aprovacao`;
+- a etapa deve ser maior ou igual a 1.
+
+### Campanha
+
+- toda campanha pertence a uma organização;
+- somente campanhas ativas devem ser executadas;
+- `cron_expression` define quando a campanha será processada.
+
+### Progresso
+
+- o mesmo vídeo não pode ser registrado duas vezes para o mesmo grupo;
+- cada grupo possui seu próprio histórico;
+- grupos diferentes podem avançar em ritmos diferentes.
+
+### Logs
+
+- cada tentativa deve possuir um status válido;
+- em caso de falha, `mensagem_erro` pode guardar a causa;
+- `dispatch_logs` registra tentativas;
+- `group_video_progress` registra apenas vídeos considerados enviados.
+
+---
+
+## 14. Diferença entre as Tabelas de Controle
+
+### `campaigns`
+
+Define quando uma rotina de envio deve ser executada.
+
+### `campaign_groups`
+
+Define quais grupos participam da campanha.
+
+### `video_catalog`
+
+Define quais vídeos estão disponíveis e aprovados.
+
+### `dispatch_logs`
+
+Registra cada tentativa de envio, incluindo falhas.
+
+### `group_video_progress`
+
+Registra os vídeos já enviados para cada grupo.
+
+---
+
+## 15. Considerações Finais
+
+A estrutura permite:
+
+- cadastrar clientes B2B;
+- descrever o contexto de cada organização;
+- cadastrar grupos de WhatsApp;
+- associar grupos a campanhas;
+- organizar vídeos por etapa e segmento;
+- controlar a aprovação dos vídeos;
+- identificar o próximo vídeo disponível;
+- impedir reenvios duplicados;
+- registrar falhas e sucessos;
+- consultar o último envio feito para cada grupo;
 - permitir que cada grupo avance de forma independente.
 
-A documentação deve ser atualizada sempre que novas tabelas, campos ou regras forem adicionados ao banco.
+A documentação deve ser atualizada sempre que novas tabelas, campos ou regras de negócio forem adicionados ao banco.
