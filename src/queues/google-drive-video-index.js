@@ -6,6 +6,11 @@ const {
 } = require("../services/google-drive-video-index-state");
 const { indexGoogleDriveVideos } = require("../services/google-drive-video-indexer");
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
+const {
+  GOOGLE_DRIVE_VIDEO_INDEX_SCHEDULE_KEY,
+  buildGoogleDriveVideoIndexRepeatOptions,
+  buildGoogleDriveVideoIndexScheduleJobData: buildScheduleJobData,
+} = require("./google-drive-video-index-schedule");
 const { queueNames } = require("./names");
 
 const GOOGLE_DRIVE_VIDEO_INDEX_JOB_NAME = "index-google-drive-videos";
@@ -35,6 +40,21 @@ async function addGoogleDriveVideoIndexJob(params = {}, options = {}) {
   const jobData = buildGoogleDriveVideoIndexJobData(params);
 
   return googleDriveVideoIndexQueue.add(GOOGLE_DRIVE_VIDEO_INDEX_JOB_NAME, jobData, options);
+}
+
+function buildGoogleDriveVideoIndexScheduleJobData(params = {}, repeatOptions) {
+  return buildScheduleJobData(params, repeatOptions, buildGoogleDriveVideoIndexJobData);
+}
+
+async function scheduleGoogleDriveVideoIndexJob(params = {}, options = {}) {
+  const repeatOptions = buildGoogleDriveVideoIndexRepeatOptions(params);
+  const jobData = buildGoogleDriveVideoIndexScheduleJobData(params, repeatOptions);
+  const { repeat: _ignoredRepeatOptions, ...jobOptionOverrides } = options;
+
+  return googleDriveVideoIndexQueue.add(GOOGLE_DRIVE_VIDEO_INDEX_JOB_NAME, jobData, {
+    ...jobOptionOverrides,
+    repeat: repeatOptions,
+  });
 }
 
 function createGoogleDriveVideoIndexProcessor(options = {}) {
@@ -184,11 +204,15 @@ module.exports = {
   GOOGLE_DRIVE_VIDEO_INDEX_INITIAL_STATUS,
   GOOGLE_DRIVE_VIDEO_INDEX_JOB_NAME,
   GOOGLE_DRIVE_VIDEO_INDEX_PROCESSING_STATUS,
+  GOOGLE_DRIVE_VIDEO_INDEX_SCHEDULE_KEY,
   GOOGLE_DRIVE_VIDEO_INDEX_SUCCESS_STATUS,
   addGoogleDriveVideoIndexJob,
+  buildGoogleDriveVideoIndexRepeatOptions,
+  buildGoogleDriveVideoIndexScheduleJobData,
   buildGoogleDriveVideoIndexJobData,
   createGoogleDriveVideoIndexEvents,
   createGoogleDriveVideoIndexProcessor,
   createGoogleDriveVideoIndexWorker,
   googleDriveVideoIndexQueue,
+  scheduleGoogleDriveVideoIndexJob,
 };
