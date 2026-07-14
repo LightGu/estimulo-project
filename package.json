@@ -16,6 +16,8 @@
     "queue:drive-video-index:worker": "node scripts/start-google-drive-video-index-worker.js",
     "test:drive": "node tests/google-drive-files-list.test.js",
     "test:drive-indexer": "node tests/google-drive-video-indexer.test.js",
+    "test:drive-download": "node tests/google-drive-video-download.test.js",
+    "test:dispatch-drive-video": "node tests/dispatch-google-drive-video.test.js",
     "test:drive-index-schedule": "node tests/google-drive-video-index-schedule.test.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

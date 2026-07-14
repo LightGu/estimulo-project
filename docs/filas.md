@@ -248,12 +248,19 @@ Cada job contem pelo menos:
 
 - `group_id`: identificador do grupo de destino.
 - `campaign_id`: campanha associada ao envio.
-- `link_video`: URL do video que sera enviado.
+- `link_video`, `video_id` ou `drive_file_id`: referencia do video que sera enviado.
 - `legenda`: texto usado como legenda/mensagem.
 - `scheduled_at`: data/hora planejada para envio em ISO 8601.
 - `status`: status inicial do processamento, por padrao `pending`.
 - `dispatch_order`, `jitter_delay_ms` e `cumulative_delay_ms`: metadados
   preenchidos quando o job foi criado por `addJitteredDispatchJobs()`.
+
+Quando o job recebe `video_id` ou `video_catalog`, o worker baixa o arquivo do
+Google Drive apenas no momento do disparo. O servico
+`src/services/google-drive-video-download.js` usa o `drive_file_id` do registro
+`video_catalog`, chama `drive.files.get({ fileId, alt: "media" })` e retorna os
+bytes junto com nome e tipo MIME para o dispatcher montar o payload de envio. O
+envio por `link_video` continua disponivel para testes manuais e fluxos antigos.
 
 O worker padrao chama o wrapper `sendToEvolution` de
 `src/services/evolution.js`. Ao iniciar, o job tem `status` atualizado para
