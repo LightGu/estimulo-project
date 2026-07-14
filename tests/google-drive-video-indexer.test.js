@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 
 const {
+  buildFolderChildrenQuery,
   FOLDER_MIME_TYPE,
   indexGoogleDriveVideos,
   isValidVideoFile,
@@ -105,10 +106,70 @@ async function testInvalidVideosAreIgnored() {
   assert.equal(isValidVideoFile({ name: "folder", mimeType: FOLDER_MIME_TYPE }), false);
 }
 
+async function testIncrementalQueryKeepsFoldersAndFiltersFilesByModifiedTime() {
+  const query = buildFolderChildrenQuery("root", {
+    modifiedTimeAfter: "2026-07-14T10:00:00.000Z",
+    modifiedTimeBefore: "2026-07-14T11:00:00.000Z",
+  });
+
+  assert.equal(
+    query,
+    "'root' in parents and trashed = false and (mimeType = 'application/vnd.google-apps.folder' or (modifiedTime > '2026-07-14T10:00:00.000Z' and modifiedTime <= '2026-07-14T11:00:00.000Z'))"
+  );
+}
+
+async function testIncrementalIndexingReportsProcessedCountAndPeriod() {
+  const seenQueries = [];
+  const drive = {
+    files: {
+      async list(params) {
+        seenQueries.push(params.q);
+        const folderId = params.q.match(/'([^']+)' in parents/)[1];
+
+        return {
+          data: {
+            files:
+              folderId === "root"
+                ? [{ id: "persona-e", name: "#E01", mimeType: FOLDER_MIME_TYPE }]
+                : [
+                    {
+                      id: "video-3",
+                      name: "aula.mp4",
+                      mimeType: "video/mp4",
+                      fileExtension: "mp4",
+                      modifiedTime: "2026-07-14T10:30:00.000Z",
+                    },
+                  ],
+          },
+        };
+      },
+    },
+  };
+
+  const result = await indexGoogleDriveVideos({
+    drive,
+    rootFolderId: "root",
+    rootFolderName: "Etapa 01",
+    modifiedTimeAfter: "2026-07-14T10:00:00.000Z",
+    modifiedTimeBefore: "2026-07-14T11:00:00.000Z",
+    logger: {},
+  });
+
+  assert.equal(result.processed_count, 1);
+  assert.equal(result.indexed_count, 1);
+  assert.equal(result.modified_time_after, "2026-07-14T10:00:00.000Z");
+  assert.equal(result.modified_time_before, "2026-07-14T11:00:00.000Z");
+  assert.match(seenQueries[0], /modifiedTime > '2026-07-14T10:00:00.000Z'/);
+  assert.match(seenQueries[0], /modifiedTime <= '2026-07-14T11:00:00.000Z'/);
+  assert.equal(result.videos[0].modified_time, "2026-07-14T10:30:00.000Z");
+}
+
 async function main() {
   await testRecursiveIndexingMapsEtapaAndTrilha();
   await testFolderErrorsDoNotStopIndexing();
   await testInvalidVideosAreIgnored();
+  await testIncrementalQueryKeepsFoldersAndFiltersFilesByModifiedTime();
+  await testIncrementalIndexingReportsProcessedCountAndPeriod();
 
   console.log("google-drive-video-indexer tests OK");
 }

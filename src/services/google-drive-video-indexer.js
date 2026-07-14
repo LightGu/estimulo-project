@@ -143,6 +143,45 @@ function buildDriveWebViewLink(fileId) {
   return `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/view`;
 }
 
+function normalizeDateISOString(value, fieldName) {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`${fieldName} deve ser uma data valida`);
+  }
+
+  return date.toISOString();
+}
+
+function buildModifiedTimePredicate(options = {}) {
+  const predicates = [];
+
+  if (options.modifiedTimeAfter) {
+    predicates.push(`modifiedTime > '${options.modifiedTimeAfter}'`);
+  }
+
+  if (options.modifiedTimeBefore) {
+    predicates.push(`modifiedTime <= '${options.modifiedTimeBefore}'`);
+  }
+
+  return predicates.join(" and ");
+}
+
+function buildFolderChildrenQuery(folderId, options = {}) {
+  const baseQuery = `'${folderId}' in parents and trashed = false`;
+  const modifiedTimePredicate = buildModifiedTimePredicate(options);
+
+  if (!modifiedTimePredicate) {
+    return baseQuery;
+  }
+
+  return `${baseQuery} and (mimeType = '${FOLDER_MIME_TYPE}' or (${modifiedTimePredicate}))`;
+}
+
 function mapVideoFile(file, pathSegments, options = {}) {
   const etapa = findEtapa(pathSegments);
   const persona = findPersona(pathSegments, options.personaMappings);
@@ -173,6 +212,7 @@ function mapVideoFile(file, pathSegments, options = {}) {
       name: file.name,
       mime_type: file.mimeType,
       file_extension: getFileExtension(file) || undefined,
+      modified_time: file.modifiedTime,
       web_view_link: file.webViewLink || buildDriveWebViewLink(file.id),
       etapa,
       trilha_segmento: persona.trilha,
@@ -191,9 +231,9 @@ async function listFolderChildren(drive, folderId, options = {}) {
 
   do {
     const response = await drive.files.list({
-      q: `'${folderId}' in parents and trashed = false`,
+      q: buildFolderChildrenQuery(folderId, options),
       fields:
-        "nextPageToken, files(id, name, mimeType, fileExtension, webViewLink, parents, size, videoMediaMetadata)",
+        "nextPageToken, files(id, name, mimeType, fileExtension, modifiedTime, webViewLink, parents, size, videoMediaMetadata)",
       pageSize: options.pageSize || 1000,
       pageToken,
       supportsAllDrives: true,
@@ -216,6 +256,8 @@ async function indexGoogleDriveVideos(params) {
     logger = console,
     maxDepth = 50,
   } = params || {};
+  const modifiedTimeAfter = normalizeDateISOString(params && params.modifiedTimeAfter, "modifiedTimeAfter");
+  const modifiedTimeBefore = normalizeDateISOString(params && params.modifiedTimeBefore, "modifiedTimeBefore");
 
   if (!drive || !drive.files || typeof drive.files.list !== "function") {
     throw new Error("drive.files.list e obrigatorio para indexar videos do Google Drive");
@@ -229,6 +271,7 @@ async function indexGoogleDriveVideos(params) {
   const skipped = [];
   const errors = [];
   const visitedFolderIds = new Set();
+  let processedCount = 0;
 
   async function walk(folderId, pathSegments, depth) {
     if (depth > maxDepth) {
@@ -273,6 +316,8 @@ async function indexGoogleDriveVideos(params) {
           await walk(child.id, [...pathSegments, { id: child.id, name: child.name }], depth + 1);
           continue;
         }
+
+        processedCount += 1;
 
         if (!isValidVideoFile(child, params.videoExtensions || DEFAULT_VIDEO_EXTENSIONS)) {
           skipped.push({
@@ -326,6 +371,9 @@ async function indexGoogleDriveVideos(params) {
 
   return {
     root_folder_id: rootFolderId,
+    modified_time_after: modifiedTimeAfter,
+    modified_time_before: modifiedTimeBefore,
+    processed_count: processedCount,
     indexed_count: videos.length,
     skipped_count: skipped.length,
     error_count: errors.length,
@@ -339,6 +387,7 @@ module.exports = {
   DEFAULT_PERSONA_MAPPINGS,
   DEFAULT_VIDEO_EXTENSIONS,
   FOLDER_MIME_TYPE,
+  buildFolderChildrenQuery,
   extractEtapaFromFolderName,
   findEtapa,
   findPersona,
