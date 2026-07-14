@@ -12,7 +12,10 @@
     "queue:campaign-trigger:recurring-test": "node scripts/test-campaign-trigger-recurring.js",
     "queue:dispatch:test": "node scripts/enqueue-dispatch.js",
     "queue:dispatch:worker": "node scripts/start-dispatch-worker.js",
+    "queue:drive-video-index:test": "node scripts/enqueue-google-drive-video-index.js",
+    "queue:drive-video-index:worker": "node scripts/start-google-drive-video-index-worker.js",
     "test:drive": "node tests/google-drive-files-list.test.js",
+    "test:drive-indexer": "node tests/google-drive-video-indexer.test.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
