@@ -311,6 +311,23 @@ O indexador considera apenas arquivos de video validos. O arquivo e aceito
 quando o `mimeType` do Drive comeca com `video/` ou quando a extensao e uma
 extensao de video conhecida, como `mp4`, `mov`, `mkv`, `webm` ou `avi`.
 
+### Indexacao incremental
+
+O worker armazena o marco da ultima indexacao concluida com sucesso em
+`storage/google-drive-video-index-state.json`, separado por `root_folder_id`.
+Na primeira execucao, quando ainda nao existe estado salvo para a pasta raiz, a
+leitura e completa. Nas execucoes seguintes, o job usa `modifiedTime` na query
+do Google Drive para trazer apenas arquivos novos ou alterados depois do ultimo
+marco salvo, mantendo as pastas na consulta para preservar a navegacao
+recursiva.
+
+Cada execucao consulta o periodo ate `started_at` do proprio job e salva esse
+valor como `last_successful_index_at` apenas depois da conclusao com sucesso.
+Os logs `google_drive_video_index.started` e
+`google_drive_video_index.completed` informam `modified_time_after`,
+`modified_time_before`, `processed_count`, `indexed_count`, `skipped_count` e
+`error_count`.
+
 A etapa e a trilha sao inferidas pelos nomes das pastas ancestrais do arquivo:
 
 - etapa: pastas como `Etapa 01`, `Fase 2`, `Modulo 03`, `Semana 4`, `Aula 5`

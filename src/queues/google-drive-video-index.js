@@ -1,6 +1,9 @@
 const process = require("node:process");
 
 const { createGoogleDriveClient } = require("../services/google-drive");
+const {
+  createGoogleDriveVideoIndexStateStore,
+} = require("../services/google-drive-video-index-state");
 const { indexGoogleDriveVideos } = require("../services/google-drive-video-indexer");
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
@@ -38,6 +41,7 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
   const {
     drive: providedDrive,
     indexer = indexGoogleDriveVideos,
+    stateStore = createGoogleDriveVideoIndexStateStore(),
     upsertVideo,
     logger = console,
   } = options;
@@ -57,20 +61,56 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
         drive = createGoogleDriveClient();
       }
 
+      const modifiedTimeAfter = job.data.force_full_index
+        ? undefined
+        : await stateStore.getLastSuccessfulIndexAt({
+            rootFolderId: job.data.root_folder_id,
+          });
+      const modifiedTimeBefore = startedAt;
+
+      logger.info &&
+        logger.info(
+          JSON.stringify({
+            event: "google_drive_video_index.started",
+            job_id: job.id,
+            root_folder_id: job.data.root_folder_id,
+            mode: modifiedTimeAfter ? "incremental" : "full",
+            modified_time_after: modifiedTimeAfter,
+            modified_time_before: modifiedTimeBefore,
+          })
+        );
+
       const result = await indexer({
         drive,
         rootFolderId: job.data.root_folder_id,
         rootFolderName: job.data.root_folder_name,
+        modifiedTimeAfter,
+        modifiedTimeBefore,
         upsertVideo,
         logger,
       });
       const completedAt = new Date().toISOString();
+
+      await stateStore.saveSuccessfulIndex({
+        rootFolderId: job.data.root_folder_id,
+        rootFolderName: job.data.root_folder_name,
+        indexedAt: modifiedTimeBefore,
+        completedAt,
+        jobId: job.id,
+        processedCount: result.processed_count,
+        indexedCount: result.indexed_count,
+        skippedCount: result.skipped_count,
+        errorCount: result.error_count,
+      });
 
       await job.updateData({
         ...job.data,
         status: GOOGLE_DRIVE_VIDEO_INDEX_SUCCESS_STATUS,
         started_at: startedAt,
         completed_at: completedAt,
+        modified_time_after: modifiedTimeAfter,
+        modified_time_before: modifiedTimeBefore,
+        processed_count: result.processed_count,
         indexed_count: result.indexed_count,
         skipped_count: result.skipped_count,
         error_count: result.error_count,
@@ -82,6 +122,9 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
             event: "google_drive_video_index.completed",
             job_id: job.id,
             root_folder_id: job.data.root_folder_id,
+            modified_time_after: modifiedTimeAfter,
+            modified_time_before: modifiedTimeBefore,
+            processed_count: result.processed_count,
             indexed_count: result.indexed_count,
             skipped_count: result.skipped_count,
             error_count: result.error_count,
@@ -92,6 +135,8 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
         status: GOOGLE_DRIVE_VIDEO_INDEX_SUCCESS_STATUS,
         started_at: startedAt,
         completed_at: completedAt,
+        modified_time_after: modifiedTimeAfter,
+        modified_time_before: modifiedTimeBefore,
         ...result,
       };
     } catch (error) {
@@ -121,11 +166,11 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
 }
 
 function createGoogleDriveVideoIndexWorker(options = {}) {
-  const { drive, indexer, upsertVideo, logger, ...workerOptions } = options;
+  const { drive, indexer, stateStore, upsertVideo, logger, ...workerOptions } = options;
 
   return createWorker(
     queueNames.googleDriveVideoIndex,
-    createGoogleDriveVideoIndexProcessor({ drive, indexer, upsertVideo, logger }),
+    createGoogleDriveVideoIndexProcessor({ drive, indexer, stateStore, upsertVideo, logger }),
     workerOptions
   );
 }
