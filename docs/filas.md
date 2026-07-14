@@ -362,6 +362,28 @@ Para iniciar o worker:
 npm run queue:drive-video-index:worker
 ```
 
+Ao iniciar, o worker tambem registra um repeatable job diario na mesma fila
+`google-drive-video-index`, usando a infraestrutura de `src/queues/bullmq.js` e
+a conexao Redis compartilhada. O agendamento usa a chave estavel
+`google-drive-video-index-daily`, portanto reiniciar o worker atualiza o mesmo
+agendamento em vez de criar duplicatas.
+
+O horario fica centralizado no `.env`:
+
+```env
+GOOGLE_DRIVE_VIDEO_INDEX_CRON=0 3 * * *
+GOOGLE_DRIVE_VIDEO_INDEX_TIMEZONE=America/Bahia
+```
+
+O cron acima executa uma vez por dia as 03:00 no fuso configurado. O job
+recorrente usa as opcoes padrao da fila, incluindo a politica de tentativas e
+backoff definida em `src/queues/bullmq.js`.
+
+O inicio da execucao e registrado por `google_drive_video_index.execution_started`
+e `google_drive_video_index.started`. Conclusao e falha sao registradas por
+`google_drive_video_index.completed`, `google_drive_video_index.completed.event`,
+`google_drive_video_index.failed` e `google_drive_video_index.failed.event`.
+
 O worker usa `GOOGLE_DRIVE_CREDENTIALS` e `GOOGLE_DRIVE_ROOT_FOLDER_ID` do
 `.env`. Enquanto o reposititorio de banco do catalogo nao estiver implementado,
 o processor retorna os videos mapeados no resultado do job. Quando o banco
