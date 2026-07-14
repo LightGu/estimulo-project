@@ -300,6 +300,57 @@ const worker = createDispatchWorker({
 });
 ```
 
+## Fila google-drive-video-index
+
+A fila `google-drive-video-index` percorre recursivamente a pasta raiz do Google
+Drive e monta o catalogo de videos a partir da organizacao atual das pastas.
+Falhas em uma pasta ou arquivo sao registradas no resultado do job e nao
+interrompem a indexacao das demais pastas.
+
+O indexador considera apenas arquivos de video validos. O arquivo e aceito
+quando o `mimeType` do Drive comeca com `video/` ou quando a extensao e uma
+extensao de video conhecida, como `mp4`, `mov`, `mkv`, `webm` ou `avi`.
+
+A etapa e a trilha sao inferidas pelos nomes das pastas ancestrais do arquivo:
+
+- etapa: pastas como `Etapa 01`, `Fase 2`, `Modulo 03`, `Semana 4`, `Aula 5`
+  ou nomes iniciados por numero;
+- trilha/persona: pastas que contenham `#P01`, `P01`, `Paulo`,
+  `pre infancia`, `#M01`, `M01`, `Maria`, `#E01`, `E01`, `Eufrasio`,
+  `adolescencia` ou `maturidade`.
+
+Mapeamentos padrao:
+
+| Hashtag | Persona | Trilha |
+|---|---|---|
+| `#P01` | Paulo | Empreendedores na pre infancia |
+| `#M01` | Maria | Empreendedores na infancia |
+| `#E01` | Eufrasio | Empreendedores na adolescencia e maturidade |
+
+Para enfileirar uma indexacao:
+
+```bash
+npm run queue:drive-video-index:test
+```
+
+Tambem e possivel informar a pasta raiz manualmente:
+
+```bash
+npm run queue:drive-video-index:test -- --root-folder-id ID_DA_PASTA_RAIZ --root-folder-name Conteudos
+```
+
+Para iniciar o worker:
+
+```bash
+npm run queue:drive-video-index:worker
+```
+
+O worker usa `GOOGLE_DRIVE_CREDENTIALS` e `GOOGLE_DRIVE_ROOT_FOLDER_ID` do
+`.env`. Enquanto o reposititorio de banco do catalogo nao estiver implementado,
+o processor retorna os videos mapeados no resultado do job. Quando o banco
+estiver disponivel, injete `upsertVideo(video)` em `createGoogleDriveVideoIndexWorker`
+para gravar cada item no `video_catalog`.
+
 Para jobs agendados ou repetiveis, use as opcoes nativas do BullMQ:
 
 ```js
