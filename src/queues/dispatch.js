@@ -2,6 +2,7 @@ const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
+const { downloadGoogleDriveVideoForDispatch } = require("../services/google-drive-video-download");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
 const DISPATCH_INITIAL_STATUS = "pending";
@@ -9,11 +10,19 @@ const DISPATCH_PROCESSING_STATUS = "processing";
 const DISPATCH_SUCCESS_STATUS = "sent";
 const DISPATCH_FAILED_STATUS = "failed";
 
-const dispatchQueue = createQueue(queueNames.dispatch, {
-  defaultJobOptions: {
-    attempts: 1,
-  },
-});
+let dispatchQueueInstance;
+
+function getDispatchQueue() {
+  if (!dispatchQueueInstance) {
+    dispatchQueueInstance = createQueue(queueNames.dispatch, {
+      defaultJobOptions: {
+        attempts: 1,
+      },
+    });
+  }
+
+  return dispatchQueueInstance;
+}
 
 function normalizeScheduledDate(scheduledAt = new Date()) {
   const date = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
@@ -34,8 +43,11 @@ function assertRequiredField(params, fieldName) {
 function buildDispatchJobData(params) {
   assertRequiredField(params, "group_id");
   assertRequiredField(params, "campaign_id");
-  assertRequiredField(params, "link_video");
   assertRequiredField(params, "legenda");
+
+  if (!params.link_video && !params.video_id && !params.drive_file_id && !params.video_catalog) {
+    throw new Error("link_video, video_id ou drive_file_id e obrigatorio para enfileirar dispatch");
+  }
 
   const scheduledDate = normalizeScheduledDate(params.scheduled_at || params.scheduledAt);
 
@@ -43,6 +55,9 @@ function buildDispatchJobData(params) {
     group_id: params.group_id,
     campaign_id: params.campaign_id,
     link_video: params.link_video,
+    video_id: params.video_id || (params.video_catalog && params.video_catalog.id),
+    drive_file_id: params.drive_file_id || (params.video_catalog && params.video_catalog.drive_file_id),
+    video_catalog: params.video_catalog,
     legenda: params.legenda,
     scheduled_at: scheduledDate.toISOString(),
     status: params.status || DISPATCH_INITIAL_STATUS,
@@ -62,7 +77,20 @@ function buildDispatchJobOptions(jobData, options = {}) {
   };
 }
 
-function buildDispatchDeliveryPayload(jobData) {
+function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
+  if (downloadedVideo) {
+    return {
+      groupId: jobData.group_id,
+      message: jobData.legenda,
+      content: {
+        base64: downloadedVideo.bytes.toString("base64"),
+        fileName: downloadedVideo.name,
+        mimeType: downloadedVideo.mime_type,
+        type: "video",
+      },
+    };
+  }
+
   return {
     groupId: jobData.group_id,
     message: jobData.legenda,
@@ -79,7 +107,7 @@ async function addDispatchJob(params, options = {}) {
   const jobData = buildDispatchJobData(params);
   const jobOptions = buildDispatchJobOptions(jobData, options);
 
-  return dispatchQueue.add(DISPATCH_JOB_NAME, jobData, jobOptions);
+  return getDispatchQueue().add(DISPATCH_JOB_NAME, jobData, jobOptions);
 }
 
 async function addJitteredDispatchJobs(params, options = {}) {
@@ -94,7 +122,12 @@ async function addJitteredDispatchJobs(params, options = {}) {
 }
 
 function createDispatchProcessor(options = {}) {
-  const { sender = sendToEvolution } = options;
+  const {
+    sender = sendToEvolution,
+    videoDownloader = downloadGoogleDriveVideoForDispatch,
+    drive,
+    videoCatalogRepository,
+  } = options;
 
   return async function dispatchWorker(job) {
     const startedAt = new Date().toISOString();
@@ -106,7 +139,17 @@ function createDispatchProcessor(options = {}) {
     });
 
     try {
-      const delivery = await sender(buildDispatchDeliveryPayload(job.data));
+      const shouldDownloadVideo = Boolean(job.data.video_catalog || job.data.video_id || job.data.drive_file_id);
+      const downloadedVideo = shouldDownloadVideo
+        ? await videoDownloader({
+            drive,
+            videoCatalogRepository,
+            videoCatalogRecord: job.data.video_catalog,
+            videoId: job.data.video_id,
+            driveFileId: job.data.drive_file_id,
+          })
+        : undefined;
+      const delivery = await sender(buildDispatchDeliveryPayload(job.data, downloadedVideo));
       const completedAt = new Date().toISOString();
 
       await job.updateData({
@@ -164,9 +207,19 @@ function createDispatchProcessor(options = {}) {
 const dispatchWorker = createDispatchProcessor();
 
 function createDispatchWorker(options = {}) {
-  const { sender = sendToEvolution, ...workerOptions } = options;
+  const {
+    sender = sendToEvolution,
+    videoDownloader = downloadGoogleDriveVideoForDispatch,
+    drive,
+    videoCatalogRepository,
+    ...workerOptions
+  } = options;
 
-  return createWorker(queueNames.dispatch, createDispatchProcessor({ sender }), workerOptions);
+  return createWorker(
+    queueNames.dispatch,
+    createDispatchProcessor({ sender, videoDownloader, drive, videoCatalogRepository }),
+    workerOptions
+  );
 }
 
 function createDispatchEvents(options = {}) {
@@ -188,5 +241,7 @@ module.exports = {
   createDispatchEvents,
   createDispatchWorker,
   dispatchWorker,
-  dispatchQueue,
+  get dispatchQueue() {
+    return getDispatchQueue();
+  },
 };
