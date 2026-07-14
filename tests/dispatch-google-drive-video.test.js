@@ -24,6 +24,7 @@ function createFakeJob(data) {
 async function testDispatchDownloadsVideoAndSendsBase64Payload() {
   const sentPayloads = [];
   const downloadCalls = [];
+  let downloadedVideoRef;
   const jobData = buildDispatchJobData({
     group_id: "120363000000000000@g.us",
     campaign_id: "campaign-1",
@@ -41,16 +42,18 @@ async function testDispatchDownloadsVideoAndSendsBase64Payload() {
     videoDownloader: async (params) => {
       downloadCalls.push(params);
 
-      return {
+      downloadedVideoRef = {
         video_id: "video-1",
         drive_file_id: "drive-file-1",
         bytes: Buffer.from("video-bytes"),
         name: "aula-01.mp4",
         mime_type: "video/mp4",
       };
+
+      return downloadedVideoRef;
     },
     sender: async (payload) => {
-      sentPayloads.push(payload);
+      sentPayloads.push(JSON.parse(JSON.stringify(payload)));
 
       return {
         provider: "fake",
@@ -77,6 +80,7 @@ async function testDispatchDownloadsVideoAndSendsBase64Payload() {
   assert.equal(result.status, DISPATCH_SUCCESS_STATUS);
   assert.equal(job.updates[0].status, "processing");
   assert.equal(job.updates[1].status, DISPATCH_SUCCESS_STATUS);
+  assert.equal(downloadedVideoRef.bytes, undefined);
 }
 
 async function testDispatchStillAcceptsLegacyVideoUrl() {
@@ -103,9 +107,61 @@ async function testDispatchStillAcceptsLegacyVideoUrl() {
   assert.equal(payload[0].content.url, "https://example.com/video.mp4");
 }
 
+async function testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo() {
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_id: "video-1",
+    legenda: "Legenda de teste",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const sentPayloads = [];
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.alloc(0),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    sender: async (payload) => {
+      sentPayloads.push(payload);
+      return { provider: "fake" };
+    },
+  });
+
+  await assert.rejects(() => processor(createFakeJob(jobData)), /video vazio/);
+  assert.equal(sentPayloads.length, 0);
+}
+
+async function testDispatchDoesNotSendWhenDownloadFails() {
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_id: "video-1",
+    legenda: "Legenda de teste",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const sentPayloads = [];
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => {
+      throw new Error("Falha simulada no download");
+    },
+    sender: async (payload) => {
+      sentPayloads.push(payload);
+      return { provider: "fake" };
+    },
+  });
+
+  await assert.rejects(() => processor(createFakeJob(jobData)), /Falha simulada no download/);
+  assert.equal(sentPayloads.length, 0);
+}
+
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
   await testDispatchStillAcceptsLegacyVideoUrl();
+  await testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo();
+  await testDispatchDoesNotSendWhenDownloadFails();
 
   console.log("dispatch-google-drive-video tests OK");
 }
