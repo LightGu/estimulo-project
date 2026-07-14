@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 
 const {
-  downloadGoogleDriveVideoForDispatch,
+  downloadFromDrive,
   resolveVideoCatalogRecord,
 } = require("../src/services/google-drive-video-download");
 
@@ -29,7 +29,7 @@ async function testDownloadsVideoBytesUsingDriveFileId() {
     calls
   );
 
-  const result = await downloadGoogleDriveVideoForDispatch({
+  const result = await downloadFromDrive({
     drive,
     videoCatalogRecord: {
       id: "video-1",
@@ -90,7 +90,7 @@ async function testUsesResponseHeaderAsMimeTypeFallback() {
     calls
   );
 
-  const result = await downloadGoogleDriveVideoForDispatch({
+  const result = await downloadFromDrive({
     drive,
     videoCatalogRecord: {
       id: "video-3",
@@ -102,13 +102,86 @@ async function testUsesResponseHeaderAsMimeTypeFallback() {
   assert.equal(result.mime_type, "video/webm");
 }
 
+async function testInfersVideoMimeTypeFromFileNameWhenDriveReturnsOctetStream() {
+  const calls = [];
+  const drive = createFakeDrive(
+    {
+      data: Buffer.from("video"),
+      headers: {
+        "content-type": "application/octet-stream",
+      },
+    },
+    calls
+  );
+
+  const result = await downloadFromDrive({
+    drive,
+    videoCatalogRecord: {
+      id: "video-4",
+      drive_file_id: "drive-file-4",
+      name: "aula-04.mp4",
+      mime_type: "application/octet-stream",
+    },
+  });
+
+  assert.equal(result.mime_type, "video/mp4");
+}
+
+async function testRejectsEmptyDownload() {
+  await assert.rejects(
+    () =>
+      downloadFromDrive({
+        drive: createFakeDrive(
+          {
+            data: Buffer.alloc(0),
+            headers: {
+              "content-type": "video/mp4",
+            },
+          },
+          []
+        ),
+        videoCatalogRecord: {
+          id: "video-5",
+          drive_file_id: "drive-file-5",
+          name: "aula-05.mp4",
+          mime_type: "video/mp4",
+        },
+      }),
+    /video vazio/
+  );
+}
+
+async function testRejectsInvalidMimeType() {
+  await assert.rejects(
+    () =>
+      downloadFromDrive({
+        drive: createFakeDrive(
+          {
+            data: Buffer.from("not-a-video"),
+            headers: {
+              "content-type": "application/pdf",
+            },
+          },
+          []
+        ),
+        videoCatalogRecord: {
+          id: "video-6",
+          drive_file_id: "drive-file-6",
+          name: "documento.pdf",
+          mime_type: "application/pdf",
+        },
+      }),
+    /Tipo MIME invalido/
+  );
+}
+
 async function testRequiresDriveFileId() {
   await assert.rejects(
     () =>
-      downloadGoogleDriveVideoForDispatch({
+      downloadFromDrive({
         drive: createFakeDrive({ data: Buffer.from("") }, []),
         videoCatalogRecord: {
-          id: "video-4",
+          id: "video-7",
         },
       }),
     /drive_file_id e obrigatorio/
@@ -119,6 +192,9 @@ async function main() {
   await testDownloadsVideoBytesUsingDriveFileId();
   await testFetchesVideoCatalogRecordFromRepository();
   await testUsesResponseHeaderAsMimeTypeFallback();
+  await testInfersVideoMimeTypeFromFileNameWhenDriveReturnsOctetStream();
+  await testRejectsEmptyDownload();
+  await testRejectsInvalidMimeType();
   await testRequiresDriveFileId();
 
   console.log("google-drive-video-download tests OK");

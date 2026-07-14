@@ -2,6 +2,20 @@ const path = require("node:path");
 
 const { createGoogleDriveClient } = require("./google-drive");
 
+const VIDEO_MIME_TYPES_BY_EXTENSION = {
+  ".3g2": "video/3gpp2",
+  ".3gp": "video/3gpp",
+  ".avi": "video/x-msvideo",
+  ".m4v": "video/x-m4v",
+  ".mkv": "video/x-matroska",
+  ".mov": "video/quicktime",
+  ".mp4": "video/mp4",
+  ".mpeg": "video/mpeg",
+  ".mpg": "video/mpeg",
+  ".webm": "video/webm",
+  ".wmv": "video/x-ms-wmv",
+};
+
 function assertDriveClient(drive) {
   if (!drive || !drive.files || typeof drive.files.get !== "function") {
     throw new Error("drive.files.get e obrigatorio para baixar video do Google Drive");
@@ -23,6 +37,16 @@ function normalizeMimeType(value) {
   return String(value).split(";")[0].trim() || undefined;
 }
 
+function isVideoMimeType(value) {
+  return Boolean(value && value.toLowerCase().startsWith("video/"));
+}
+
+function selectVideoMimeType(...candidates) {
+  const normalizedCandidates = candidates.map(normalizeMimeType).filter(Boolean);
+
+  return normalizedCandidates.find(isVideoMimeType) || normalizedCandidates[0] || "application/octet-stream";
+}
+
 function normalizeFileName(value, fallbackDriveFileId) {
   const name = value && String(value).trim();
 
@@ -31,6 +55,12 @@ function normalizeFileName(value, fallbackDriveFileId) {
   }
 
   return fallbackDriveFileId ? `${fallbackDriveFileId}.mp4` : "video.mp4";
+}
+
+function inferVideoMimeTypeFromName(fileName) {
+  const extension = path.extname(fileName || "").toLowerCase();
+
+  return VIDEO_MIME_TYPES_BY_EXTENSION[extension];
 }
 
 function toBuffer(data) {
@@ -51,6 +81,20 @@ function toBuffer(data) {
   }
 
   throw new Error("Resposta da Google Drive API nao contem bytes de video em formato suportado");
+}
+
+function assertValidDownloadedVideo(downloadedVideo) {
+  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes)) {
+    throw new Error("Download do Google Drive nao retornou bytes de video validos");
+  }
+
+  if (downloadedVideo.bytes.length === 0) {
+    throw new Error("Download do Google Drive retornou video vazio");
+  }
+
+  if (!isVideoMimeType(downloadedVideo.mime_type)) {
+    throw new Error(`Tipo MIME invalido para envio de video: ${downloadedVideo.mime_type || "indefinido"}`);
+  }
 }
 
 async function resolveVideoCatalogRecord(params = {}) {
@@ -93,7 +137,7 @@ async function resolveVideoCatalogRecord(params = {}) {
   throw new Error("videoCatalogRepository deve implementar findById(videoId) ou getById(videoId)");
 }
 
-async function downloadGoogleDriveVideoForDispatch(params = {}) {
+async function downloadFromDrive(params = {}) {
   const drive = params.drive || createGoogleDriveClient(params.googleDriveOptions || {});
   const videoCatalogRecord = await resolveVideoCatalogRecord(params);
 
@@ -125,12 +169,13 @@ async function downloadGoogleDriveVideoForDispatch(params = {}) {
     videoCatalogRecord.name || videoCatalogRecord.file_name || videoCatalogRecord.filename,
     driveFileId
   );
-  const mimeType =
-    normalizeMimeType(videoCatalogRecord.mime_type || videoCatalogRecord.mimeType) ||
-    responseMimeType ||
-    "application/octet-stream";
-
-  return {
+  const inferredMimeType = inferVideoMimeTypeFromName(name);
+  const mimeType = selectVideoMimeType(
+    videoCatalogRecord.mime_type || videoCatalogRecord.mimeType,
+    responseMimeType,
+    inferredMimeType
+  );
+  const downloadedVideo = {
     video_id: videoCatalogRecord.id,
     drive_file_id: driveFileId,
     bytes,
@@ -143,9 +188,17 @@ async function downloadGoogleDriveVideoForDispatch(params = {}) {
       size_bytes: bytes.length,
     },
   };
+
+  assertValidDownloadedVideo(downloadedVideo);
+
+  return downloadedVideo;
 }
 
+const downloadGoogleDriveVideoForDispatch = downloadFromDrive;
+
 module.exports = {
+  assertValidDownloadedVideo,
+  downloadFromDrive,
   downloadGoogleDriveVideoForDispatch,
   resolveVideoCatalogRecord,
 };

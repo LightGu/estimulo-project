@@ -2,7 +2,7 @@ const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
-const { downloadGoogleDriveVideoForDispatch } = require("../services/google-drive-video-download");
+const { downloadFromDrive } = require("../services/google-drive-video-download");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
 const DISPATCH_INITIAL_STATUS = "pending";
@@ -77,8 +77,24 @@ function buildDispatchJobOptions(jobData, options = {}) {
   };
 }
 
+function assertDownloadedVideoForDispatch(downloadedVideo) {
+  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes)) {
+    throw new Error("Download do Google Drive nao retornou bytes de video validos");
+  }
+
+  if (downloadedVideo.bytes.length === 0) {
+    throw new Error("Download do Google Drive retornou video vazio");
+  }
+
+  if (!downloadedVideo.mime_type || !downloadedVideo.mime_type.toLowerCase().startsWith("video/")) {
+    throw new Error(`Tipo MIME invalido para envio de video: ${downloadedVideo.mime_type || "indefinido"}`);
+  }
+}
+
 function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
   if (downloadedVideo) {
+    assertDownloadedVideoForDispatch(downloadedVideo);
+
     return {
       groupId: jobData.group_id,
       message: jobData.legenda,
@@ -103,6 +119,16 @@ function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
   };
 }
 
+function releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload) {
+  if (downloadedVideo) {
+    downloadedVideo.bytes = undefined;
+  }
+
+  if (deliveryPayload && deliveryPayload.content) {
+    deliveryPayload.content.base64 = undefined;
+  }
+}
+
 async function addDispatchJob(params, options = {}) {
   const jobData = buildDispatchJobData(params);
   const jobOptions = buildDispatchJobOptions(jobData, options);
@@ -124,7 +150,7 @@ async function addJitteredDispatchJobs(params, options = {}) {
 function createDispatchProcessor(options = {}) {
   const {
     sender = sendToEvolution,
-    videoDownloader = downloadGoogleDriveVideoForDispatch,
+    videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
   } = options;
@@ -140,42 +166,53 @@ function createDispatchProcessor(options = {}) {
 
     try {
       const shouldDownloadVideo = Boolean(job.data.video_catalog || job.data.video_id || job.data.drive_file_id);
-      const downloadedVideo = shouldDownloadVideo
-        ? await videoDownloader({
+      let downloadedVideo;
+      let deliveryPayload;
+
+      try {
+        downloadedVideo = shouldDownloadVideo
+          ? await videoDownloader({
             drive,
             videoCatalogRepository,
             videoCatalogRecord: job.data.video_catalog,
             videoId: job.data.video_id,
             driveFileId: job.data.drive_file_id,
           })
-        : undefined;
-      const delivery = await sender(buildDispatchDeliveryPayload(job.data, downloadedVideo));
-      const completedAt = new Date().toISOString();
+          : undefined;
+        deliveryPayload = buildDispatchDeliveryPayload(job.data, downloadedVideo);
+        const delivery = await sender(deliveryPayload);
+        releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload);
+        deliveryPayload = undefined;
+        downloadedVideo = undefined;
+        const completedAt = new Date().toISOString();
 
-      await job.updateData({
-        ...job.data,
-        status: DISPATCH_SUCCESS_STATUS,
-        started_at: startedAt,
-        completed_at: completedAt,
-      });
-
-      console.info(
-        JSON.stringify({
-          event: "dispatch.sent",
-          job_id: job.id,
-          campaign_id: job.data.campaign_id,
-          group_id: job.data.group_id,
+        await job.updateData({
+          ...job.data,
+          status: DISPATCH_SUCCESS_STATUS,
           started_at: startedAt,
           completed_at: completedAt,
-        })
-      );
+        });
 
-      return {
-        status: DISPATCH_SUCCESS_STATUS,
-        delivery,
-        started_at: startedAt,
-        completed_at: completedAt,
-      };
+        console.info(
+          JSON.stringify({
+            event: "dispatch.sent",
+            job_id: job.id,
+            campaign_id: job.data.campaign_id,
+            group_id: job.data.group_id,
+            started_at: startedAt,
+            completed_at: completedAt,
+          })
+        );
+
+        return {
+          status: DISPATCH_SUCCESS_STATUS,
+          delivery,
+          started_at: startedAt,
+          completed_at: completedAt,
+        };
+      } finally {
+        releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload);
+      }
     } catch (error) {
       const failedAt = new Date().toISOString();
 
@@ -209,7 +246,7 @@ const dispatchWorker = createDispatchProcessor();
 function createDispatchWorker(options = {}) {
   const {
     sender = sendToEvolution,
-    videoDownloader = downloadGoogleDriveVideoForDispatch,
+    videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
     ...workerOptions
@@ -234,6 +271,7 @@ module.exports = {
   DISPATCH_SUCCESS_STATUS,
   addDispatchJob,
   addJitteredDispatchJobs,
+  assertDownloadedVideoForDispatch,
   buildDispatchDeliveryPayload,
   buildDispatchJobData,
   buildJitteredDispatchSchedule,
