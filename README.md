@@ -62,3 +62,58 @@ Para remover tambem os dados persistidos no volume local do Redis:
 ```bash
 docker compose --env-file .env -f infra/docker-compose.yml down -v
 ```
+
+## Supabase e banco de dados
+
+Preencha as variaveis do arquivo `.env` com o URL do projeto Supabase e as chaves apropriadas para o ambiente backend:
+
+```env
+SUPABASE_URL=https://SEU_PROJECT_REF.supabase.co
+SUPABASE_ANON_KEY=change-me
+SUPABASE_SERVICE_ROLE_KEY=change-me
+```
+
+A service role key deve ser usada apenas no backend. Nunca exponha `SUPABASE_SERVICE_ROLE_KEY` no frontend, em logs, em screenshots ou em repositórios públicos.
+
+### Como configurar o Supabase
+
+1. Crie um projeto no Supabase.
+2. Copie o URL e as chaves para o arquivo `.env`.
+3. Execute a migration contida em `supabase/migrations/202607140001_create_mvp_schema.sql` no SQL Editor do Supabase, na mesma instância do projeto.
+
+### Como executar a migration
+
+```bash
+npm run db:test
+```
+
+### Como executar o seed
+
+```bash
+npm run seed
+```
+
+O seed cria de forma idempotente uma organização, três grupos, duas campanhas, associações, dez vídeos, progresso e logs de exemplo.
+
+### Como testar a conexão
+
+```bash
+npm run db:test
+```
+
+A verificacao considera uma tabela vazia como sucesso de conexao, mas exige que as variaveis do `.env` estejam preenchidas corretamente e que a migration tenha sido aplicada no projeto alvo.
+
+### Como rodar os testes
+
+```bash
+npm test
+npm run test:integration
+npm run test:repositories
+npm run test:api
+npm run db:test
+```
+
+### Endpoints HTTP
+
+- `POST /campaigns`: cria campanhas usando o serviço existente.
+- `GET /health`: devolve status geral do sistema, Redis, fila BullMQ e último dispatch.
