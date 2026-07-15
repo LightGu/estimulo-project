@@ -105,6 +105,58 @@ const worker = createCampaignTriggerWorker(async (job) => {
 });
 ```
 
+### Resolucao do proximo video por grupo
+
+Antes de enfileirar jobs na `dispatch`, o processador da campanha deve resolver
+o fluxo de videos com `src/services/group-video-flow.js`. O servico identifica a
+trilha efetiva do grupo com `coalesce(trilha_override, segmento)`, considera
+apenas videos com `status = "aprovado"`, ignora videos ja enviados ao grupo e
+retorna o primeiro disponivel por `etapa`.
+
+Quando nao existe mais video aprovado e ainda nao enviado para a trilha do
+grupo, o servico pausa o grupo no fluxo de videos com o motivo
+`end_of_queue`. Essa pausa evita reenfileirar conteudo repetido. O grupo deve
+continuar sendo avaliado nos ciclos seguintes quando a pausa tiver esse motivo;
+assim, quando um novo video elegivel aparecer no catalogo, o servico limpa a
+pausa automaticamente e retorna o grupo para enfileiramento.
+
+```js
+const {
+  resolveGroupsVideoFlow,
+} = require("../src/services/group-video-flow");
+
+const result = await resolveGroupsVideoFlow({
+  campaign_id: "campaign-123",
+  groups,
+  repository: videoFlowRepository,
+  logger: console,
+});
+
+await addJitteredDispatchJobs({
+  campaign_id: "campaign-123",
+  legenda: "Conteudo da campanha",
+  groups: result.dispatchGroups,
+  window_start: "09:00",
+  window_end: "18:00",
+  jitter_delay_min_ms: 60_000,
+  jitter_delay_max_ms: 300_000,
+});
+```
+
+O repositorio injetado pode implementar:
+
+- `findNextApprovedUnsentVideoForGroup(group)`: busca o proximo video elegivel.
+- `pauseGroupVideoFlowForEndOfQueue(groupId, metadata)`: marca a pausa por fim
+  de fila.
+- `resumeGroupVideoFlow(groupId, metadata)`: remove a pausa quando houver novo
+  video elegivel.
+
+Quando um grupo entra em pausa por fim de fila, o servico registra um log JSON
+com `event = "group_video_flow.paused_end_of_queue"`, `campaign_id`, `group_id`,
+`dispatch_group_id`, `trilha_segmento`, `pause_reason` e `paused_at`. O log e
+emitido apenas na transicao para a pausa, nao em ciclos posteriores em que o
+grupo ja esta pausado pelo mesmo motivo.
+
 Para testar manualmente com o Redis local ativo:
 
 ```bash
