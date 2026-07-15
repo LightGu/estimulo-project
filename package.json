@@ -20,7 +20,12 @@
     "test:group-video-flow": "node tests/group-video-flow.test.js",
     "test:dispatch-drive-video": "node tests/dispatch-google-drive-video.test.js",
     "test:drive-index-schedule": "node tests/google-drive-video-index-schedule.test.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test:integration": "node tests/integration-dispatch-flow.test.js",
+    "test:repositories": "node tests/repositories.test.js",
+    "test:api": "node tests/api.test.js",
+    "db:test": "node scripts/test-supabase-connection.js",
+    "seed": "node scripts/seed.js",
+    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/services.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js"
   },
   "repository": {
     "type": "git",
@@ -39,6 +44,7 @@
     "@langchain/langgraph": "^1.4.7",
     "@langchain/openai": "^1.5.4",
     "@prisma/client": "^7.8.0",
+    "@supabase/supabase-js": "^2.49.1",
     "axios": "^1.18.1",
     "bullmq": "^5.79.3",
     "cors": "^2.8.6",
