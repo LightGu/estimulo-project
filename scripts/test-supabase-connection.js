@@ -1,7 +1,5 @@
-const supabaseClient = require("../src/database/client");
-
 async function runSupabaseConnectionCheck(options = {}) {
-  const client = options.client || supabaseClient;
+  const client = options.client || require("../src/database/client");
 
   const { data, error } = await client.from("organizations").select("id").limit(1);
 

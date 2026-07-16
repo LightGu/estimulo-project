@@ -1,10 +1,8 @@
-const defaultSupabaseClient = require("../database/client");
-
-function getClient(client = defaultSupabaseClient) {
-  return client;
+function getClient(client) {
+  return client || require("../database/client");
 }
 
-async function createLog(payload, client = defaultSupabaseClient) {
+async function createLog(payload, client) {
   const { data, error } = await getClient(client)
     .from("dispatch_logs")
     .insert(payload)
@@ -18,7 +16,7 @@ async function createLog(payload, client = defaultSupabaseClient) {
   return data;
 }
 
-async function updateStatus(id, status, mensagemErro = null, client = defaultSupabaseClient) {
+async function updateStatus(id, status, mensagemErro = null, client) {
   const { data, error } = await getClient(client)
     .from("dispatch_logs")
     .update({ status, mensagem_erro: mensagemErro })
@@ -33,7 +31,7 @@ async function updateStatus(id, status, mensagemErro = null, client = defaultSup
   return data;
 }
 
-async function listByCampaign(campaignId, client = defaultSupabaseClient) {
+async function listByCampaign(campaignId, client) {
   const { data, error } = await getClient(client)
     .from("dispatch_logs")
     .select("*")
@@ -47,7 +45,7 @@ async function listByCampaign(campaignId, client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function listByGroup(groupId, client = defaultSupabaseClient) {
+async function listByGroup(groupId, client) {
   const { data, error } = await getClient(client)
     .from("dispatch_logs")
     .select("*")
@@ -61,7 +59,7 @@ async function listByGroup(groupId, client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function listRecent(limit = 10, client = defaultSupabaseClient) {
+async function listRecent(limit = 10, client) {
   const { data, error } = await getClient(client)
     .from("dispatch_logs")
     .select("*")

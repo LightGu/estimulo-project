@@ -1,10 +1,8 @@
-const defaultSupabaseClient = require("../database/client");
-
-function getClient(client = defaultSupabaseClient) {
-  return client;
+function getClient(client) {
+  return client || require("../database/client");
 }
 
-async function findById(id, client = defaultSupabaseClient) {
+async function findById(id, client) {
   const { data, error } = await getClient(client)
     .from("organizations")
     .select("*")
@@ -18,7 +16,7 @@ async function findById(id, client = defaultSupabaseClient) {
   return data || null;
 }
 
-async function findAll(client = defaultSupabaseClient) {
+async function findAll(client) {
   const { data, error } = await getClient(client)
     .from("organizations")
     .select("*")
@@ -31,7 +29,7 @@ async function findAll(client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function create(payload, client = defaultSupabaseClient) {
+async function create(payload, client) {
   const { data, error } = await getClient(client)
     .from("organizations")
     .insert(payload)
@@ -45,7 +43,7 @@ async function create(payload, client = defaultSupabaseClient) {
   return data;
 }
 
-async function update(id, payload, client = defaultSupabaseClient) {
+async function update(id, payload, client) {
   const { data, error } = await getClient(client)
     .from("organizations")
     .update(payload)
@@ -60,7 +58,7 @@ async function update(id, payload, client = defaultSupabaseClient) {
   return data;
 }
 
-async function remove(id, client = defaultSupabaseClient) {
+async function remove(id, client) {
   const { data, error } = await getClient(client)
     .from("organizations")
     .delete()
