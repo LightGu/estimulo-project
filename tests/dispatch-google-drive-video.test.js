@@ -157,11 +157,26 @@ async function testDispatchDoesNotSendWhenDownloadFails() {
   assert.equal(sentPayloads.length, 0);
 }
 
+async function testDispatchRejectsDisabledVideoGroupBeforeJobData() {
+  assert.throws(
+    () => buildDispatchJobData({
+      group_id: "120363000000000000@g.us",
+      campaign_id: "campaign-1",
+      link_video: "https://example.com/video.mp4",
+      legenda: "Legenda de teste",
+      envia_video: false,
+      scheduled_at: "2026-07-14T10:00:00.000Z",
+    }),
+    /envia_video=false/
+  );
+}
+
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
   await testDispatchStillAcceptsLegacyVideoUrl();
   await testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo();
   await testDispatchDoesNotSendWhenDownloadFails();
+  await testDispatchRejectsDisabledVideoGroupBeforeJobData();
 
   console.log("dispatch-google-drive-video tests OK");
 }

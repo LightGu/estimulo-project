@@ -41,6 +41,10 @@ function assertRequiredField(params, fieldName) {
 }
 
 function buildDispatchJobData(params) {
+  if (params && params.envia_video === false) {
+    throw new Error("grupo com envia_video=false nao pode ser enfileirado para dispatch de video");
+  }
+
   assertRequiredField(params, "group_id");
   assertRequiredField(params, "campaign_id");
   assertRequiredField(params, "legenda");

@@ -25,7 +25,7 @@
     "test:api": "node tests/api.test.js",
     "db:test": "node scripts/test-supabase-connection.js",
     "seed": "node scripts/seed.js",
-    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/services.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js"
+    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/services.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js"
   },
   "repository": {
     "type": "git",

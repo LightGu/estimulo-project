@@ -115,10 +115,9 @@ retorna o primeiro disponivel por `etapa`.
 
 Quando nao existe mais video aprovado e ainda nao enviado para a trilha do
 grupo, o servico pausa o grupo no fluxo de videos com o motivo
-`end_of_queue`. Essa pausa evita reenfileirar conteudo repetido. O grupo deve
-continuar sendo avaliado nos ciclos seguintes quando a pausa tiver esse motivo;
-assim, quando um novo video elegivel aparecer no catalogo, o servico limpa a
-pausa automaticamente e retorna o grupo para enfileiramento.
+`end_of_queue`. Essa pausa evita reenfileirar conteudo repetido. Grupos com
+`envia_video = false` sao ignorados antes da selecao de conteudo, mesmo que
+estejam pausados por `end_of_queue`, e nao entram na fila de dispatch.
 
 ```js
 const {

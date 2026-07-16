@@ -63,7 +63,7 @@ function isGroupPausedByEndOfQueue(group = {}) {
 }
 
 function canEvaluateGroupVideoFlow(group = {}) {
-  return group.envia_video !== false || isGroupPausedByEndOfQueue(group);
+  return group.envia_video !== false;
 }
 
 function selectNextApprovedUnsentVideo(params = {}) {
