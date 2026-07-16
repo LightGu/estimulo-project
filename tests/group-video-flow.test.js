@@ -90,8 +90,9 @@ async function testPausesGroupWhenQueueEndsAndLogsTransition() {
   });
 }
 
-async function testDoesNotLogAgainWhenGroupWasAlreadyPausedByEndOfQueue() {
+async function testSkipsDisabledGroupEvenWhenItWasAlreadyPausedByEndOfQueue() {
   const logger = createLogger();
+  let repositoryCalled = false;
   const result = await resolveGroupVideoFlow({
     campaign_id: "campaign-1",
     group: createGroup({
@@ -101,13 +102,20 @@ async function testDoesNotLogAgainWhenGroupWasAlreadyPausedByEndOfQueue() {
     sentVideoIds: ["video-1"],
     videos: [createVideo({ id: "video-1" })],
     logger,
+    repository: {
+      async findNextApprovedUnsentVideoForGroup() {
+        repositoryCalled = true;
+      },
+    },
   });
 
-  assert.equal(result.status, "paused");
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "group_video_disabled");
   assert.equal(logger.entries.length, 0);
+  assert.equal(repositoryCalled, false);
 }
 
-async function testResumesPausedGroupWhenNewEligibleVideoExists() {
+async function testDoesNotResumeDisabledPausedGroupWhenNewEligibleVideoExists() {
   const resumes = [];
   const result = await resolveGroupVideoFlow({
     campaign_id: "campaign-1",
@@ -128,13 +136,9 @@ async function testResumesPausedGroupWhenNewEligibleVideoExists() {
     resumedAt: "2026-07-14T13:00:00.000Z",
   });
 
-  assert.equal(result.status, "eligible");
-  assert.equal(result.video_id, "video-2");
-  assert.equal(result.group_id, "120363000000000000@g.us");
-  assert.equal(resumes.length, 1);
-  assert.equal(resumes[0].groupId, "group-1");
-  assert.equal(resumes[0].metadata.reason, END_OF_QUEUE_PAUSE_REASON);
-  assert.equal(resumes[0].metadata.resumed_at, "2026-07-14T13:00:00.000Z");
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "group_video_disabled");
+  assert.equal(resumes.length, 0);
 }
 
 async function testSkipsManuallyDisabledGroup() {
@@ -169,8 +173,8 @@ async function testResolvesMultipleGroupsForDispatch() {
 async function main() {
   await testSelectsFirstApprovedUnsentVideoForGroupTrail();
   await testPausesGroupWhenQueueEndsAndLogsTransition();
-  await testDoesNotLogAgainWhenGroupWasAlreadyPausedByEndOfQueue();
-  await testResumesPausedGroupWhenNewEligibleVideoExists();
+  await testSkipsDisabledGroupEvenWhenItWasAlreadyPausedByEndOfQueue();
+  await testDoesNotResumeDisabledPausedGroupWhenNewEligibleVideoExists();
   await testSkipsManuallyDisabledGroup();
   await testResolvesMultipleGroupsForDispatch();
 

@@ -138,7 +138,7 @@ function normalizeDispatchGroups(groups) {
       ...group,
       order: group.order ?? index + 1,
     };
-  });
+  }).filter((group) => group.envia_video !== false);
 }
 
 function randomIntegerBetween(min, max, random = Math.random) {
@@ -151,6 +151,11 @@ function randomIntegerBetween(min, max, random = Math.random) {
 
 function buildJitteredDispatchSchedule(params = {}) {
   const groups = normalizeDispatchGroups(params.groups);
+
+  if (groups.length === 0) {
+    return [];
+  }
+
   const jitter = normalizeJitterRange(params);
   const window = normalizeDispatchWindow(params);
   const random = params.random || Math.random;
