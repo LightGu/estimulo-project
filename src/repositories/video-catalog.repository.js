@@ -1,10 +1,8 @@
-const defaultSupabaseClient = require("../database/client");
-
-function getClient(client = defaultSupabaseClient) {
-  return client;
+function getClient(client) {
+  return client || require("../database/client");
 }
 
-async function findById(id, client = defaultSupabaseClient) {
+async function findById(id, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
@@ -18,7 +16,7 @@ async function findById(id, client = defaultSupabaseClient) {
   return data || null;
 }
 
-async function findAll(client = defaultSupabaseClient) {
+async function findAll(client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
@@ -31,7 +29,7 @@ async function findAll(client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function listApproved(client = defaultSupabaseClient) {
+async function listApproved(client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
@@ -45,7 +43,7 @@ async function listApproved(client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function listBySegmento(trilhaSegmento, client = defaultSupabaseClient) {
+async function listBySegmento(trilhaSegmento, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
@@ -59,7 +57,7 @@ async function listBySegmento(trilhaSegmento, client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function listByEtapa(etapa, client = defaultSupabaseClient) {
+async function listByEtapa(etapa, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
@@ -73,7 +71,7 @@ async function listByEtapa(etapa, client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function listByStatus(status, client = defaultSupabaseClient) {
+async function listByStatus(status, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
@@ -87,7 +85,7 @@ async function listByStatus(status, client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function findByDriveFileId(driveFileId, client = defaultSupabaseClient) {
+async function findByDriveFileId(driveFileId, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
@@ -101,7 +99,7 @@ async function findByDriveFileId(driveFileId, client = defaultSupabaseClient) {
   return data || null;
 }
 
-async function create(payload, client = defaultSupabaseClient) {
+async function create(payload, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .insert(payload)
@@ -115,7 +113,7 @@ async function create(payload, client = defaultSupabaseClient) {
   return data;
 }
 
-async function update(id, payload, client = defaultSupabaseClient) {
+async function update(id, payload, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .update(payload)
@@ -130,7 +128,7 @@ async function update(id, payload, client = defaultSupabaseClient) {
   return data;
 }
 
-async function remove(id, client = defaultSupabaseClient) {
+async function remove(id, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .delete()

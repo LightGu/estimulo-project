@@ -1,10 +1,8 @@
-const defaultSupabaseClient = require("../database/client");
-
-function getClient(client = defaultSupabaseClient) {
-  return client;
+function getClient(client) {
+  return client || require("../database/client");
 }
 
-async function registerDelivery(payload, client = defaultSupabaseClient) {
+async function registerDelivery(payload, client) {
   const { data, error } = await getClient(client)
     .from("group_video_progress")
     .insert(payload)
@@ -18,7 +16,7 @@ async function registerDelivery(payload, client = defaultSupabaseClient) {
   return data;
 }
 
-async function listDelivered(groupId, client = defaultSupabaseClient) {
+async function listDelivered(groupId, client) {
   const { data, error } = await getClient(client)
     .from("group_video_progress")
     .select("*")
@@ -32,7 +30,7 @@ async function listDelivered(groupId, client = defaultSupabaseClient) {
   return data || [];
 }
 
-async function getLastVideo(groupId, client = defaultSupabaseClient) {
+async function getLastVideo(groupId, client) {
   const { data, error } = await getClient(client)
     .from("group_video_progress")
     .select("*")
@@ -47,7 +45,7 @@ async function getLastVideo(groupId, client = defaultSupabaseClient) {
   return data || null;
 }
 
-async function hasDuplicate(groupId, videoId, client = defaultSupabaseClient) {
+async function hasDuplicate(groupId, videoId, client) {
   const { data, error } = await getClient(client)
     .from("group_video_progress")
     .select("id")

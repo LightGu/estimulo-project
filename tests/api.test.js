@@ -39,9 +39,39 @@ async function main() {
     assert.equal(healthResponse.status, 200);
     const healthPayload = await healthResponse.json();
     assert.equal(healthPayload.status, "ok");
+    assert.equal(healthPayload.checks.application.status, "ok");
+    assert.equal(healthPayload.checks.redis.status, "ok");
     assert.ok(healthPayload.checks.redis);
-    assert.ok(healthPayload.queue);
-    assert.ok(healthPayload.dispatch);
+
+    const unhealthyApp = createApp({
+      healthController: {
+        redisClient: {
+          ping: async () => {
+            throw new Error("Redis unavailable");
+          },
+        },
+      },
+      campaignService: {
+        create: async (payload) => ({ id: "campaign-1", ...payload }),
+      },
+    });
+
+    const unhealthyServer = unhealthyApp.listen(0);
+    await new Promise((resolve) => unhealthyServer.once("listening", resolve));
+    const unhealthyPort = unhealthyServer.address().port;
+
+    try {
+      const unhealthyResponse = await fetch(`http://127.0.0.1:${unhealthyPort}/health`);
+      assert.equal(unhealthyResponse.status, 503);
+
+      const unhealthyPayload = await unhealthyResponse.json();
+      assert.equal(unhealthyPayload.status, "error");
+      assert.equal(unhealthyPayload.checks.application.status, "ok");
+      assert.equal(unhealthyPayload.checks.redis.status, "error");
+      assert.equal(unhealthyPayload.checks.redis.error, "Redis unavailable");
+    } finally {
+      await new Promise((resolve, reject) => unhealthyServer.close((error) => (error ? reject(error) : resolve())));
+    }
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
