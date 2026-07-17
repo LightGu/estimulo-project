@@ -192,6 +192,27 @@ async function testDispatchStillAcceptsLegacyVideoUrl() {
   assert.equal(payload[0].content.url, "https://example.com/video.mp4");
 }
 
+async function testDispatchAcceptsMissingCaption() {
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    link_video: "https://example.com/video.mp4",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const payload = [];
+  const processor = createDispatchProcessor({
+    sender: async (value) => {
+      payload.push(value);
+      return { provider: "fake" };
+    },
+  });
+
+  await processor(createFakeJob(jobData));
+
+  assert.equal(jobData.legenda, "");
+  assert.equal(payload[0].message, "");
+}
+
 async function testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo() {
   const jobData = buildDispatchJobData({
     group_id: "120363000000000000@g.us",
@@ -261,6 +282,7 @@ async function main() {
   await testDispatchRegistersProgressAfterConfirmedSend();
   await testDispatchDoesNotRegisterProgressWhenSendFails();
   await testDispatchStillAcceptsLegacyVideoUrl();
+  await testDispatchAcceptsMissingCaption();
   await testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo();
   await testDispatchDoesNotSendWhenDownloadFails();
   await testDispatchRejectsDisabledVideoGroupBeforeJobData();

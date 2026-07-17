@@ -90,7 +90,7 @@ function testMigrationContainsRequiredSchemaPieces() {
   assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS public\.campaign_groups/i);
   assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS public\.video_catalog/i);
   assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS public\.group_video_progress/i);
-  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS public\.dispatch_logs/i);
+  assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS public\.logs/i);
   assert.match(migrationSql, /CREATE TRIGGER trg_organizations_updated_at/i);
   assert.match(migrationSql, /ALTER TABLE public\.organizations ENABLE ROW LEVEL SECURITY/i);
   assert.match(migrationSql, /CREATE POLICY/i);

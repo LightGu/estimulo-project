@@ -1,5 +1,7 @@
 const groupsRepository = require("../repositories/groups.repository");
 const organizationsRepository = require("../repositories/organizations.repository");
+const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
 
 function firstDefined(...values) {
@@ -67,6 +69,16 @@ function normalizeEvolutionGroups(payload) {
     .filter(Boolean);
 }
 
+function matchesNameFilter(group, filter) {
+  const normalizedFilter = String(filter || "").trim().toLowerCase();
+
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  return String(group?.nome || "").toLowerCase().includes(normalizedFilter);
+}
+
 function normalizeNullableText(value, fieldName) {
   if (value === null) {
     return null;
@@ -84,7 +96,9 @@ function normalizeNullableText(value, fieldName) {
 function createGroupsService(dependencies = {}) {
   const repository = dependencies.repository || groupsRepository;
   const organizationRepository = dependencies.organizationRepository || organizationsRepository;
+  const videoRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
   const fetchEvolutionGroups = dependencies.fetchEvolutionGroups || fetchAllGroupsFromEvolution;
+  const enqueueDispatch = dependencies.addDispatchJob || addDispatchJob;
 
   async function create(payload) {
     const nome = payload?.nome?.trim();
@@ -177,7 +191,7 @@ function createGroupsService(dependencies = {}) {
       throw new Error("Group id is required");
     }
 
-    const allowedFields = ["segmento", "envia_video", "trilha_override"];
+    const allowedFields = ["organization_id", "segmento", "envia_video", "trilha_override"];
     const hasAllowedField = allowedFields.some((field) => Object.prototype.hasOwnProperty.call(payload, field));
 
     if (!hasAllowedField) {
@@ -194,6 +208,20 @@ function createGroupsService(dependencies = {}) {
 
     if (Object.prototype.hasOwnProperty.call(payload, "segmento")) {
       nextPayload.segmento = normalizeNullableText(payload.segmento, "Segmento");
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "organization_id")) {
+      const organizationId = normalizeNullableText(payload.organization_id, "Organization id");
+
+      if (organizationId) {
+        const organization = await organizationRepository.findById(organizationId);
+
+        if (!organization) {
+          throw new Error("Organization not found");
+        }
+      }
+
+      nextPayload.organization_id = organizationId;
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, "trilha_override")) {
@@ -249,29 +277,44 @@ function createGroupsService(dependencies = {}) {
     return repository.listVideoEnabled();
   }
 
-  async function listWithoutSegment() {
-    return repository.listWithoutSegment();
+  async function listWithoutSegment(options = {}) {
+    return repository.listWithoutSegment(options);
+  }
+
+  async function search(options = {}) {
+    return repository.searchByName(options);
   }
 
   async function syncGroupsFromEvolution(options = {}) {
-    const organizationId = options.organization_id || options.organizationId;
+    const organizationId = options.organization_id || options.organizationId || null;
     const maturidade = Number(options.maturidade || options.defaultMaturidade || 1);
-
-    if (!organizationId) {
-      throw new Error("Organization id is required");
-    }
+    const nameContains = options.name_contains || options.nameContains || options.filter_name || options.filterName;
+    const getParticipants =
+      options.get_participants !== undefined
+        ? options.get_participants
+        : options.getParticipants !== undefined
+          ? options.getParticipants
+          : true;
+    const timeoutMs = Number(
+      options.timeout_ms ||
+        options.timeoutMs ||
+        process.env.EVOLUTION_GROUP_SYNC_TIMEOUT_MS ||
+        (getParticipants ? 0 : 180000)
+    );
 
     if (!Number.isInteger(maturidade) || maturidade < 1 || maturidade > 4) {
       throw new Error("Maturidade must be between 1 and 4");
     }
 
-    const organization = await organizationRepository.findById(organizationId);
+    if (organizationId) {
+      const organization = await organizationRepository.findById(organizationId);
 
-    if (!organization) {
-      throw new Error("Organization not found");
+      if (!organization) {
+        throw new Error("Organization not found");
+      }
     }
 
-    const response = await fetchEvolutionGroups();
+    const response = await fetchEvolutionGroups({ getParticipants, timeoutMs });
     const evolutionGroups = extractEvolutionGroups(response.data ?? response);
     const seen = new Set();
     const result = {
@@ -285,6 +328,11 @@ function createGroupsService(dependencies = {}) {
       const group = normalizeEvolutionGroup(rawGroup);
 
       if (!group) {
+        result.ignored += 1;
+        continue;
+      }
+
+      if (!matchesNameFilter(group, nameContains)) {
         result.ignored += 1;
         continue;
       }
@@ -335,6 +383,76 @@ function createGroupsService(dependencies = {}) {
     return result;
   }
 
+  async function dispatchTestVideo(id, payload = {}) {
+    const group = await updateOperationalSettings(id, payload);
+
+    if (group.envia_video !== true) {
+      throw new Error("Group must have envia_video=true");
+    }
+
+    if (!group.evolution_group_id) {
+      throw new Error("Evolution group id is required");
+    }
+
+    const profile = group.segmento;
+    const trail = group.trilha_override;
+
+    if (!profile) {
+      throw new Error("Segmento is required");
+    }
+
+    if (!trail) {
+      throw new Error("Trilha override is required");
+    }
+
+    const video = await videoRepository.findFirstApprovedByProfileAndTrail(profile, trail);
+
+    if (!video) {
+      throw new Error("No approved video found for trail");
+    }
+
+    if (!video.drive_file_id && !video.link_video) {
+      throw new Error("Selected video has no drive_file_id or link_video");
+    }
+
+    const job = await enqueueDispatch(
+      {
+        group_id: group.evolution_group_id,
+        progress_group_id: group.id,
+        campaign_id: "manual-test",
+        video_id: video.id,
+        drive_file_id: video.drive_file_id,
+        video_catalog: video.drive_file_id
+          ? {
+              ...video,
+              name: video.nome_do_arquivo || video.name || video.file_name,
+              mime_type: video.mime_type || "video/mp4",
+            }
+          : undefined,
+        link_video: video.drive_file_id ? undefined : video.link_video,
+        legenda: payload.legenda || `Teste: ${video.nome_do_arquivo || video.trilha || "video"}`,
+        scheduled_at: new Date(),
+      },
+      {
+        attempts: 1,
+        timeout: 25 * 60 * 1000,
+        removeOnComplete: false,
+        removeOnFail: false,
+      }
+    );
+
+    return {
+      group,
+      video,
+      dispatch_job: {
+        id: job.id,
+        name: job.name,
+        queue: job.queueName,
+        data: job.data,
+      },
+    };
+  }
+
   return {
     create,
     delete: remove,
@@ -343,6 +461,8 @@ function createGroupsService(dependencies = {}) {
     listByOrganization,
     listVideoEnabled,
     listWithoutSegment,
+    search,
+    dispatchTestVideo,
     syncGroupsFromEvolution,
     update,
     updateOperationalSettings,

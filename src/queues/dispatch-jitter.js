@@ -167,7 +167,7 @@ function buildJitteredDispatchSchedule(params = {}) {
 
   const windowStart = window.start.getTime();
   const windowEnd = window.end.getTime();
-  const minRequiredDelay = (groups.length - 1) * effectiveMinDelay;
+  const minRequiredDelay = groups.length * effectiveMinDelay;
 
   if (windowStart + minRequiredDelay > windowEnd) {
     throw new Error("janela da campanha nao comporta todos os grupos com o jitter minimo configurado");
@@ -179,20 +179,18 @@ function buildJitteredDispatchSchedule(params = {}) {
   return groups.map((group, index) => {
     let jitterDelayMs = 0;
 
-    if (index > 0) {
-      const groupsAfterCurrent = groups.length - index - 1;
-      const remainingWindow = windowEnd - scheduledTime;
-      const requiredForRest = groupsAfterCurrent * effectiveMinDelay;
-      const maxAllowedDelay = Math.min(jitter.max_ms, remainingWindow - requiredForRest);
+    const groupsAfterCurrent = groups.length - index - 1;
+    const remainingWindow = windowEnd - scheduledTime;
+    const requiredForRest = groupsAfterCurrent * effectiveMinDelay;
+    const maxAllowedDelay = Math.min(jitter.max_ms, remainingWindow - requiredForRest);
 
-      if (maxAllowedDelay < effectiveMinDelay) {
-        throw new Error("janela da campanha nao comporta todos os grupos com o jitter configurado");
-      }
-
-      jitterDelayMs = randomIntegerBetween(effectiveMinDelay, maxAllowedDelay, random);
-      cumulativeDelayMs += jitterDelayMs;
-      scheduledTime += jitterDelayMs;
+    if (maxAllowedDelay < effectiveMinDelay) {
+      throw new Error("janela da campanha nao comporta todos os grupos com o jitter configurado");
     }
+
+    jitterDelayMs = randomIntegerBetween(effectiveMinDelay, maxAllowedDelay, random);
+    cumulativeDelayMs += jitterDelayMs;
+    scheduledTime += jitterDelayMs;
 
     return {
       group_id: group.group_id,
@@ -202,7 +200,7 @@ function buildJitteredDispatchSchedule(params = {}) {
       video_id: group.video_id || params.video_id,
       drive_file_id: group.drive_file_id || params.drive_file_id,
       video_catalog: group.video_catalog || params.video_catalog,
-      legenda: group.legenda || params.legenda,
+      legenda: group.legenda || params.legenda || "",
       scheduled_at: new Date(scheduledTime).toISOString(),
       status: group.status || params.status || DISPATCH_INITIAL_STATUS,
       dispatch_order: group.order,

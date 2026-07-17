@@ -18,6 +18,14 @@ async function main() {
     },
     campaignService: {
       create: async (payload) => ({ id: "campaign-1", ...payload }),
+      createAndQueue: async (payload) => ({
+        campaign: { id: "campaign-queued-1", trilha: payload.trilha || payload.nome, ativo: true },
+        campaign_groups: payload.group_ids.map((groupId) => ({ campaign_id: "campaign-queued-1", group_id: groupId })),
+        trigger_job: { id: "trigger-1", data: { campaign_id: "campaign-queued-1" } },
+      }),
+    },
+    organizationService: {
+      list: async () => [{ id: "org-1", nome: "AMBEV" }],
     },
     groupService: {
       listWithoutSegment: async () => [
@@ -29,17 +37,18 @@ async function main() {
           envia_video: false,
         },
       ],
-      syncGroupsFromEvolution: async () => ({
+      syncGroupsFromEvolution: async (payload) => ({
         inserted: 1,
         updated: 1,
         ignored: 0,
-        groups: [{ id: "120363@g.us", nome: "Grupo", quantidade_membros: 10 }],
+        groups: [{ id: "120363@g.us", nome: payload.name_contains || "Grupo", quantidade_membros: 10 }],
       }),
       updateOperationalSettings: async (id, payload) => ({
         id,
         nome: "Grupo sem segmento",
         evolution_group_id: "120363@g.us",
         quantidade_membros: 10,
+        organization_id: payload.organization_id,
         segmento: payload.segmento,
         envia_video: payload.envia_video,
         trilha_override: payload.trilha_override,
@@ -61,10 +70,32 @@ async function main() {
 
     assert.equal(postResponse.status, 201);
 
+    const queuedCampaignResponse = await fetch(`http://127.0.0.1:${port}/campaigns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nome: "Trilha A",
+        organization_id: "org-1",
+        group_ids: ["group-1"],
+        execution_at: "2026-07-17T10:00:00.000Z",
+      }),
+    });
+
+    assert.equal(queuedCampaignResponse.status, 201);
+    const queuedCampaignPayload = await queuedCampaignResponse.json();
+    assert.equal(queuedCampaignPayload.campaign.id, "campaign-queued-1");
+    assert.equal(queuedCampaignPayload.campaign_groups[0].group_id, "group-1");
+    assert.equal(queuedCampaignPayload.trigger_job.id, "trigger-1");
+
+    const organizationsResponse = await fetch(`http://127.0.0.1:${port}/organizations`);
+    assert.equal(organizationsResponse.status, 200);
+    const organizationsPayload = await organizationsResponse.json();
+    assert.deepEqual(organizationsPayload, [{ id: "org-1", nome: "AMBEV" }]);
+
     const groupSyncResponse = await fetch(`http://127.0.0.1:${port}/groups/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ organization_id: "org-1" }),
+      body: JSON.stringify({ name_contains: "Teste", get_participants: false }),
     });
 
     assert.equal(groupSyncResponse.status, 200);
@@ -72,7 +103,7 @@ async function main() {
     assert.equal(groupSyncPayload.inserted, 1);
     assert.equal(groupSyncPayload.updated, 1);
     assert.equal(groupSyncPayload.ignored, 0);
-    assert.deepEqual(groupSyncPayload.groups, [{ id: "120363@g.us", nome: "Grupo", quantidade_membros: 10 }]);
+    assert.deepEqual(groupSyncPayload.groups, [{ id: "120363@g.us", nome: "Teste", quantidade_membros: 10 }]);
 
     const unclassifiedGroupsResponse = await fetch(`http://127.0.0.1:${port}/groups/unclassified`);
     assert.equal(unclassifiedGroupsResponse.status, 200);
@@ -90,7 +121,9 @@ async function main() {
     const unclassifiedGroupsPageResponse = await fetch(`http://127.0.0.1:${port}/groups-unclassified.html`);
     assert.equal(unclassifiedGroupsPageResponse.status, 200);
     const unclassifiedGroupsPage = await unclassifiedGroupsPageResponse.text();
-    assert.match(unclassifiedGroupsPage, /fetch\("\/groups\/unclassified"\)/);
+    assert.match(unclassifiedGroupsPage, /fetch\(`\/groups\/search\$\{query\}`\)/);
+    assert.match(unclassifiedGroupsPage, /fetch\("\/organizations"\)/);
+    assert.match(unclassifiedGroupsPage, /name_contains/);
     assert.match(unclassifiedGroupsPage, /fetch\(`\/groups\/\$\{encodeURIComponent\(groupId\)\}`/);
     assert.match(unclassifiedGroupsPage, /Evolution group id/);
 
@@ -99,6 +132,7 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         segmento: "Pre infancia",
+        organization_id: "org-1",
         envia_video: true,
         trilha_override: "Trilha A",
         nome: "Nao deve ser usado",
@@ -112,6 +146,7 @@ async function main() {
       nome: "Grupo sem segmento",
       evolution_group_id: "120363@g.us",
       quantidade_membros: 10,
+      organization_id: "org-1",
       segmento: "Pre infancia",
       envia_video: true,
       trilha_override: "Trilha A",
@@ -143,6 +178,9 @@ async function main() {
       },
       campaignService: {
         create: async (payload) => ({ id: "campaign-1", ...payload }),
+      },
+      organizationService: {
+        list: async () => [],
       },
       groupService: {
         listWithoutSegment: async () => [],

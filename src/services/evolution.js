@@ -137,11 +137,18 @@ function buildEvolutionRequest(params, config = evolutionConfig) {
   };
 }
 
-function buildFetchAllGroupsRequest(config = evolutionConfig) {
+function buildFetchAllGroupsRequest(config = evolutionConfig, options = {}) {
+  const getParticipants =
+    options.getParticipants !== undefined
+      ? options.getParticipants
+      : options.get_participants !== undefined
+        ? options.get_participants
+        : true;
+
   return {
     endpoint: `/group/fetchAllGroups/${config.instanceName}`,
     params: {
-      getParticipants: true,
+      getParticipants,
     },
   };
 }
@@ -193,8 +200,8 @@ class EvolutionDeliveryProvider {
     }
   }
 
-  async fetchAllGroups() {
-    const request = buildFetchAllGroupsRequest(this.config);
+  async fetchAllGroups(options = {}) {
+    const request = buildFetchAllGroupsRequest(this.config, options);
 
     try {
       const response = await this.client.get(request.endpoint, { params: request.params });
@@ -219,9 +226,20 @@ async function sendToEvolution(params, options = {}) {
 }
 
 async function fetchAllGroupsFromEvolution(options = {}) {
-  const provider = new EvolutionDeliveryProvider(options);
+  const timeoutMs = Number(options.timeoutMs || options.timeout_ms || 0);
+  const providerOptions = timeoutMs
+    ? {
+        ...options,
+        config: {
+          ...evolutionConfig,
+          ...(options.config || {}),
+          timeoutMs,
+        },
+      }
+    : options;
+  const provider = new EvolutionDeliveryProvider(providerOptions);
 
-  return provider.fetchAllGroups();
+  return provider.fetchAllGroups(options);
 }
 
 module.exports = {

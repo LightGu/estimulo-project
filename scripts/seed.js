@@ -190,7 +190,7 @@ async function main() {
   for (const [index, group] of groups.entries()) {
     const video = videos[(index + 1) % videos.length];
     const { data: existingLog, error: logLookupError } = await client
-      .from("dispatch_logs")
+      .from("logs")
       .select("id")
       .eq("campaign_id", campaigns[0].id)
       .eq("group_id", group.id)
@@ -203,7 +203,7 @@ async function main() {
 
     if (!existingLog?.id) {
       const { error } = await client
-        .from("dispatch_logs")
+        .from("logs")
         .insert({
           campaign_id: campaigns[0].id,
           group_id: group.id,

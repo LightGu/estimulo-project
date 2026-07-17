@@ -19,6 +19,7 @@ pnpm-debug.log*
 dist/
 build/
 coverage/
+outputs/
 
 # Runtime/cache
 .cache/

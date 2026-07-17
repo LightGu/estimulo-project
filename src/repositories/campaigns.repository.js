@@ -19,8 +19,7 @@ async function findById(id, client) {
 async function findAll(client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
-    .select("*")
-    .order("created_at", { ascending: false });
+    .select("*");
 
   if (error) {
     throw error;
@@ -33,8 +32,7 @@ async function listActive(client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
     .select("*")
-    .eq("ativo", true)
-    .order("created_at", { ascending: false });
+    .eq("ativo", true);
 
   if (error) {
     throw error;
@@ -47,8 +45,7 @@ async function listByOrganization(organizationId, client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
     .select("*")
-    .eq("organization_id", organizationId)
-    .order("created_at", { ascending: false });
+    .eq("organization_id", organizationId);
 
   if (error) {
     throw error;

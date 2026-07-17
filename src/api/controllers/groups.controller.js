@@ -3,7 +3,17 @@ function createGroupsController(dependencies = {}) {
 
   async function listWithoutSegment(req, res) {
     try {
-      const groups = await groupService.listWithoutSegment();
+      const groups = await groupService.listWithoutSegment(req.query || {});
+
+      return res.status(200).json(groups);
+    } catch (error) {
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  async function search(req, res) {
+    try {
+      const groups = await groupService.search(req.query || {});
 
       return res.status(200).json(groups);
     } catch (error) {
@@ -48,6 +58,7 @@ function createGroupsController(dependencies = {}) {
         [
           "Group id is required",
           "At least one operational setting is required",
+          "Organization id must be a string or null",
           "Segmento must be a string or null",
           "Trilha override must be a string or null",
           "Envia video must be boolean",
@@ -64,8 +75,45 @@ function createGroupsController(dependencies = {}) {
     }
   }
 
+  async function dispatchTestVideo(req, res) {
+    try {
+      const result = await groupService.dispatchTestVideo(req.params.id, req.body || {});
+
+      return res.status(202).json(result);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (
+        [
+          "Group id is required",
+          "At least one operational setting is required",
+          "Organization id must be a string or null",
+          "Segmento must be a string or null",
+          "Trilha override must be a string or null",
+          "Envia video must be boolean",
+          "Group must have envia_video=true",
+          "Evolution group id is required",
+          "Segmento is required",
+          "Trilha override is required",
+          "No approved video found for trail",
+          "Selected video has no drive_file_id or link_video",
+        ].includes(message)
+      ) {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Group not found" || message === "Organization not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   return {
+    dispatchTestVideo,
     listWithoutSegment,
+    search,
     syncFromEvolution,
     updateOperationalSettings,
   };

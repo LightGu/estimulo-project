@@ -47,6 +47,10 @@ function createVideo(overrides = {}) {
   };
 }
 
+const fakeCampaignsRepository = {
+  findById: async (id) => ({ id, nome: "Pre infancia" }),
+};
+
 async function testVideoFlowRepositoryUsesGroupProgress() {
   const repository = buildCampaignVideoFlowRepository({
     videoCatalogRepository: {
@@ -73,6 +77,8 @@ async function testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch() {
   const dispatchJobs = [];
   const processor = createCampaignTriggerProcessor({
     logger: {},
+    campaigns: fakeCampaignsRepository,
+    dispatchLogs: null,
     campaignGroups: {
       listGroups: async (campaignId) => {
         assert.equal(campaignId, "campaign-1");
@@ -116,8 +122,17 @@ async function testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch() {
 
 async function testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent() {
   const jitterCalls = [];
+  const campaignUpdates = [];
   const processor = createCampaignTriggerProcessor({
     logger: {},
+    campaigns: {
+      findById: fakeCampaignsRepository.findById,
+      update: async (id, payload) => {
+        campaignUpdates.push({ id, payload });
+        return { id, ...payload };
+      },
+    },
+    dispatchLogs: null,
     campaignGroups: {
       listGroups: async () => [
         { groups: createGroup({ id: "group-1", evolution_group_id: "group-1@g.us" }) },
@@ -129,7 +144,7 @@ async function testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent() 
     addJitteredDispatchJobs: async (payload) => {
       jitterCalls.push(payload);
 
-      return [{ id: "dispatch-1" }];
+      return [{ id: "dispatch-1", data: { scheduled_at: "2026-07-17T12:01:00.000Z" } }];
     },
   });
   const job = createJob({
@@ -143,13 +158,100 @@ async function testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent() 
   assert.equal(jitterCalls[0].groups.length, 1);
   assert.equal(jitterCalls[0].jitter_delay_min_ms, 1000);
   assert.equal(jitterCalls[0].jitter_delay_max_ms, 2000);
+  assert.deepEqual(campaignUpdates, [
+    {
+      id: "campaign-1",
+      payload: {
+        ativo: true,
+        data_envio: "2026-07-17",
+        horario_envio: "09:01:00",
+      },
+    },
+  ]);
   assert.equal(result.dispatch_enqueued, 1);
+}
+
+async function testProcessorUsesCampaignNameAsTrailFallback() {
+  const dispatchJobs = [];
+  const processor = createCampaignTriggerProcessor({
+    logger: {},
+    campaigns: {
+      findById: async () => ({ id: "campaign-1", nome: "Trilha Campanha" }),
+    },
+    dispatchLogs: null,
+    campaignGroups: {
+      listGroups: async () => [
+        { groups: createGroup({ id: "group-1", evolution_group_id: "group-1@g.us", segmento: "Outro" }) },
+      ],
+    },
+    videoFlowRepository: {
+      findNextApprovedUnsentVideoForGroup: async (group) => {
+        assert.equal(group.trilha_override, "Trilha Campanha");
+
+        return createVideo({ trilha: "Trilha Campanha" });
+      },
+    },
+    addDispatchJob: async (payload) => {
+      dispatchJobs.push(payload);
+
+      return { id: "dispatch-1", data: payload };
+    },
+  });
+
+  await processor(createJob());
+
+  assert.equal(dispatchJobs.length, 1);
+}
+
+async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
+  const createdLogs = [];
+  const processor = createCampaignTriggerProcessor({
+    logger: {},
+    campaigns: fakeCampaignsRepository,
+    dispatchLogs: {
+      listByCampaign: async (campaignId) => {
+        assert.equal(campaignId, "campaign-1");
+
+        return [];
+      },
+      createLog: async (payload) => {
+        const record = { id: `log-${createdLogs.length + 1}`, ...payload };
+        createdLogs.push(record);
+        return record;
+      },
+    },
+    campaignGroups: {
+      listGroups: async () => [
+        { groups: createGroup({ id: "group-1", evolution_group_id: "enabled@g.us" }) },
+      ],
+    },
+    videoFlowRepository: {
+      findNextApprovedUnsentVideoForGroup: async () => createVideo({ id: "video-1", drive_file_id: "drive-1" }),
+    },
+    addDispatchJob: async (payload) => ({ id: "dispatch-1", data: payload }),
+  });
+
+  const result = await processor(createJob());
+
+  assert.equal(result.pending_logs_created, 1);
+  assert.deepEqual(createdLogs, [
+    {
+      id: "log-1",
+      campaign_id: "campaign-1",
+      group_id: "group-1",
+      video_id: "video-1",
+      status: "pendente",
+      mensagem_erro: null,
+    },
+  ]);
 }
 
 async function main() {
   await testVideoFlowRepositoryUsesGroupProgress();
   await testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch();
   await testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent();
+  await testProcessorUsesCampaignNameAsTrailFallback();
+  await testProcessorCreatesPendingDispatchLogAfterEnqueue();
 
   console.log("campaign-trigger-processor tests OK");
 }

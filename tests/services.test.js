@@ -84,6 +84,15 @@ async function main() {
     listRecent: async () => [{ id: "log-1" }],
     updateStatus: async (id, status) => ({ id, status }),
   };
+  const associatedCampaignGroups = [];
+  const campaignTriggerJobs = [];
+  const campaignGroupsRepository = {
+    associateGroup: async (campaignId, groupId) => {
+      const record = { campaign_id: campaignId, group_id: groupId, created_at: "2026-07-17T10:00:00.000Z" };
+      associatedCampaignGroups.push(record);
+      return record;
+    },
+  };
 
   const orgService = organizationsService.createOrganizationsService({ repository: orgRepository });
   const groupService = groupsService.createGroupsService({
@@ -113,6 +122,18 @@ async function main() {
     repository: groupRepository,
   });
   const campaignService = campaignsService.createCampaignsService({
+    addCampaignTriggerJob: async (payload) => {
+      const job = {
+        id: `trigger-${campaignTriggerJobs.length + 1}`,
+        name: "trigger-campaign",
+        queueName: "campaign-trigger",
+        data: payload,
+      };
+      campaignTriggerJobs.push(job);
+      return job;
+    },
+    campaignGroupsRepository,
+    groupsRepository: groupRepository,
     organizationRepository: orgRepository,
     repository: campaignRepository,
   });
@@ -140,12 +161,13 @@ async function main() {
   assert.ok(createdGroup.id);
   await assert.rejects(() => groupService.create({ nome: "Grupo", organization_id: "org-1" }), /required/);
   await assert.rejects(() => groupService.listByOrganization(""), /required/);
-  const syncedGroups = await groupService.syncGroupsFromEvolution({ organization_id: "org-1", maturidade: 2 });
+  const syncedGroups = await groupService.syncGroupsFromEvolution({ maturidade: 2 });
   assert.equal(syncedGroups.inserted, 1);
   assert.equal(syncedGroups.updated, 1);
   assert.equal(syncedGroups.ignored, 2);
   const insertedGroup = persistedGroups.find((group) => group.evolution_group_id === "120363new@g.us");
   assert.equal(insertedGroup.segmento, null);
+  assert.equal(insertedGroup.organization_id, null);
   assert.equal(insertedGroup.envia_video, false);
   assert.deepEqual(syncedGroups.groups, [
     { id: "120363new@g.us", nome: "Grupo Novo", quantidade_membros: 3 },
@@ -155,6 +177,7 @@ async function main() {
   assert.equal(groupsWithoutSegment.length, 1);
   assert.equal(groupsWithoutSegment[0].evolution_group_id, "120363new@g.us");
   const updatedOperationalSettings = await groupService.updateOperationalSettings(insertedGroup.id, {
+    organization_id: "org-1",
     segmento: "Pre infancia",
     envia_video: true,
     trilha_override: "Trilha A",
@@ -162,6 +185,7 @@ async function main() {
     evolution_group_id: "outro@g.us",
   });
   assert.equal(updatedOperationalSettings.segmento, "Pre infancia");
+  assert.equal(updatedOperationalSettings.organization_id, "org-1");
   assert.equal(updatedOperationalSettings.envia_video, true);
   assert.equal(updatedOperationalSettings.trilha_override, "Trilha A");
   assert.equal(updatedOperationalSettings.nome, "Grupo Novo");
@@ -171,9 +195,33 @@ async function main() {
     /boolean/,
   );
 
-  const createdCampaign = await campaignService.create({ nome: "Campanha", organization_id: "org-1", cron_expression: "0 * * * *" });
+  const createdCampaign = await campaignService.create({
+    nome: "Campanha",
+    organization_id: "org-1",
+    execution_at: "2026-07-17T09:30:00.000Z",
+  });
   assert.ok(createdCampaign.id);
-  await assert.rejects(() => campaignService.create({ nome: "Campanha", organization_id: "org-1" }), /required/);
+  assert.equal(createdCampaign.trilha, "Campanha");
+  assert.equal(createdCampaign.data_envio, null);
+  assert.equal(createdCampaign.horario_envio, null);
+  await assert.rejects(() => campaignService.create({ nome: "Campanha" }), /required/);
+  const queuedCampaign = await campaignService.createAndQueue({
+    nome: "Trilha A",
+    organization_id: "org-1",
+    group_ids: ["group-1"],
+    execution_at: "2026-07-17T10:00:00.000Z",
+  });
+  assert.equal(queuedCampaign.campaign.ativo, true);
+  assert.equal(queuedCampaign.campaign.trilha, "Trilha A");
+  assert.equal(queuedCampaign.campaign.data_envio, null);
+  assert.equal(queuedCampaign.campaign.horario_envio, null);
+  assert.equal(associatedCampaignGroups[0].campaign_id, "campaign-1");
+  assert.equal(associatedCampaignGroups[0].group_id, "group-1");
+  assert.equal(campaignTriggerJobs[0].data.campaign_id, "campaign-1");
+  assert.equal(campaignTriggerJobs[0].data.execution_at, "2026-07-17T10:00:00.000Z");
+  assert.equal(campaignTriggerJobs[0].data.window_start, "2026-07-17T10:00:00.000Z");
+  assert.equal(campaignTriggerJobs[0].data.window_end, "2026-07-17T11:00:00.000Z");
+  assert.equal(campaignTriggerJobs[0].data.jitter_delay_min_ms, 60000);
 
   const createdVideo = await videoService.create({ drive_file_id: "drive-service-1", etapa: 1, status: true });
   assert.ok(createdVideo.id);

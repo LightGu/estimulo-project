@@ -27,10 +27,6 @@ function buildGroupSyncJobData(params = {}) {
   const organizationId = params.organization_id || params.organizationId || process.env.GROUP_SYNC_ORGANIZATION_ID;
   const maturidade = Number(params.maturidade || params.defaultMaturidade || process.env.GROUP_SYNC_DEFAULT_MATURIDADE || 1);
 
-  if (!organizationId) {
-    throw new Error("organization_id ou GROUP_SYNC_ORGANIZATION_ID e obrigatorio para sincronizar grupos");
-  }
-
   if (!Number.isInteger(maturidade) || maturidade < 1 || maturidade > 4) {
     throw new Error("GROUP_SYNC_DEFAULT_MATURIDADE deve ser um inteiro entre 1 e 4");
   }

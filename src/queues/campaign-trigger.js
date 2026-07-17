@@ -1,6 +1,8 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { addDispatchJob, addJitteredDispatchJobs } = require("./dispatch");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
+const campaignsRepository = require("../repositories/campaigns.repository");
+const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const {
@@ -15,6 +17,8 @@ const CAMPAIGN_TRIGGER_INITIAL_STATUS = "pending";
 const CAMPAIGN_TRIGGER_ACTIVE_STATUS = "active";
 const CAMPAIGN_TRIGGER_INACTIVE_STATUS = "inactive";
 const CAMPAIGN_TRIGGER_TYPE_RECURRING = "recurring";
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEFAULT_CAMPAIGN_TIMEZONE = "America/Bahia";
 
 let campaignTriggerQueueInstance;
 
@@ -34,6 +38,39 @@ function normalizeExecutionDate(executionAt = new Date()) {
   }
 
   return date;
+}
+
+function getCampaignTimezone() {
+  return process.env.CAMPAIGN_TIMEZONE || process.env.TZ || DEFAULT_CAMPAIGN_TIMEZONE;
+}
+
+function formatScheduledDateTime(value, timeZone = getCampaignTimezone()) {
+  const date = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error("scheduled_at deve ser uma data valida");
+  }
+
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    day: "2-digit",
+    hour: "2-digit",
+    hour12: false,
+    minute: "2-digit",
+    month: "2-digit",
+    second: "2-digit",
+    timeZone,
+    year: "numeric",
+  })
+    .formatToParts(date)
+    .reduce((accumulator, part) => {
+      accumulator[part.type] = part.value;
+      return accumulator;
+    }, {});
+
+  return {
+    data_envio: `${parts.year}-${parts.month}-${parts.day}`,
+    horario_envio: `${parts.hour}:${parts.minute}:${parts.second}`,
+  };
 }
 
 function buildCampaignTriggerJobData(params) {
@@ -327,6 +364,19 @@ function isVideoEnabledGroup(group = {}) {
   return group.envia_video === true;
 }
 
+function applyCampaignTrailFallback(group, campaign) {
+  const campaignTrail = campaign && (campaign.trilha || campaign.nome);
+
+  if (!campaignTrail || group.trilha_override || group.trilhaOverride) {
+    return group;
+  }
+
+  return {
+    ...group,
+    trilha_override: campaignTrail,
+  };
+}
+
 function buildCampaignVideoFlowRepository(dependencies = {}) {
   const videosRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
   const progressRepository = dependencies.groupVideoProgressRepository || groupVideoProgressRepository;
@@ -410,12 +460,108 @@ async function enqueueResolvedDispatchJobs(jobData, dispatchGroups, dependencies
   return jobs;
 }
 
+function extractScheduledAtFromDispatchJob(job) {
+  return job && job.data && job.data.scheduled_at;
+}
+
+function extractDispatchLogPayloadFromJob(job) {
+  const data = (job && job.data) || {};
+  const groupId = data.progress_group_id || data.progressGroupId || data.group_db_id;
+
+  if (!data.campaign_id || !groupId || !data.video_id) {
+    return null;
+  }
+
+  return {
+    campaign_id: data.campaign_id,
+    group_id: groupId,
+    video_id: data.video_id,
+    status: "pendente",
+    mensagem_erro: null,
+  };
+}
+
+function hasExistingDispatchLog(existingLogs, payload) {
+  return (existingLogs || []).some((entry) => (
+    entry.campaign_id === payload.campaign_id &&
+    entry.group_id === payload.group_id &&
+    entry.video_id === payload.video_id
+  ));
+}
+
+async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs, logger = console) {
+  if (!dispatchLogs || typeof dispatchLogs.createLog !== "function" || !Array.isArray(dispatchJobs)) {
+    return 0;
+  }
+
+  const payloads = dispatchJobs
+    .map(extractDispatchLogPayloadFromJob)
+    .filter(Boolean);
+
+  if (payloads.length === 0) {
+    return 0;
+  }
+
+  const existingLogs = typeof dispatchLogs.listByCampaign === "function"
+    ? await dispatchLogs.listByCampaign(campaignId)
+    : [];
+  let created = 0;
+
+  for (const payload of payloads) {
+    if (hasExistingDispatchLog(existingLogs, payload)) {
+      continue;
+    }
+
+    const log = await dispatchLogs.createLog(payload);
+    existingLogs.push(log || payload);
+    created += 1;
+
+    logger.info &&
+      logger.info(
+        JSON.stringify({
+          event: "dispatch_log.pending_created",
+          campaign_id: payload.campaign_id,
+          group_id: payload.group_id,
+          video_id: payload.video_id,
+          log_id: log && log.id,
+        })
+      );
+  }
+
+  return created;
+}
+
+async function updateCampaignScheduledDispatch(campaigns, campaignId, dispatchJobs) {
+  if (!campaigns || typeof campaigns.update !== "function" || !campaignId || !Array.isArray(dispatchJobs)) {
+    return null;
+  }
+
+  const scheduledTimes = dispatchJobs
+    .map(extractScheduledAtFromDispatchJob)
+    .filter(Boolean)
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => left.getTime() - right.getTime());
+
+  if (scheduledTimes.length === 0) {
+    return null;
+  }
+
+  return campaigns.update(campaignId, {
+    ativo: true,
+    ...formatScheduledDateTime(scheduledTimes[0]),
+  });
+}
+
 function createCampaignTriggerProcessor(options = {}) {
   const {
     campaignGroups = campaignGroupsRepository,
+    campaigns = campaignsRepository,
+    dispatchLogs = dispatchLogsRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     logger = console,
   } = options;
+  const validateCampaignId = options.validateCampaignId ?? campaigns === campaignsRepository;
 
   return async function campaignTriggerWorker(job) {
     const startedAt = new Date().toISOString();
@@ -427,8 +573,44 @@ function createCampaignTriggerProcessor(options = {}) {
     });
 
     try {
+      if (validateCampaignId && !UUID_PATTERN.test(String(job.data.campaign_id || ""))) {
+        const completedAt = new Date().toISOString();
+        const result = {
+          campaign_id: job.data.campaign_id,
+          status: "skipped",
+          reason: "invalid_campaign_id",
+          started_at: startedAt,
+          completed_at: completedAt,
+        };
+
+        await job.updateData({
+          ...job.data,
+          status: "skipped",
+          reason: "invalid_campaign_id",
+          started_at: startedAt,
+          completed_at: completedAt,
+        });
+
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "campaign_trigger.skipped_invalid_campaign_id",
+              job_id: job.id,
+              ...result,
+            })
+          );
+
+        return result;
+      }
+
+      const campaign = campaigns && typeof campaigns.findById === "function"
+        ? await campaigns.findById(job.data.campaign_id)
+        : null;
       const campaignGroupRows = await campaignGroups.listGroups(job.data.campaign_id);
-      const groups = campaignGroupRows.map(extractCampaignGroup).filter(isVideoEnabledGroup);
+      const groups = campaignGroupRows
+        .map(extractCampaignGroup)
+        .map((group) => applyCampaignTrailFallback(group, campaign))
+        .filter(isVideoEnabledGroup);
       const flow = await resolveGroupsVideoFlow({
         campaign_id: job.data.campaign_id,
         groups,
@@ -436,6 +618,8 @@ function createCampaignTriggerProcessor(options = {}) {
         logger,
       });
       const dispatchJobs = await enqueueResolvedDispatchJobs(job.data, flow.dispatchGroups, options);
+      const pendingLogsCreated = await ensurePendingDispatchLogs(dispatchLogs, job.data.campaign_id, dispatchJobs, logger);
+      await updateCampaignScheduledDispatch(campaigns, job.data.campaign_id, dispatchJobs);
       const completedAt = new Date().toISOString();
       const result = {
         campaign_id: job.data.campaign_id,
@@ -445,6 +629,7 @@ function createCampaignTriggerProcessor(options = {}) {
         total_campaign_groups: campaignGroupRows.length,
         video_enabled_groups: groups.length,
         dispatch_enqueued: dispatchJobs.length,
+        pending_logs_created: pendingLogsCreated,
         paused_groups: flow.pausedGroups.length,
         skipped_groups: flow.skippedGroups.length,
       };
@@ -457,6 +642,7 @@ function createCampaignTriggerProcessor(options = {}) {
         total_campaign_groups: result.total_campaign_groups,
         video_enabled_groups: result.video_enabled_groups,
         dispatch_enqueued: result.dispatch_enqueued,
+        pending_logs_created: result.pending_logs_created,
         paused_groups: result.paused_groups,
         skipped_groups: result.skipped_groups,
       });
@@ -473,6 +659,10 @@ function createCampaignTriggerProcessor(options = {}) {
       return result;
     } catch (error) {
       const failedAt = new Date().toISOString();
+
+      if (campaigns && typeof campaigns.update === "function" && UUID_PATTERN.test(String(job.data.campaign_id || ""))) {
+        await campaigns.update(job.data.campaign_id, { ativo: false }).catch(() => undefined);
+      }
 
       await job.updateData({
         ...job.data,
@@ -505,6 +695,8 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
   const workerOptions = processorOrOptions || {};
   const {
     campaignGroups,
+    campaigns,
+    dispatchLogs,
     videoCatalogRepository: injectedVideoCatalogRepository,
     groupVideoProgressRepository: injectedGroupVideoProgressRepository,
     videoFlowRepository,
@@ -518,6 +710,8 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
     queueNames.campaignTrigger,
     createCampaignTriggerProcessor({
       campaignGroups,
+      campaigns,
+      dispatchLogs,
       videoCatalogRepository: injectedVideoCatalogRepository,
       groupVideoProgressRepository: injectedGroupVideoProgressRepository,
       videoFlowRepository,
@@ -544,6 +738,8 @@ module.exports = {
   buildCampaignScheduleKey,
   buildCampaignTriggerJobData,
   buildCampaignVideoFlowRepository,
+  formatScheduledDateTime,
+  ensurePendingDispatchLogs,
   get campaignTriggerQueue() {
     return getCampaignTriggerQueue();
   },

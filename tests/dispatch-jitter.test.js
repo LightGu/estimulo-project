@@ -28,6 +28,9 @@ async function testSkipsDisabledGroupsBeforeBuildingSchedule() {
 
   assert.equal(schedule.length, 2);
   assert.deepEqual(schedule.map((job) => job.group_id), ["group-2@g.us", "group-3@g.us"]);
+  assert.equal(schedule[0].jitter_delay_ms, 1000);
+  assert.equal(schedule[0].cumulative_delay_ms, 1000);
+  assert.equal(new Date(schedule[1].scheduled_at).getTime() - new Date(schedule[0].scheduled_at).getTime(), 1000);
 }
 
 async function testReturnsEmptyScheduleWhenAllGroupsAreDisabled() {

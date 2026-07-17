@@ -151,6 +151,26 @@ function createVideoCatalogService(dependencies = {}) {
     return repository.listByStatus(normalizeStatus(status));
   }
 
+  async function listTrailsByProfile(profile) {
+    if (!profile) {
+      throw new Error("Profile is required");
+    }
+
+    return repository.listTrailsByProfile(profile);
+  }
+
+  async function getFirstApprovedByProfileAndTrail(profile, trail) {
+    if (!profile) {
+      throw new Error("Profile is required");
+    }
+
+    if (!trail) {
+      throw new Error("Trail is required");
+    }
+
+    return repository.findFirstApprovedByProfileAndTrail(profile, trail);
+  }
+
   async function getByDriveFileId(driveFileId) {
     if (!driveFileId) {
       throw new Error("Drive file id is required");
@@ -169,6 +189,8 @@ function createVideoCatalogService(dependencies = {}) {
     listByEtapa,
     listBySegmento,
     listByStatus,
+    listTrailsByProfile,
+    getFirstApprovedByProfileAndTrail,
     update,
   };
 }

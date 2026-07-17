@@ -3,6 +3,7 @@ const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
+const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
@@ -10,14 +11,26 @@ const DISPATCH_INITIAL_STATUS = "pending";
 const DISPATCH_PROCESSING_STATUS = "processing";
 const DISPATCH_SUCCESS_STATUS = "sent";
 const DISPATCH_FAILED_STATUS = "failed";
+const DEFAULT_DISPATCH_JOB_TIMEOUT_MS = 25 * 60 * 1000;
 
 let dispatchQueueInstance;
+
+function resolveDispatchJobTimeoutMs() {
+  const timeoutMs = Number(process.env.DISPATCH_JOB_TIMEOUT_MS || DEFAULT_DISPATCH_JOB_TIMEOUT_MS);
+
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return DEFAULT_DISPATCH_JOB_TIMEOUT_MS;
+  }
+
+  return Math.trunc(timeoutMs);
+}
 
 function getDispatchQueue() {
   if (!dispatchQueueInstance) {
     dispatchQueueInstance = createQueue(queueNames.dispatch, {
       defaultJobOptions: {
         attempts: 1,
+        timeout: resolveDispatchJobTimeoutMs(),
       },
     });
   }
@@ -48,7 +61,6 @@ function buildDispatchJobData(params) {
 
   assertRequiredField(params, "group_id");
   assertRequiredField(params, "campaign_id");
-  assertRequiredField(params, "legenda");
 
   if (!params.link_video && !params.video_id && !params.drive_file_id && !params.video_catalog) {
     throw new Error("link_video, video_id ou drive_file_id e obrigatorio para enfileirar dispatch");
@@ -64,7 +76,7 @@ function buildDispatchJobData(params) {
     video_id: params.video_id || (params.video_catalog && params.video_catalog.id),
     drive_file_id: params.drive_file_id || (params.video_catalog && params.video_catalog.drive_file_id),
     video_catalog: params.video_catalog,
-    legenda: params.legenda,
+    legenda: params.legenda || "",
     scheduled_at: scheduledDate.toISOString(),
     status: params.status || DISPATCH_INITIAL_STATUS,
     dispatch_order: params.dispatch_order,
@@ -103,7 +115,7 @@ function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
 
     return {
       groupId: jobData.group_id,
-      message: jobData.legenda,
+      message: jobData.legenda || "",
       content: {
         base64: downloadedVideo.bytes.toString("base64"),
         fileName: downloadedVideo.name,
@@ -115,7 +127,7 @@ function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
 
   return {
     groupId: jobData.group_id,
-    message: jobData.legenda,
+    message: jobData.legenda || "",
     content: {
       url: jobData.link_video,
       fileName: "campaign-video.mp4",
@@ -133,6 +145,104 @@ function releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload) {
   if (deliveryPayload && deliveryPayload.content) {
     deliveryPayload.content.base64 = undefined;
   }
+}
+
+function canUseDispatchConsistency(jobData = {}, dispatchConsistencyService) {
+  return Boolean(
+    dispatchConsistencyService &&
+      typeof dispatchConsistencyService.executeDispatch === "function" &&
+      jobData.campaign_id &&
+      jobData.progress_group_id &&
+      jobData.video_id
+  );
+}
+
+function createDeliveryExecutor(params = {}) {
+  const {
+    drive,
+    jobData,
+    logger = console,
+    sender,
+    videoCatalogRepository,
+    videoDownloader,
+  } = params;
+  const shouldDownloadVideo = Boolean(
+    jobData.drive_file_id ||
+      (jobData.video_catalog && (jobData.video_catalog.drive_file_id || jobData.video_catalog.driveFileId)) ||
+      (jobData.video_id && !jobData.link_video)
+  );
+
+  return async function executeDelivery() {
+    let downloadedVideo;
+    let deliveryPayload;
+
+    try {
+      if (shouldDownloadVideo) {
+        logger.info &&
+          logger.info(
+            JSON.stringify({
+              event: "dispatch.video_download.started",
+              campaign_id: jobData.campaign_id,
+              group_id: jobData.group_id,
+              progress_group_id: jobData.progress_group_id,
+              video_id: jobData.video_id,
+              drive_file_id: jobData.drive_file_id,
+            })
+          );
+
+        downloadedVideo = await videoDownloader({
+          drive,
+          videoCatalogRepository,
+          videoCatalogRecord: jobData.video_catalog,
+          videoId: jobData.video_id,
+          driveFileId: jobData.drive_file_id,
+        });
+
+        logger.info &&
+          logger.info(
+            JSON.stringify({
+              event: "dispatch.video_download.completed",
+              campaign_id: jobData.campaign_id,
+              group_id: jobData.group_id,
+              progress_group_id: jobData.progress_group_id,
+              video_id: jobData.video_id,
+              drive_file_id: jobData.drive_file_id,
+              bytes: downloadedVideo && downloadedVideo.bytes && downloadedVideo.bytes.length,
+              mime_type: downloadedVideo && downloadedVideo.mime_type,
+            })
+          );
+      }
+
+      deliveryPayload = buildDispatchDeliveryPayload(jobData, downloadedVideo);
+      logger.info &&
+        logger.info(
+          JSON.stringify({
+            event: "dispatch.provider_send.started",
+            campaign_id: jobData.campaign_id,
+            group_id: jobData.group_id,
+            progress_group_id: jobData.progress_group_id,
+            video_id: jobData.video_id,
+          })
+        );
+      const result = await sender(deliveryPayload);
+      logger.info &&
+        logger.info(
+          JSON.stringify({
+            event: "dispatch.provider_send.completed",
+            campaign_id: jobData.campaign_id,
+            group_id: jobData.group_id,
+            progress_group_id: jobData.progress_group_id,
+            video_id: jobData.video_id,
+            status: result && result.status,
+            success: result && result.data && result.data.success,
+          })
+        );
+
+      return result;
+    } finally {
+      releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload);
+    }
+  };
 }
 
 async function addDispatchJob(params, options = {}) {
@@ -188,6 +298,8 @@ function createDispatchProcessor(options = {}) {
     drive,
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
+    dispatchConsistencyService,
+    logger = console,
   } = options;
 
   return async function dispatchWorker(job) {
@@ -200,62 +312,79 @@ function createDispatchProcessor(options = {}) {
     });
 
     try {
-      const shouldDownloadVideo = Boolean(job.data.video_catalog || job.data.video_id || job.data.drive_file_id);
-      let downloadedVideo;
-      let deliveryPayload;
-
-      try {
-        downloadedVideo = shouldDownloadVideo
-          ? await videoDownloader({
-            drive,
-            videoCatalogRepository,
-            videoCatalogRecord: job.data.video_catalog,
-            videoId: job.data.video_id,
-            driveFileId: job.data.drive_file_id,
-          })
-          : undefined;
-        deliveryPayload = buildDispatchDeliveryPayload(job.data, downloadedVideo);
-        const delivery = await sender(deliveryPayload);
-        releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload);
-        deliveryPayload = undefined;
-        downloadedVideo = undefined;
-        const completedAt = new Date().toISOString();
-        const progress = await registerDispatchProgress(job.data, progressRepository);
-
-        await job.updateData({
-          ...job.data,
-          status: DISPATCH_SUCCESS_STATUS,
+      console.info(
+        JSON.stringify({
+          event: "dispatch.started",
+          job_id: job.id,
+          campaign_id: job.data.campaign_id,
+          group_id: job.data.group_id,
+          progress_group_id: job.data.progress_group_id,
+          video_id: job.data.video_id,
+          drive_file_id: job.data.drive_file_id,
           started_at: startedAt,
-          completed_at: completedAt,
-          progress_registered: Boolean(progress && !progress.duplicate),
-          progress_duplicate: Boolean(progress && progress.duplicate),
+        })
+      );
+
+      const executeDelivery = createDeliveryExecutor({
+        drive,
+        jobData: job.data,
+        logger,
+        sender,
+        videoCatalogRepository,
+        videoDownloader,
+      });
+      const useDispatchConsistency = canUseDispatchConsistency(job.data, dispatchConsistencyService);
+      let delivery;
+      let progress;
+
+      if (useDispatchConsistency) {
+        const result = await dispatchConsistencyService.executeDispatch({
+          campaignId: job.data.campaign_id,
+          groupId: job.data.progress_group_id,
+          videoId: job.data.video_id,
+          sender: executeDelivery,
         });
 
-        console.info(
-          JSON.stringify({
-            event: "dispatch.sent",
-            job_id: job.id,
-            campaign_id: job.data.campaign_id,
-            group_id: job.data.group_id,
-            progress_group_id: job.data.progress_group_id,
-            video_id: job.data.video_id,
-            progress_registered: Boolean(progress && !progress.duplicate),
-            progress_duplicate: Boolean(progress && progress.duplicate),
-            started_at: startedAt,
-            completed_at: completedAt,
-          })
-        );
+        delivery = result.result;
+        progress = result.progress;
+      } else {
+        delivery = await executeDelivery();
+        progress = await registerDispatchProgress(job.data, progressRepository);
+      }
 
-        return {
-          status: DISPATCH_SUCCESS_STATUS,
-          delivery,
-          progress,
+      const completedAt = new Date().toISOString();
+
+      await job.updateData({
+        ...job.data,
+        status: DISPATCH_SUCCESS_STATUS,
+        started_at: startedAt,
+        completed_at: completedAt,
+        progress_registered: Boolean(progress && !progress.duplicate),
+        progress_duplicate: Boolean(progress && progress.duplicate),
+      });
+
+      console.info(
+        JSON.stringify({
+          event: "dispatch.sent",
+          job_id: job.id,
+          campaign_id: job.data.campaign_id,
+          group_id: job.data.group_id,
+          progress_group_id: job.data.progress_group_id,
+          video_id: job.data.video_id,
+          progress_registered: Boolean(progress && !progress.duplicate),
+          progress_duplicate: Boolean(progress && progress.duplicate),
           started_at: startedAt,
           completed_at: completedAt,
-        };
-      } finally {
-        releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload);
-      }
+        })
+      );
+
+      return {
+        status: DISPATCH_SUCCESS_STATUS,
+        delivery,
+        progress,
+        started_at: startedAt,
+        completed_at: completedAt,
+      };
     } catch (error) {
       const failedAt = new Date().toISOString();
 
@@ -284,7 +413,7 @@ function createDispatchProcessor(options = {}) {
   };
 }
 
-const dispatchWorker = createDispatchProcessor();
+const dispatchWorker = createDispatchProcessor({ dispatchConsistencyService: defaultDispatchConsistencyService });
 
 function createDispatchWorker(options = {}) {
   const {
@@ -293,12 +422,22 @@ function createDispatchWorker(options = {}) {
     drive,
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
+    dispatchConsistencyService = defaultDispatchConsistencyService,
+    logger = console,
     ...workerOptions
   } = options;
 
   return createWorker(
     queueNames.dispatch,
-    createDispatchProcessor({ sender, videoDownloader, drive, videoCatalogRepository, progressRepository }),
+    createDispatchProcessor({
+      sender,
+      videoDownloader,
+      drive,
+      videoCatalogRepository,
+      progressRepository,
+      dispatchConsistencyService,
+      logger,
+    }),
     workerOptions
   );
 }
