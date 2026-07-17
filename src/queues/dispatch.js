@@ -3,6 +3,7 @@ const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
+const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
 const DISPATCH_INITIAL_STATUS = "pending";
@@ -57,6 +58,7 @@ function buildDispatchJobData(params) {
 
   return {
     group_id: params.group_id,
+    progress_group_id: params.progress_group_id || params.progressGroupId || (params.group && params.group.id),
     campaign_id: params.campaign_id,
     link_video: params.link_video,
     video_id: params.video_id || (params.video_catalog && params.video_catalog.id),
@@ -151,12 +153,41 @@ async function addJitteredDispatchJobs(params, options = {}) {
   return jobs;
 }
 
+async function registerDispatchProgress(jobData, repository = groupVideoProgressRepository) {
+  const groupId = jobData.progress_group_id;
+  const videoId = jobData.video_id;
+
+  if (!groupId || !videoId) {
+    return null;
+  }
+
+  const duplicate = await repository.hasDuplicate(groupId, videoId);
+
+  if (duplicate) {
+    return {
+      duplicate: true,
+      record: null,
+    };
+  }
+
+  const record = await repository.registerDelivery({
+    group_id: groupId,
+    video_id: videoId,
+  });
+
+  return {
+    duplicate: false,
+    record,
+  };
+}
+
 function createDispatchProcessor(options = {}) {
   const {
     sender = sendToEvolution,
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
+    progressRepository = groupVideoProgressRepository,
   } = options;
 
   return async function dispatchWorker(job) {
@@ -189,12 +220,15 @@ function createDispatchProcessor(options = {}) {
         deliveryPayload = undefined;
         downloadedVideo = undefined;
         const completedAt = new Date().toISOString();
+        const progress = await registerDispatchProgress(job.data, progressRepository);
 
         await job.updateData({
           ...job.data,
           status: DISPATCH_SUCCESS_STATUS,
           started_at: startedAt,
           completed_at: completedAt,
+          progress_registered: Boolean(progress && !progress.duplicate),
+          progress_duplicate: Boolean(progress && progress.duplicate),
         });
 
         console.info(
@@ -203,6 +237,10 @@ function createDispatchProcessor(options = {}) {
             job_id: job.id,
             campaign_id: job.data.campaign_id,
             group_id: job.data.group_id,
+            progress_group_id: job.data.progress_group_id,
+            video_id: job.data.video_id,
+            progress_registered: Boolean(progress && !progress.duplicate),
+            progress_duplicate: Boolean(progress && progress.duplicate),
             started_at: startedAt,
             completed_at: completedAt,
           })
@@ -211,6 +249,7 @@ function createDispatchProcessor(options = {}) {
         return {
           status: DISPATCH_SUCCESS_STATUS,
           delivery,
+          progress,
           started_at: startedAt,
           completed_at: completedAt,
         };
@@ -253,12 +292,13 @@ function createDispatchWorker(options = {}) {
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
+    progressRepository = groupVideoProgressRepository,
     ...workerOptions
   } = options;
 
   return createWorker(
     queueNames.dispatch,
-    createDispatchProcessor({ sender, videoDownloader, drive, videoCatalogRepository }),
+    createDispatchProcessor({ sender, videoDownloader, drive, videoCatalogRepository, progressRepository }),
     workerOptions
   );
 }
@@ -283,6 +323,7 @@ module.exports = {
   createDispatchEvents,
   createDispatchWorker,
   dispatchWorker,
+  registerDispatchProgress,
   get dispatchQueue() {
     return getDispatchQueue();
   },
