@@ -49,10 +49,10 @@ CREATE TABLE IF NOT EXISTS public.campaigns (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id uuid NOT NULL,
     nome text NOT NULL,
-    cron_expression text NOT NULL,
     ativo boolean NOT NULL DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
+    trilha text NOT NULL,
+    data_envio date,
+    horario_envio time,
     CONSTRAINT fk_campaigns_organization
         FOREIGN KEY (organization_id)
         REFERENCES public.organizations(id)
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS public.group_video_progress (
     CONSTRAINT uq_group_video_progress UNIQUE (group_id, video_id)
 );
 
-CREATE TABLE IF NOT EXISTS public.dispatch_logs (
+CREATE TABLE IF NOT EXISTS public.logs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     campaign_id uuid NOT NULL,
     group_id uuid NOT NULL,
@@ -105,17 +105,17 @@ CREATE TABLE IF NOT EXISTS public.dispatch_logs (
     ),
     mensagem_erro text,
     criado_em timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT fk_dispatch_logs_campaign
+    CONSTRAINT fk_logs_campaign
         FOREIGN KEY (campaign_id)
         REFERENCES public.campaigns(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE,
-    CONSTRAINT fk_dispatch_logs_group
+    CONSTRAINT fk_logs_group
         FOREIGN KEY (group_id)
         REFERENCES public.groups(id)
         ON DELETE CASCADE
         ON UPDATE CASCADE,
-    CONSTRAINT fk_dispatch_logs_video
+    CONSTRAINT fk_logs_video
         FOREIGN KEY (video_id)
         REFERENCES public.video_catalog(id)
         ON DELETE CASCADE
@@ -165,16 +165,6 @@ BEGIN
         EXECUTE FUNCTION public.set_updated_at();
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_trigger
-        WHERE tgname = 'trg_campaigns_updated_at'
-    ) THEN
-        CREATE TRIGGER trg_campaigns_updated_at
-        BEFORE UPDATE ON public.campaigns
-        FOR EACH ROW
-        EXECUTE FUNCTION public.set_updated_at();
-    END IF;
 END $$;
 
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
@@ -183,7 +173,7 @@ ALTER TABLE public.video_catalog ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.campaign_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_video_progress ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.dispatch_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.logs ENABLE ROW LEVEL SECURITY;
 
 DO $$
 BEGIN
@@ -305,8 +295,8 @@ CREATE INDEX IF NOT EXISTS idx_campaigns_organization_id ON public.campaigns (or
 CREATE INDEX IF NOT EXISTS idx_campaign_groups_group_id ON public.campaign_groups (group_id);
 CREATE INDEX IF NOT EXISTS idx_group_video_progress_group_id ON public.group_video_progress (group_id);
 CREATE INDEX IF NOT EXISTS idx_group_video_progress_video_id ON public.group_video_progress (video_id);
-CREATE INDEX IF NOT EXISTS idx_dispatch_logs_campaign_id ON public.dispatch_logs (campaign_id);
-CREATE INDEX IF NOT EXISTS idx_dispatch_logs_group_id ON public.dispatch_logs (group_id);
-CREATE INDEX IF NOT EXISTS idx_dispatch_logs_criado_em ON public.dispatch_logs (criado_em);
+CREATE INDEX IF NOT EXISTS idx_logs_campaign_id ON public.logs (campaign_id);
+CREATE INDEX IF NOT EXISTS idx_logs_group_id ON public.logs (group_id);
+CREATE INDEX IF NOT EXISTS idx_logs_criado_em ON public.logs (criado_em);
 CREATE INDEX IF NOT EXISTS idx_video_catalog_trilha_status_etapa ON public.video_catalog (trilha_segmento, status, etapa);
-CREATE INDEX IF NOT EXISTS idx_dispatch_logs_campaign_group_created ON public.dispatch_logs (campaign_id, group_id, criado_em);
+CREATE INDEX IF NOT EXISTS idx_logs_campaign_group_created ON public.logs (campaign_id, group_id, criado_em);

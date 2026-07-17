@@ -2,6 +2,14 @@ function getClient(client) {
   return client || require("../database/client");
 }
 
+function normalizeComparableText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
 async function findById(id, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
@@ -33,14 +41,69 @@ async function listApproved(client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
-    .eq("status", true)
-    .order("etapa", { ascending: true });
+    .eq("status", true);
 
   if (error) {
     throw error;
   }
 
   return data || [];
+}
+
+async function listTrailsByProfile(profile, client) {
+  const videos = await listApproved(client);
+  const normalizedProfile = normalizeComparableText(profile);
+  const trailsByName = new Map();
+
+  videos
+    .filter((video) => normalizeComparableText(video.perfil_da_jornada || video.trilha_segmento) === normalizedProfile)
+    .forEach((video) => {
+      if (!video.trilha) {
+        return;
+      }
+
+      const current = trailsByName.get(video.trilha) || {
+        perfil_da_jornada: video.perfil_da_jornada,
+        trilha: video.trilha,
+        videos_count: 0,
+        first_video: null,
+      };
+
+      current.videos_count += 1;
+      trailsByName.set(video.trilha, current);
+    });
+
+  const trails = Array.from(trailsByName.values()).sort((left, right) => left.trilha.localeCompare(right.trilha));
+
+  for (const trail of trails) {
+    trail.first_video = await findFirstApprovedByProfileAndTrail(
+      trail.perfil_da_jornada || profile,
+      trail.trilha,
+      client
+    );
+  }
+
+  return trails;
+}
+
+async function findFirstApprovedByProfileAndTrail(profile, trail, client) {
+  const videos = await listApproved(client);
+  const normalizedProfile = normalizeComparableText(profile);
+  const normalizedTrail = normalizeComparableText(trail);
+
+  return videos
+    .filter((video) => normalizeComparableText(video.perfil_da_jornada || video.trilha_segmento) === normalizedProfile)
+    .filter((video) => normalizeComparableText(video.trilha || video.trilha_segmento) === normalizedTrail)
+    .sort((left, right) => {
+      const leftOrder = Number(left.ordem_geral || left.ordem || left.etapa || Number.MAX_SAFE_INTEGER);
+      const rightOrder = Number(right.ordem_geral || right.ordem || right.etapa || Number.MAX_SAFE_INTEGER);
+
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
+
+      return String(left.nome_do_arquivo || left.nome || "").localeCompare(String(right.nome_do_arquivo || right.nome || ""));
+    })[0] || null;
 }
 
 async function listBySegmento(trilhaSegmento, client) {
@@ -149,10 +212,12 @@ module.exports = {
   findAll,
   findByDriveFileId,
   findById,
+  findFirstApprovedByProfileAndTrail,
   listApproved,
   listByEtapa,
   listBySegmento,
   listByStatus,
+  listTrailsByProfile,
   remove,
   update,
 };

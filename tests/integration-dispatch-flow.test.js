@@ -5,6 +5,8 @@ const { createDispatchConsistencyService } = require("../src/services/dispatch-c
 async function main() {
   const createdLogs = [];
   const createdProgress = [];
+  const campaignUpdates = [];
+  const operationOrder = [];
 
   const dispatchLogsRepository = {
     createLog: async (payload) => {
@@ -13,6 +15,7 @@ async function main() {
       return record;
     },
     updateStatus: async (id, status, mensagemErro = null) => {
+      operationOrder.push(`log:${status}`);
       const record = createdLogs.find((entry) => entry.id === id);
       if (record) {
         record.status = status;
@@ -26,6 +29,7 @@ async function main() {
   const groupVideoProgressRepository = {
     hasDuplicate: async () => false,
     registerDelivery: async (payload) => {
+      operationOrder.push("progress:register");
       const record = { id: `progress-${createdProgress.length + 1}`, ...payload };
       createdProgress.push(record);
       return record;
@@ -34,6 +38,10 @@ async function main() {
 
   const campaignsRepository = {
     findById: async (id) => (id === "campaign-1" ? { id, nome: "Campanha" } : null),
+    update: async (id, payload) => {
+      campaignUpdates.push({ id, payload });
+      return { id, ...payload };
+    },
   };
 
   const groupsRepository = {
@@ -41,7 +49,7 @@ async function main() {
   };
 
   const videoCatalogRepository = {
-    findById: async (id) => (id === "video-1" ? { id, drive_file_id: "drive-1" } : null),
+    findById: async (id) => (["video-1", "video-2"].includes(id) ? { id, drive_file_id: "drive-1" } : null),
   };
 
   const service = createDispatchConsistencyService({
@@ -64,6 +72,8 @@ async function main() {
   assert.equal(firstRun.logId, "log-1");
   assert.equal(createdProgress.length, 1);
   assert.equal(createdLogs[0].status, "enviado");
+  assert.ok(operationOrder.indexOf("log:enviado") < operationOrder.indexOf("progress:register"));
+  assert.equal(campaignUpdates.length, 0);
 
   const secondRun = await service.executeDispatch({
     campaignId: "campaign-1",
@@ -88,6 +98,34 @@ async function main() {
   }).catch((error) => error);
 
   assert.equal(failureRun.message, "Group not found");
+
+  const sendFailure = await service.executeDispatch({
+    campaignId: "campaign-1",
+    groupId: "group-1",
+    videoId: "video-2",
+    sender: async () => {
+      throw new Error("Falha no provedor");
+    },
+    deliveryPayload: { message: "erro" },
+  }).catch((error) => error);
+
+  assert.equal(sendFailure.message, "Falha no provedor");
+  const failedLog = createdLogs.find((entry) => entry.video_id === "video-2");
+  assert.equal(failedLog.status, "erro");
+  assert.equal(failedLog.mensagem_erro, "Falha no provedor");
+  assert.equal(createdProgress.length, 1);
+  assert.deepEqual(campaignUpdates.at(-1), { id: "campaign-1", payload: { ativo: false } });
+
+  const unconfirmedSend = await service.executeDispatch({
+    campaignId: "campaign-1",
+    groupId: "group-1",
+    videoId: "video-2",
+    sender: async () => ({ provider: "fake", status: 500, data: { message: "Erro no servidor" } }),
+    deliveryPayload: { message: "erro" },
+  }).catch((error) => error);
+
+  assert.match(unconfirmedSend.message, /status 500/);
+  assert.equal(createdProgress.length, 1);
 
   console.log("integration-dispatch-flow tests OK");
 }

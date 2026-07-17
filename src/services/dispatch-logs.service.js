@@ -43,7 +43,7 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Video not found");
     }
 
-    const validStatuses = ["pendente", "processando", "enviado", "falhou"];
+    const validStatuses = ["pendente", "processando", "enviado", "erro", "falhou"];
 
     if (!validStatuses.includes(status)) {
       throw new Error("Invalid status");
@@ -57,7 +57,7 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Dispatch log id is required");
     }
 
-    const validStatuses = ["pendente", "processando", "enviado", "falhou"];
+    const validStatuses = ["pendente", "processando", "enviado", "erro", "falhou"];
 
     if (!validStatuses.includes(status)) {
       throw new Error("Invalid status");

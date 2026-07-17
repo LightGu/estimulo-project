@@ -54,12 +54,11 @@ async function testBuildsRecurringJobData() {
 
 async function testBuildsGroupSyncJobData() {
   const jobData = buildGroupSyncJobData({
-    organization_id: "org-1",
     maturidade: 3,
     requested_at: "2026-07-17T10:00:00.000Z",
   });
 
-  assert.equal(jobData.organization_id, "org-1");
+  assert.equal(jobData.organization_id, undefined);
   assert.equal(jobData.maturidade, 3);
   assert.equal(jobData.status, "pending");
   assert.equal(jobData.requested_at, "2026-07-17T10:00:00.000Z");
@@ -86,7 +85,6 @@ async function testProcessorRunsGroupSyncService() {
   const job = {
     id: "job-1",
     data: {
-      organization_id: "org-1",
       maturidade: 2,
     },
     updateData: async (data) => {
@@ -97,7 +95,7 @@ async function testProcessorRunsGroupSyncService() {
 
   const result = await processor(job);
 
-  assert.deepEqual(calls, [{ organization_id: "org-1", maturidade: 2 }]);
+  assert.deepEqual(calls, [{ organization_id: undefined, maturidade: 2 }]);
   assert.equal(updates[0].status, GROUP_SYNC_PROCESSING_STATUS);
   assert.equal(updates[1].status, GROUP_SYNC_SUCCESS_STATUS);
   assert.equal(updates[1].inserted, 1);

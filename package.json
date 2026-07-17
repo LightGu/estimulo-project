@@ -16,6 +16,8 @@
     "queue:group-sync:worker": "node scripts/start-group-sync-worker.js",
     "queue:drive-video-index:test": "node scripts/enqueue-google-drive-video-index.js",
     "queue:drive-video-index:worker": "node scripts/start-google-drive-video-index-worker.js",
+    "api": "node scripts/start-api.js",
+    "api:start": "node scripts/start-api.js",
     "test:drive": "node tests/google-drive-files-list.test.js",
     "test:drive-indexer": "node tests/google-drive-video-indexer.test.js",
     "test:drive-download": "node tests/google-drive-video-download.test.js",

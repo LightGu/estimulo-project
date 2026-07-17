@@ -17,6 +17,7 @@
         --primary-dark: #0f5269;
         --danger: #a33a3a;
         --success: #237a57;
+        --secondary: #334155;
       }
 
       * {
@@ -71,9 +72,51 @@
         background: var(--primary-dark);
       }
 
+      button.secondary {
+        background: var(--secondary);
+      }
+
+      button.secondary:hover {
+        background: #1f2937;
+      }
+
       button:disabled {
         cursor: not-allowed;
         opacity: 0.55;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: minmax(180px, 260px) auto auto;
+        gap: 12px;
+        align-items: end;
+        margin: 0 0 16px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      select,
+      input[type="search"],
+      input[type="text"] {
+        width: 100%;
+        min-width: 170px;
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px 10px;
+        color: var(--text);
+        background: #ffffff;
+        font: inherit;
       }
 
       .status {
@@ -137,17 +180,6 @@
         word-break: break-word;
       }
 
-      input[type="text"] {
-        width: 100%;
-        min-width: 170px;
-        min-height: 38px;
-        border: 1px solid var(--line);
-        border-radius: 6px;
-        padding: 8px 10px;
-        color: var(--text);
-        font: inherit;
-      }
-
       input[type="checkbox"] {
         width: 18px;
         height: 18px;
@@ -157,6 +189,17 @@
       .checkbox-cell {
         width: 120px;
         text-align: center;
+      }
+
+      .actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .video-preview {
+        min-width: 220px;
+        color: var(--muted);
+        font-size: 13px;
       }
 
       .row-status {
@@ -192,6 +235,10 @@
           flex-direction: column;
         }
 
+        .toolbar {
+          grid-template-columns: 1fr;
+        }
+
         h1 {
           font-size: 24px;
         }
@@ -208,6 +255,15 @@
         <button type="button" id="reloadButton">Atualizar</button>
       </header>
 
+      <section class="toolbar" aria-label="Sincronizacao de grupos">
+        <label>
+          Filtro de nome
+          <input id="nameFilterInput" type="search" value="Teste" placeholder="Ex.: Teste">
+        </label>
+        <button type="button" id="syncButton">Sincronizar filtro</button>
+        <button type="button" id="syncAllButton" class="secondary">Sincronizar todos</button>
+      </section>
+
       <div id="status" class="status" role="status"></div>
       <section id="content"></section>
     </main>
@@ -216,6 +272,10 @@
       <option value="Pre infancia"></option>
       <option value="Infancia"></option>
       <option value="Adolescencia"></option>
+      <option value="Pré-infância"></option>
+      <option value="Infância"></option>
+      <option value="Adolescência"></option>
+      <option value="Adolescência/Maturidade"></option>
       <option value="Empreendedores na pre infancia"></option>
     </datalist>
 
@@ -223,6 +283,10 @@
       const content = document.querySelector("#content");
       const statusEl = document.querySelector("#status");
       const reloadButton = document.querySelector("#reloadButton");
+      const nameFilterInput = document.querySelector("#nameFilterInput");
+      const syncButton = document.querySelector("#syncButton");
+      const syncAllButton = document.querySelector("#syncAllButton");
+      let organizationsCache = [];
 
       function setStatus(message, type) {
         statusEl.textContent = message || "";
@@ -234,11 +298,13 @@
       }
 
       function buildPayload(row) {
+        const organizationId = row.querySelector("[data-field='organization_id']").value;
         const segmento = row.querySelector("[data-field='segmento']").value.trim();
         const trilhaOverride = row.querySelector("[data-field='trilha_override']").value.trim();
         const enviaVideo = row.querySelector("[data-field='envia_video']").checked;
 
         return {
+          organization_id: organizationId || null,
           segmento: segmento || null,
           envia_video: enviaVideo,
           trilha_override: trilhaOverride || null,
@@ -270,11 +336,6 @@
           }
 
           setRowStatus(row, "Salvo", "success");
-          row.remove();
-
-          if (!content.querySelector("tbody tr")) {
-            renderEmpty();
-          }
         } catch (error) {
           setRowStatus(row, error.message, "error");
         } finally {
@@ -299,9 +360,11 @@
                 <tr>
                   <th>Nome real</th>
                   <th>Evolution group id</th>
+                  <th>Organizacao</th>
                   <th>Segmento</th>
                   <th>Envia video</th>
-                  <th>Trilha override</th>
+                  <th>Trilha</th>
+                  <th>Primeiro video</th>
                   <th>Acao</th>
                   <th>Status</th>
                 </tr>
@@ -320,29 +383,181 @@
             <td class="group-name"></td>
             <td class="group-id"></td>
             <td>
+              <select data-field="organization_id"></select>
+            </td>
+            <td>
               <input data-field="segmento" type="text" list="segmentOptions" autocomplete="off" placeholder="Selecionar ou informar">
             </td>
             <td class="checkbox-cell">
               <input data-field="envia_video" type="checkbox" aria-label="Envia video">
             </td>
             <td>
-              <input data-field="trilha_override" type="text" autocomplete="off" placeholder="Opcional">
+              <select data-field="trilha_override">
+                <option value="">Selecione o perfil</option>
+              </select>
             </td>
+            <td data-video-preview class="video-preview"></td>
             <td>
-              <button type="button" data-action="save">Salvar</button>
+              <div class="actions">
+                <button type="button" data-action="save">Salvar</button>
+                <button type="button" data-action="dispatch" class="secondary">Enfileirar</button>
+              </div>
             </td>
             <td data-row-status class="row-status"></td>
           `;
 
           row.querySelector(".group-name").textContent = textOrEmpty(group.nome);
           row.querySelector(".group-id").textContent = textOrEmpty(group.evolution_group_id);
-          row.querySelector("[data-field='segmento']").value = textOrEmpty(group.segmento);
+          const organizationField = row.querySelector("[data-field='organization_id']");
+          organizationField.innerHTML = '<option value="">Selecionar</option>';
+          organizationsCache.forEach((organization) => {
+            const option = document.createElement("option");
+            option.value = organization.id;
+            option.textContent = organization.nome;
+            organizationField.appendChild(option);
+          });
+          organizationField.value = textOrEmpty(group.organization_id);
+          const segmentField = row.querySelector("[data-field='segmento']");
+          const trailField = row.querySelector("[data-field='trilha_override']");
+          segmentField.value = textOrEmpty(group.segmento);
           row.querySelector("[data-field='envia_video']").checked = group.envia_video === true;
-          row.querySelector("[data-field='trilha_override']").value = textOrEmpty(group.trilha_override);
+          segmentField.addEventListener("change", () => loadTrailsForRow(row));
+          segmentField.addEventListener("blur", () => loadTrailsForRow(row));
+          trailField.addEventListener("change", () => updateVideoPreview(row));
           row.querySelector("[data-action='save']").addEventListener("click", () => saveGroup(row, group.id));
+          row.querySelector("[data-action='dispatch']").addEventListener("click", () => dispatchGroup(row, group.id));
 
           tbody.appendChild(row);
+          loadTrailsForRow(row, textOrEmpty(group.trilha_override));
         });
+      }
+
+      async function loadTrailsForRow(row, selectedTrail) {
+        const segment = row.querySelector("[data-field='segmento']").value.trim();
+        const trailField = row.querySelector("[data-field='trilha_override']");
+        const preview = row.querySelector("[data-video-preview]");
+
+        trailField.innerHTML = '<option value="">Selecione o perfil</option>';
+        preview.textContent = "";
+
+        if (!segment) {
+          return;
+        }
+
+        trailField.innerHTML = '<option value="">Carregando...</option>';
+
+        try {
+          const response = await fetch(`/video-catalog/trails?perfil=${encodeURIComponent(segment)}`);
+          const trails = await response.json();
+
+          if (!response.ok) {
+            throw new Error(trails.error || "Falha ao carregar trilhas");
+          }
+
+          trailField.innerHTML = '<option value="">Selecione</option>';
+
+          (Array.isArray(trails) ? trails : []).forEach((trail) => {
+            const option = document.createElement("option");
+            option.value = trail.trilha;
+            option.textContent = `${trail.trilha} (${trail.videos_count})`;
+            option.dataset.video = JSON.stringify(trail.first_video || {});
+            trailField.appendChild(option);
+          });
+
+          if (selectedTrail) {
+            trailField.value = selectedTrail;
+          }
+
+          updateVideoPreview(row);
+        } catch (error) {
+          trailField.innerHTML = '<option value="">Erro ao carregar</option>';
+          preview.textContent = error.message;
+        }
+      }
+
+      function updateVideoPreview(row) {
+        const trailField = row.querySelector("[data-field='trilha_override']");
+        const preview = row.querySelector("[data-video-preview]");
+        const selectedOption = trailField.selectedOptions[0];
+        const video = selectedOption && selectedOption.dataset.video ? JSON.parse(selectedOption.dataset.video) : null;
+
+        if (!video || !video.id) {
+          preview.textContent = "";
+          return;
+        }
+
+        preview.textContent = `${video.ordem_geral || video.ordem || 1} - ${video.nome_do_arquivo || video.trilha || video.id}`;
+      }
+
+      function padTimePart(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      function formatLocalDate(date) {
+        return `${date.getFullYear()}-${padTimePart(date.getMonth() + 1)}-${padTimePart(date.getDate())}`;
+      }
+
+      function formatLocalTime(date) {
+        return `${padTimePart(date.getHours())}:${padTimePart(date.getMinutes())}:${padTimePart(date.getSeconds())}`;
+      }
+
+      async function dispatchGroup(row, groupId) {
+        const button = row.querySelector("[data-action='dispatch']");
+        button.disabled = true;
+        setRowStatus(row, "Criando campanha e enfileirando...");
+
+        try {
+          const groupPayload = buildPayload(row);
+
+          if (!groupPayload.organization_id) {
+            throw new Error("Organizacao e obrigatoria");
+          }
+
+          if (!groupPayload.trilha_override) {
+            throw new Error("Trilha e obrigatoria");
+          }
+
+          const updateResponse = await fetch(`/groups/${encodeURIComponent(groupId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(groupPayload),
+          });
+          const updatePayload = await updateResponse.json().catch(() => ({}));
+
+          if (!updateResponse.ok) {
+            throw new Error(updatePayload.error || "Falha ao salvar grupo");
+          }
+
+          const now = new Date();
+          const response = await fetch("/campaigns", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              nome: groupPayload.trilha_override,
+              organization_id: groupPayload.organization_id,
+              group_ids: [groupId],
+              ativo: true,
+              execution_at: now.toISOString(),
+              data_envio: formatLocalDate(now),
+              horario_envio: formatLocalTime(now),
+            }),
+          });
+          const payload = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Falha ao criar campanha");
+          }
+
+          setRowStatus(
+            row,
+            `Campanha ${payload.campaign && payload.campaign.id} enfileirada no job ${payload.trigger_job && payload.trigger_job.id}`,
+            "success"
+          );
+        } catch (error) {
+          setRowStatus(row, error.message, "error");
+        } finally {
+          button.disabled = false;
+        }
       }
 
       async function loadGroups() {
@@ -350,7 +565,9 @@
         setStatus("Carregando grupos...");
 
         try {
-          const response = await fetch("/groups/unclassified");
+          const filter = nameFilterInput.value.trim();
+          const query = filter ? `?name_contains=${encodeURIComponent(filter)}` : "";
+          const response = await fetch(`/groups/search${query}`);
           const groups = await response.json();
 
           if (!response.ok) {
@@ -358,7 +575,7 @@
           }
 
           renderGroups(Array.isArray(groups) ? groups : []);
-          setStatus(`${Array.isArray(groups) ? groups.length : 0} grupo(s) pendente(s).`, "success");
+          setStatus(`${Array.isArray(groups) ? groups.length : 0} grupo(s) pendente(s) exibido(s).`, "success");
         } catch (error) {
           content.innerHTML = "";
           setStatus(error.message, "error");
@@ -367,8 +584,63 @@
         }
       }
 
+      async function loadOrganizations() {
+        try {
+          const response = await fetch("/organizations");
+          const organizations = await response.json();
+
+          if (!response.ok) {
+            throw new Error(organizations.error || "Falha ao carregar organizacoes");
+          }
+
+          organizationsCache = Array.isArray(organizations) ? organizations : [];
+        } catch (error) {
+          organizationsCache = [];
+          setStatus(error.message, "error");
+        }
+      }
+
+      async function syncGroups(options = {}) {
+        const nameContains = options.all ? "" : nameFilterInput.value.trim();
+
+        syncButton.disabled = true;
+        syncAllButton.disabled = true;
+        setStatus("Sincronizando grupos da Evolution...");
+
+        try {
+          const response = await fetch("/groups/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name_contains: nameContains,
+              get_participants: false,
+              timeout_ms: 180000,
+            }),
+          });
+          const result = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(result.error || "Falha ao sincronizar grupos");
+          }
+
+          await loadGroups();
+          setStatus(
+            `Sync concluido: ${result.inserted || 0} inserido(s), ${result.updated || 0} atualizado(s), ${result.ignored || 0} ignorado(s).`,
+            "success"
+          );
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          syncButton.disabled = false;
+          syncAllButton.disabled = false;
+        }
+      }
+
       reloadButton.addEventListener("click", loadGroups);
-      loadGroups();
+      nameFilterInput.addEventListener("input", loadGroups);
+      syncButton.addEventListener("click", () => syncGroups());
+      syncAllButton.addEventListener("click", () => syncGroups({ all: true }));
+      loadOrganizations().finally(loadGroups);
     </script>
   </body>
 </html>

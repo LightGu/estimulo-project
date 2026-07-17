@@ -71,12 +71,43 @@ async function listVideoEnabled(client) {
   return data || [];
 }
 
-async function listWithoutSegment(client) {
-  const { data, error } = await getClient(client)
+async function listWithoutSegment(params, client) {
+  const options = params && typeof params === "object" && !params.from ? params : {};
+  const databaseClient = params && typeof params === "object" && params.from ? params : client;
+  let query = getClient(databaseClient)
     .from("groups")
     .select("*")
     .is("segmento", null)
     .order("created_at", { ascending: false });
+
+  const nameContains = String(options.name_contains || options.nameContains || "").trim();
+
+  if (nameContains) {
+    query = query.ilike("nome", `%${nameContains}%`);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function searchByName(params = {}, client) {
+  let query = getClient(client)
+    .from("groups")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  const nameContains = String(params.name_contains || params.nameContains || "").trim();
+
+  if (nameContains) {
+    query = query.ilike("nome", `%${nameContains}%`);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     throw error;
@@ -136,6 +167,7 @@ module.exports = {
   findByEvolutionGroupId,
   findById,
   listByOrganization,
+  searchByName,
   listVideoEnabled,
   listWithoutSegment,
   remove,

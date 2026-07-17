@@ -4,12 +4,52 @@ const campaignsRepository = require("../repositories/campaigns.repository");
 const groupsRepository = require("../repositories/groups.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 
+function isFailureLikeStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+
+  return ["error", "erro", "failed", "failure", "false", "500", "400"].includes(normalized);
+}
+
+function assertDeliveryConfirmed(result) {
+  if (!result) {
+    throw new Error("Envio nao confirmado pelo provedor");
+  }
+
+  if (result.status !== undefined && (Number(result.status) < 200 || Number(result.status) >= 300)) {
+    throw new Error(`Envio nao confirmado pelo provedor: status ${result.status}`);
+  }
+
+  const data = result.data || {};
+
+  if (result.error || data.error || data.errors || data.success === false || isFailureLikeStatus(data.status)) {
+    const message =
+      result.error?.message ||
+      data.error?.message ||
+      data.message ||
+      data.response?.message ||
+      "Envio nao confirmado pelo provedor";
+
+    throw new Error(message);
+  }
+}
+
+function writeStageLog(logger, level, event, payload = {}) {
+  const writer = logger && (logger[level] || logger.info);
+
+  if (typeof writer !== "function") {
+    return;
+  }
+
+  writer.call(logger, JSON.stringify({ event, ...payload }));
+}
+
 function createDispatchConsistencyService(dependencies = {}) {
   const dispatchLogsRepositoryDependency = dependencies.dispatchLogsRepository || dispatchLogsRepository;
   const groupVideoProgressRepositoryDependency = dependencies.groupVideoProgressRepository || groupVideoProgressRepository;
   const campaignsRepositoryDependency = dependencies.campaignsRepository || campaignsRepository;
   const groupsRepositoryDependency = dependencies.groupsRepository || groupsRepository;
   const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
+  const logger = dependencies.logger || console;
 
   async function ensureDispatchEntities(campaignId, groupId, videoId) {
     if (!campaignId) {
@@ -104,6 +144,12 @@ function createDispatchConsistencyService(dependencies = {}) {
     return { duplicate: false, record };
   }
 
+  async function markCampaignFailed(campaignId) {
+    if (campaignsRepositoryDependency && typeof campaignsRepositoryDependency.update === "function") {
+      await campaignsRepositoryDependency.update(campaignId, { ativo: false });
+    }
+  }
+
   async function executeDispatch(options = {}) {
     const {
       campaignId,
@@ -113,9 +159,30 @@ function createDispatchConsistencyService(dependencies = {}) {
       deliveryPayload,
     } = options;
 
+    writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.started", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+    });
     await ensureDispatchEntities(campaignId, groupId, videoId);
+    writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.completed", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+    });
 
+    writeStageLog(logger, "info", "dispatch_consistency.find_completed_log.started", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+    });
     const completedLog = await findExistingLog(campaignId, groupId, videoId, ["enviado"]);
+    writeStageLog(logger, "info", "dispatch_consistency.find_completed_log.completed", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+      log_id: completedLog && completedLog.id,
+    });
 
     if (completedLog) {
       return {
@@ -126,10 +193,22 @@ function createDispatchConsistencyService(dependencies = {}) {
       };
     }
 
+    writeStageLog(logger, "info", "dispatch_consistency.create_attempt_log.started", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+    });
     const { log, skipSend } = await createAttemptLog({
       campaignId,
       groupId,
       videoId,
+    });
+    writeStageLog(logger, "info", "dispatch_consistency.create_attempt_log.completed", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+      log_id: log && log.id,
+      skipped_send: skipSend,
     });
 
     if (skipSend) {
@@ -141,23 +220,83 @@ function createDispatchConsistencyService(dependencies = {}) {
       };
     }
 
+    writeStageLog(logger, "info", "dispatch_consistency.mark_processing.started", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+      log_id: log.id,
+    });
     await dispatchLogsRepositoryDependency.updateStatus(log.id, "processando");
+    writeStageLog(logger, "info", "dispatch_consistency.mark_processing.completed", {
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: videoId,
+      log_id: log.id,
+    });
 
     try {
+      writeStageLog(logger, "info", "dispatch_consistency.sender.started", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+      });
       const result = await sender(deliveryPayload);
+      writeStageLog(logger, "info", "dispatch_consistency.sender.completed", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+      });
+      assertDeliveryConfirmed(result);
 
-      await registerProgress(groupId, videoId);
+      writeStageLog(logger, "info", "dispatch_consistency.mark_sent.started", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+      });
       await dispatchLogsRepositoryDependency.updateStatus(log.id, "enviado");
+      writeStageLog(logger, "info", "dispatch_consistency.mark_sent.completed", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+      });
+
+      writeStageLog(logger, "info", "dispatch_consistency.progress.started", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+      });
+      const progress = await registerProgress(groupId, videoId);
+      writeStageLog(logger, "info", "dispatch_consistency.progress.completed", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+        duplicate: Boolean(progress && progress.duplicate),
+      });
 
       return {
         idempotent: false,
         status: "enviado",
         skippedSend: false,
         logId: log.id,
+        progress,
         result,
       };
     } catch (error) {
-      await dispatchLogsRepositoryDependency.updateStatus(log.id, "falhou", error.message || String(error));
+      writeStageLog(logger, "error", "dispatch_consistency.failed", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+        error_message: error.message || String(error),
+      });
+      await markCampaignFailed(campaignId);
+      await dispatchLogsRepositoryDependency.updateStatus(log.id, "erro", error.message || String(error));
       throw error;
     }
   }
@@ -169,3 +308,4 @@ function createDispatchConsistencyService(dependencies = {}) {
 
 module.exports = createDispatchConsistencyService();
 module.exports.createDispatchConsistencyService = createDispatchConsistencyService;
+module.exports.assertDeliveryConfirmed = assertDeliveryConfirmed;

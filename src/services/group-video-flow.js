@@ -51,7 +51,7 @@ function isApprovedVideo(video = {}) {
 }
 
 function isVideoForTrail(video = {}, trail) {
-  return normalizeComparableText(video.trilha_segmento || video.trilhaSegmento) === normalizeComparableText(trail);
+  return normalizeComparableText(video.trilha || video.trilha_segmento || video.trilhaSegmento) === normalizeComparableText(trail);
 }
 
 function isGroupPausedByEndOfQueue(group = {}) {
@@ -85,6 +85,13 @@ function selectNextApprovedUnsentVideo(params = {}) {
     .filter((video) => isVideoForTrail(video, trail))
     .filter((video) => !sentVideoIds.has(normalizeVideoId(resolveVideoId(video))))
     .sort((left, right) => {
+      const orderDifference = Number(left.ordem_geral || left.ordem || Number.MAX_SAFE_INTEGER) -
+        Number(right.ordem_geral || right.ordem || Number.MAX_SAFE_INTEGER);
+
+      if (orderDifference !== 0) {
+        return orderDifference;
+      }
+
       const etapaDifference = resolveVideoEtapa(left) - resolveVideoEtapa(right);
 
       if (etapaDifference !== 0) {

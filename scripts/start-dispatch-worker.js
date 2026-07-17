@@ -12,6 +12,19 @@ worker.on("ready", () => {
   console.log(`Worker da fila ${dispatchQueue.name} iniciado`);
 });
 
+worker.on("active", (job) => {
+  console.log(
+    JSON.stringify({
+      event: "dispatch.active",
+      job_id: job.id,
+      group_id: job.data.group_id,
+      video_id: job.data.video_id,
+      drive_file_id: job.data.drive_file_id,
+      scheduled_at: job.data.scheduled_at,
+    })
+  );
+});
+
 events.on("completed", ({ jobId, returnvalue }) => {
   console.log(
     JSON.stringify({
