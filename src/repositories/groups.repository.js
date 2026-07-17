@@ -16,6 +16,20 @@ async function findById(id, client) {
   return data || null;
 }
 
+async function findByEvolutionGroupId(evolutionGroupId, client) {
+  const { data, error } = await getClient(client)
+    .from("groups")
+    .select("*")
+    .eq("evolution_group_id", evolutionGroupId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
 async function findAll(client) {
   const { data, error } = await getClient(client)
     .from("groups")
@@ -105,6 +119,7 @@ module.exports = {
   create,
   delete: remove,
   findAll,
+  findByEvolutionGroupId,
   findById,
   listByOrganization,
   listVideoEnabled,

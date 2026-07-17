@@ -50,7 +50,7 @@ function createMockClient() {
       return createBuilder({
         id: "record-1",
         nome: "Registro",
-        status: "aprovado",
+        status: true,
         group_id: "group-1",
         campaign_id: "campaign-1",
         video_id: "video-1",
@@ -88,6 +88,7 @@ async function main() {
     assert.ok(group);
     await groupsRepository.update("group-1", { nome: "Grupo 2" }, client);
     await groupsRepository.findById("group-1", client);
+    await groupsRepository.findByEvolutionGroupId("evo-1", client);
     await groupsRepository.listByOrganization("org-1", client);
     await groupsRepository.listVideoEnabled(client);
     await groupsRepository.delete("group-1", client);
@@ -104,14 +105,14 @@ async function main() {
     await campaignGroupsRepository.listGroups("camp-1", client);
     await campaignGroupsRepository.removeGroup("camp-1", "group-1", client);
 
-    await videoCatalogRepository.create({ drive_file_id: "drive-1", etapa: 1, trilha_segmento: "Pré", status: "aprovado" }, client);
-    await videoCatalogRepository.update("video-1", { status: "inativo" }, client);
+    await videoCatalogRepository.create({ drive_file_id: "drive-1", etapa: 1, trilha_segmento: "Pré", status: true }, client);
+    await videoCatalogRepository.update("video-1", { status: false }, client);
     await videoCatalogRepository.findById("video-1", client);
     await videoCatalogRepository.findAll(client);
     await videoCatalogRepository.listApproved(client);
     await videoCatalogRepository.listBySegmento("Pré", client);
     await videoCatalogRepository.listByEtapa(1, client);
-    await videoCatalogRepository.listByStatus("aprovado", client);
+    await videoCatalogRepository.listByStatus(true, client);
     await videoCatalogRepository.findByDriveFileId("drive-1", client);
     await videoCatalogRepository.delete("video-1", client);
 

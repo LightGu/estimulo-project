@@ -220,7 +220,7 @@ function mapVideoFile(file, pathSegments, options = {}) {
       persona_hashtag: persona.hashtag,
       persona_name: persona.persona,
       drive_path: pathSegments.map((segment) => segment.name),
-      status: options.defaultStatus || "pendente_revisao",
+      status: options.defaultStatus === undefined ? false : options.defaultStatus,
     },
   };
 }

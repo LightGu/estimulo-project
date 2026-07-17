@@ -34,7 +34,7 @@ function createVideo(overrides = {}) {
     drive_file_id: "drive-file-1",
     etapa: 1,
     trilha_segmento: "Pre infancia",
-    status: "aprovado",
+    status: true,
     data_aprovacao: "2026-07-14T10:00:00.000Z",
     ...overrides,
   };
@@ -46,7 +46,7 @@ async function testSelectsFirstApprovedUnsentVideoForGroupTrail() {
     sentVideoIds: ["video-1"],
     videos: [
       createVideo({ id: "video-1", etapa: 1 }),
-      createVideo({ id: "video-2", etapa: 2, status: "pendente_revisao" }),
+      createVideo({ id: "video-2", etapa: 2, status: false }),
       createVideo({ id: "video-3", etapa: 3, trilha_segmento: "Infancia" }),
       createVideo({ id: "video-4", etapa: 4 }),
       createVideo({ id: "video-5", etapa: 2 }),

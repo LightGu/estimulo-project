@@ -19,6 +19,14 @@ async function main() {
     campaignService: {
       create: async (payload) => ({ id: "campaign-1", ...payload }),
     },
+    groupService: {
+      syncGroupsFromEvolution: async () => ({
+        inserted: 1,
+        updated: 1,
+        ignored: 0,
+        groups: [{ id: "120363@g.us", nome: "Grupo", quantidade_membros: 10 }],
+      }),
+    },
   });
 
   const server = app.listen(0);
@@ -34,6 +42,19 @@ async function main() {
     });
 
     assert.equal(postResponse.status, 201);
+
+    const groupSyncResponse = await fetch(`http://127.0.0.1:${port}/groups/sync/evolution`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ organization_id: "org-1" }),
+    });
+
+    assert.equal(groupSyncResponse.status, 200);
+    const groupSyncPayload = await groupSyncResponse.json();
+    assert.equal(groupSyncPayload.inserted, 1);
+    assert.equal(groupSyncPayload.updated, 1);
+    assert.equal(groupSyncPayload.ignored, 0);
+    assert.deepEqual(groupSyncPayload.groups, [{ id: "120363@g.us", nome: "Grupo", quantidade_membros: 10 }]);
 
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);
@@ -53,6 +74,14 @@ async function main() {
       },
       campaignService: {
         create: async (payload) => ({ id: "campaign-1", ...payload }),
+      },
+      groupService: {
+        syncGroupsFromEvolution: async () => ({
+          inserted: 0,
+          updated: 0,
+          ignored: 0,
+          groups: [],
+        }),
       },
     });
 

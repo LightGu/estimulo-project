@@ -33,7 +33,7 @@ async function listApproved(client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
-    .eq("status", "aprovado")
+    .eq("status", true)
     .order("etapa", { ascending: true });
 
   if (error) {
