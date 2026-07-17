@@ -16,7 +16,8 @@ function createApp(dependencies = {}) {
   const healthController = createHealthController(dependencies.healthController || {});
 
   app.post("/campaigns", campaignsController);
-  app.post("/groups/sync/evolution", groupsController.syncFromEvolution);
+  app.get("/groups/unclassified", groupsController.listWithoutSegment);
+  app.post("/groups/sync", groupsController.syncFromEvolution);
   app.get("/health", healthController);
 
   return app;

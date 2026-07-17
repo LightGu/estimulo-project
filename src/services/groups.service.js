@@ -196,17 +196,16 @@ function createGroupsService(dependencies = {}) {
     return repository.listVideoEnabled();
   }
 
+  async function listWithoutSegment() {
+    return repository.listWithoutSegment();
+  }
+
   async function syncGroupsFromEvolution(options = {}) {
     const organizationId = options.organization_id || options.organizationId;
-    const segmento = (options.segmento || options.defaultSegmento || "geral").trim();
     const maturidade = Number(options.maturidade || options.defaultMaturidade || 1);
 
     if (!organizationId) {
       throw new Error("Organization id is required");
-    }
-
-    if (!segmento) {
-      throw new Error("Segmento is required");
     }
 
     if (!Number.isInteger(maturidade) || maturidade < 1 || maturidade > 4) {
@@ -267,7 +266,8 @@ function createGroupsService(dependencies = {}) {
         ...payload,
         organization_id: organizationId,
         evolution_group_id: group.id,
-        segmento,
+        segmento: null,
+        envia_video: false,
         maturidade,
       });
 
@@ -289,6 +289,7 @@ function createGroupsService(dependencies = {}) {
     list,
     listByOrganization,
     listVideoEnabled,
+    listWithoutSegment,
     syncGroupsFromEvolution,
     update,
   };
