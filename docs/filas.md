@@ -91,18 +91,13 @@ await addCampaignTriggerJob({
 });
 ```
 
-Quando houver processamento de campanha implementado, crie o worker pelo mesmo
-modulo:
+O worker padrao da campanha busca os grupos associados em `campaign_groups`,
+filtra `groups.envia_video = true`, resolve o proximo video elegivel por grupo
+considerando `group_video_progress` e enfileira os envios na fila `dispatch`.
+Para iniciar o worker:
 
-```js
-const { createCampaignTriggerWorker } = require("../src/queues/campaign-trigger");
-
-const worker = createCampaignTriggerWorker(async (job) => {
-  const { campaign_id, execution_at, status } = job.data;
-
-  // Buscar grupos, etapas e conteudos da campanha aqui.
-  return { campaign_id, execution_at, status };
-});
+```bash
+npm run queue:campaign-trigger:worker
 ```
 
 ### Resolucao do proximo video por grupo

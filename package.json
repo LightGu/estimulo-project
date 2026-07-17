@@ -10,6 +10,7 @@
   "scripts": {
     "queue:campaign-trigger:test": "node scripts/enqueue-campaign-trigger.js",
     "queue:campaign-trigger:recurring-test": "node scripts/test-campaign-trigger-recurring.js",
+    "queue:campaign-trigger:worker": "node scripts/start-campaign-trigger-worker.js",
     "queue:dispatch:test": "node scripts/enqueue-dispatch.js",
     "queue:dispatch:worker": "node scripts/start-dispatch-worker.js",
     "queue:group-sync:worker": "node scripts/start-group-sync-worker.js",
@@ -20,6 +21,7 @@
     "test:drive-download": "node tests/google-drive-video-download.test.js",
     "test:group-video-flow": "node tests/group-video-flow.test.js",
     "test:dispatch-drive-video": "node tests/dispatch-google-drive-video.test.js",
+    "test:campaign-trigger-processor": "node tests/campaign-trigger-processor.test.js",
     "test:group-sync-schedule": "node tests/group-sync-schedule.test.js",
     "test:drive-index-schedule": "node tests/google-drive-video-index-schedule.test.js",
     "test:integration": "node tests/integration-dispatch-flow.test.js",
@@ -27,7 +29,7 @@
     "test:api": "node tests/api.test.js",
     "db:test": "node scripts/test-supabase-connection.js",
     "seed": "node scripts/seed.js",
-    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/services.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/group-sync-schedule.test.js"
+    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/services.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/campaign-trigger-processor.test.js && node tests/group-sync-schedule.test.js"
   },
   "repository": {
     "type": "git",
