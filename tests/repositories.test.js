@@ -30,6 +30,10 @@ function createMockClient() {
       calls.push({ type: "eq", column, value });
       return this;
     },
+    is(column, value) {
+      calls.push({ type: "is", column, value });
+      return this;
+    },
     order() {
       return this;
     },
@@ -91,6 +95,8 @@ async function main() {
     await groupsRepository.findByEvolutionGroupId("evo-1", client);
     await groupsRepository.listByOrganization("org-1", client);
     await groupsRepository.listVideoEnabled(client);
+    await groupsRepository.listWithoutSegment(client);
+    assert.ok(client.__calls.some((call) => call.type === "is" && call.column === "segmento" && call.value === null));
     await groupsRepository.delete("group-1", client);
 
     await campaignsRepository.create({ nome: "Campanha", organization_id: "org-1", ativo: true }, client);

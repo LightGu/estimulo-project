@@ -20,6 +20,15 @@ async function main() {
       create: async (payload) => ({ id: "campaign-1", ...payload }),
     },
     groupService: {
+      listWithoutSegment: async () => [
+        {
+          id: "group-1",
+          nome: "Grupo sem segmento",
+          evolution_group_id: "120363@g.us",
+          segmento: null,
+          envia_video: false,
+        },
+      ],
       syncGroupsFromEvolution: async () => ({
         inserted: 1,
         updated: 1,
@@ -43,7 +52,7 @@ async function main() {
 
     assert.equal(postResponse.status, 201);
 
-    const groupSyncResponse = await fetch(`http://127.0.0.1:${port}/groups/sync/evolution`, {
+    const groupSyncResponse = await fetch(`http://127.0.0.1:${port}/groups/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ organization_id: "org-1" }),
@@ -55,6 +64,19 @@ async function main() {
     assert.equal(groupSyncPayload.updated, 1);
     assert.equal(groupSyncPayload.ignored, 0);
     assert.deepEqual(groupSyncPayload.groups, [{ id: "120363@g.us", nome: "Grupo", quantidade_membros: 10 }]);
+
+    const unclassifiedGroupsResponse = await fetch(`http://127.0.0.1:${port}/groups/unclassified`);
+    assert.equal(unclassifiedGroupsResponse.status, 200);
+    const unclassifiedGroupsPayload = await unclassifiedGroupsResponse.json();
+    assert.deepEqual(unclassifiedGroupsPayload, [
+      {
+        id: "group-1",
+        nome: "Grupo sem segmento",
+        evolution_group_id: "120363@g.us",
+        segmento: null,
+        envia_video: false,
+      },
+    ]);
 
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);
@@ -76,6 +98,7 @@ async function main() {
         create: async (payload) => ({ id: "campaign-1", ...payload }),
       },
       groupService: {
+        listWithoutSegment: async () => [],
         syncGroupsFromEvolution: async () => ({
           inserted: 0,
           updated: 0,

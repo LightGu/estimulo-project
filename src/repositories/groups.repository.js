@@ -71,6 +71,20 @@ async function listVideoEnabled(client) {
   return data || [];
 }
 
+async function listWithoutSegment(client) {
+  const { data, error } = await getClient(client)
+    .from("groups")
+    .select("*")
+    .is("segmento", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function create(payload, client) {
   const { data, error } = await getClient(client)
     .from("groups")
@@ -123,6 +137,7 @@ module.exports = {
   findById,
   listByOrganization,
   listVideoEnabled,
+  listWithoutSegment,
   remove,
   update,
 };

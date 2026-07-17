@@ -32,6 +32,7 @@ async function main() {
     findById: async (id) => (id === "group-1" ? { id, nome: "Grupo", evolution_group_id: "evo-1" } : null),
     listByOrganization: async () => [{ id: "group-1" }],
     listVideoEnabled: async () => [{ id: "group-1", envia_video: true }],
+    listWithoutSegment: async () => persistedGroups.filter((group) => group.segmento === null),
     update: async (id, payload) => {
       const index = persistedGroups.findIndex((group) => group.id === id);
       const updated = { ...persistedGroups[index], ...payload };
@@ -133,14 +134,20 @@ async function main() {
   assert.ok(createdGroup.id);
   await assert.rejects(() => groupService.create({ nome: "Grupo", organization_id: "org-1" }), /required/);
   await assert.rejects(() => groupService.listByOrganization(""), /required/);
-  const syncedGroups = await groupService.syncGroupsFromEvolution({ organization_id: "org-1", segmento: "geral", maturidade: 2 });
+  const syncedGroups = await groupService.syncGroupsFromEvolution({ organization_id: "org-1", maturidade: 2 });
   assert.equal(syncedGroups.inserted, 1);
   assert.equal(syncedGroups.updated, 1);
   assert.equal(syncedGroups.ignored, 2);
+  const insertedGroup = persistedGroups.find((group) => group.evolution_group_id === "120363new@g.us");
+  assert.equal(insertedGroup.segmento, null);
+  assert.equal(insertedGroup.envia_video, false);
   assert.deepEqual(syncedGroups.groups, [
     { id: "120363new@g.us", nome: "Grupo Novo", quantidade_membros: 3 },
     { id: "120363existing@g.us", nome: "Grupo Existente", quantidade_membros: 4 },
   ]);
+  const groupsWithoutSegment = await groupService.listWithoutSegment();
+  assert.equal(groupsWithoutSegment.length, 1);
+  assert.equal(groupsWithoutSegment[0].evolution_group_id, "120363new@g.us");
 
   const createdCampaign = await campaignService.create({ nome: "Campanha", organization_id: "org-1", cron_expression: "0 * * * *" });
   assert.ok(createdCampaign.id);
