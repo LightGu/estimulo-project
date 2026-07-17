@@ -83,6 +83,91 @@ async function testDispatchDownloadsVideoAndSendsBase64Payload() {
   assert.equal(downloadedVideoRef.bytes, undefined);
 }
 
+async function testDispatchRegistersProgressAfterConfirmedSend() {
+  const progressCalls = [];
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    progress_group_id: "group-uuid-1",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+    },
+    legenda: "Legenda de teste",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    sender: async () => ({ provider: "fake", status: 200 }),
+    progressRepository: {
+      hasDuplicate: async (groupId, videoId) => {
+        progressCalls.push({ type: "hasDuplicate", groupId, videoId });
+        return false;
+      },
+      registerDelivery: async (payload) => {
+        progressCalls.push({ type: "registerDelivery", payload });
+        return { id: "progress-1", ...payload };
+      },
+    },
+  });
+  const job = createFakeJob(jobData);
+
+  const result = await processor(job);
+
+  assert.deepEqual(progressCalls, [
+    { type: "hasDuplicate", groupId: "group-uuid-1", videoId: "video-1" },
+    { type: "registerDelivery", payload: { group_id: "group-uuid-1", video_id: "video-1" } },
+  ]);
+  assert.equal(result.progress.duplicate, false);
+  assert.equal(job.updates[1].progress_registered, true);
+  assert.equal(job.updates[1].progress_duplicate, false);
+}
+
+async function testDispatchDoesNotRegisterProgressWhenSendFails() {
+  let progressCalled = false;
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    progress_group_id: "group-uuid-1",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+    },
+    legenda: "Legenda de teste",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    sender: async () => {
+      throw new Error("Falha simulada no envio");
+    },
+    progressRepository: {
+      hasDuplicate: async () => {
+        progressCalled = true;
+        return false;
+      },
+      registerDelivery: async () => {
+        progressCalled = true;
+      },
+    },
+  });
+
+  await assert.rejects(() => processor(createFakeJob(jobData)), /Falha simulada no envio/);
+  assert.equal(progressCalled, false);
+}
+
 async function testDispatchStillAcceptsLegacyVideoUrl() {
   const jobData = buildDispatchJobData({
     group_id: "120363000000000000@g.us",
@@ -173,6 +258,8 @@ async function testDispatchRejectsDisabledVideoGroupBeforeJobData() {
 
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
+  await testDispatchRegistersProgressAfterConfirmedSend();
+  await testDispatchDoesNotRegisterProgressWhenSendFails();
   await testDispatchStillAcceptsLegacyVideoUrl();
   await testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo();
   await testDispatchDoesNotSendWhenDownloadFails();

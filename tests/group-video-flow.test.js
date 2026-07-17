@@ -166,6 +166,7 @@ async function testResolvesMultipleGroupsForDispatch() {
 
   assert.equal(result.dispatchGroups.length, 1);
   assert.equal(result.dispatchGroups[0].group_id, "group-1@g.us");
+  assert.equal(result.dispatchGroups[0].progress_group_id, "group-1");
   assert.equal(result.pausedGroups.length, 1);
   assert.equal(result.pausedGroups[0].group.id, "group-2");
 }

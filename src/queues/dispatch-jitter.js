@@ -196,6 +196,7 @@ function buildJitteredDispatchSchedule(params = {}) {
 
     return {
       group_id: group.group_id,
+      progress_group_id: group.progress_group_id || params.progress_group_id,
       campaign_id: group.campaign_id || params.campaign_id,
       link_video: group.link_video || params.link_video,
       video_id: group.video_id || params.video_id,

@@ -102,6 +102,7 @@ async function testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch() {
 
   assert.equal(dispatchJobs.length, 1);
   assert.equal(dispatchJobs[0].group_id, "enabled@g.us");
+  assert.equal(dispatchJobs[0].progress_group_id, "group-1");
   assert.equal(dispatchJobs[0].campaign_id, "campaign-1");
   assert.equal(dispatchJobs[0].video_id, "video-1");
   assert.equal(dispatchJobs[0].drive_file_id, "drive-1");

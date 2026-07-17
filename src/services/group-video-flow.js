@@ -211,6 +211,7 @@ async function resolveGroupVideoFlow(params = {}) {
   return {
     status: "eligible",
     group,
+    progress_group_id: resolveGroupId(group),
     group_id: resolveDispatchGroupId(group),
     video_catalog: video,
     video_id: resolveVideoId(video),
