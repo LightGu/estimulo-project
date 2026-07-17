@@ -1,4 +1,5 @@
 const express = require("express");
+const path = require("node:path");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createGroupsController = require("./controllers/groups.controller");
 const createHealthController = require("./controllers/health.controller");
@@ -8,6 +9,7 @@ const groupsService = require("../services/groups.service");
 function createApp(dependencies = {}) {
   const app = express();
   app.use(express.json());
+  app.use(express.static(path.join(__dirname, "../../public")));
 
   const campaignService = dependencies.campaignService || campaignsService;
   const groupService = dependencies.groupService || groupsService;
@@ -18,6 +20,7 @@ function createApp(dependencies = {}) {
   app.post("/campaigns", campaignsController);
   app.get("/groups/unclassified", groupsController.listWithoutSegment);
   app.post("/groups/sync", groupsController.syncFromEvolution);
+  app.patch("/groups/:id", groupsController.updateOperationalSettings);
   app.patch("/groups/:id/operational-settings", groupsController.updateOperationalSettings);
   app.get("/health", healthController);
 
