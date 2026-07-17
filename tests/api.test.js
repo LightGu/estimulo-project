@@ -87,7 +87,14 @@ async function main() {
       },
     ]);
 
-    const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/operational-settings`, {
+    const unclassifiedGroupsPageResponse = await fetch(`http://127.0.0.1:${port}/groups-unclassified.html`);
+    assert.equal(unclassifiedGroupsPageResponse.status, 200);
+    const unclassifiedGroupsPage = await unclassifiedGroupsPageResponse.text();
+    assert.match(unclassifiedGroupsPage, /fetch\("\/groups\/unclassified"\)/);
+    assert.match(unclassifiedGroupsPage, /fetch\(`\/groups\/\$\{encodeURIComponent\(groupId\)\}`/);
+    assert.match(unclassifiedGroupsPage, /Evolution group id/);
+
+    const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -109,6 +116,14 @@ async function main() {
       envia_video: true,
       trilha_override: "Trilha A",
     });
+
+    const legacyOperationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/operational-settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segmento: "Infancia" }),
+    });
+
+    assert.equal(legacyOperationalSettingsResponse.status, 200);
 
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);

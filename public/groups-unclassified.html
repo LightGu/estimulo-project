@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Grupos nao classificados</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f7f9;
+        --surface: #ffffff;
+        --surface-strong: #eef2f6;
+        --text: #18202a;
+        --muted: #617082;
+        --line: #d9e0e8;
+        --primary: #176b87;
+        --primary-dark: #0f5269;
+        --danger: #a33a3a;
+        --success: #237a57;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      main {
+        width: min(1180px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 32px 0;
+      }
+
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        margin: 0 0 6px;
+        font-size: 28px;
+        line-height: 1.15;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      button {
+        min-height: 40px;
+        border: 0;
+        border-radius: 6px;
+        padding: 0 14px;
+        background: var(--primary);
+        color: #ffffff;
+        cursor: pointer;
+        font-weight: 700;
+      }
+
+      button:hover {
+        background: var(--primary-dark);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .status {
+        min-height: 22px;
+        margin: 0 0 14px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .status.success {
+        color: var(--success);
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 920px;
+      }
+
+      th,
+      td {
+        padding: 14px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: middle;
+      }
+
+      th {
+        background: var(--surface-strong);
+        color: #334155;
+        font-size: 13px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .group-name {
+        min-width: 220px;
+        font-weight: 700;
+      }
+
+      .group-id {
+        width: 230px;
+        color: var(--muted);
+        font-family: Consolas, "Courier New", monospace;
+        font-size: 13px;
+        word-break: break-word;
+      }
+
+      input[type="text"] {
+        width: 100%;
+        min-width: 170px;
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 8px 10px;
+        color: var(--text);
+        font: inherit;
+      }
+
+      input[type="checkbox"] {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--primary);
+      }
+
+      .checkbox-cell {
+        width: 120px;
+        text-align: center;
+      }
+
+      .row-status {
+        min-width: 150px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .row-status.error {
+        color: var(--danger);
+      }
+
+      .row-status.success {
+        color: var(--success);
+      }
+
+      .empty {
+        padding: 28px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--muted);
+      }
+
+      @media (max-width: 720px) {
+        main {
+          width: min(100% - 20px, 1180px);
+          padding: 20px 0;
+        }
+
+        header {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        h1 {
+          font-size: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>Grupos nao classificados</h1>
+          <p>Classifique os grupos sincronizados pela Evolution API.</p>
+        </div>
+        <button type="button" id="reloadButton">Atualizar</button>
+      </header>
+
+      <div id="status" class="status" role="status"></div>
+      <section id="content"></section>
+    </main>
+
+    <datalist id="segmentOptions">
+      <option value="Pre infancia"></option>
+      <option value="Infancia"></option>
+      <option value="Adolescencia"></option>
+      <option value="Empreendedores na pre infancia"></option>
+    </datalist>
+
+    <script>
+      const content = document.querySelector("#content");
+      const statusEl = document.querySelector("#status");
+      const reloadButton = document.querySelector("#reloadButton");
+
+      function setStatus(message, type) {
+        statusEl.textContent = message || "";
+        statusEl.className = type ? `status ${type}` : "status";
+      }
+
+      function textOrEmpty(value) {
+        return value === null || value === undefined ? "" : String(value);
+      }
+
+      function buildPayload(row) {
+        const segmento = row.querySelector("[data-field='segmento']").value.trim();
+        const trilhaOverride = row.querySelector("[data-field='trilha_override']").value.trim();
+        const enviaVideo = row.querySelector("[data-field='envia_video']").checked;
+
+        return {
+          segmento: segmento || null,
+          envia_video: enviaVideo,
+          trilha_override: trilhaOverride || null,
+        };
+      }
+
+      function setRowStatus(row, message, type) {
+        const rowStatus = row.querySelector("[data-row-status]");
+        rowStatus.textContent = message || "";
+        rowStatus.className = type ? `row-status ${type}` : "row-status";
+      }
+
+      async function saveGroup(row, groupId) {
+        const button = row.querySelector("[data-action='save']");
+        button.disabled = true;
+        setRowStatus(row, "Salvando...");
+
+        try {
+          const response = await fetch(`/groups/${encodeURIComponent(groupId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildPayload(row)),
+          });
+
+          const payload = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Falha ao salvar grupo");
+          }
+
+          setRowStatus(row, "Salvo", "success");
+          row.remove();
+
+          if (!content.querySelector("tbody tr")) {
+            renderEmpty();
+          }
+        } catch (error) {
+          setRowStatus(row, error.message, "error");
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      function renderEmpty() {
+        content.innerHTML = '<div class="empty">Nenhum grupo pendente de classificacao.</div>';
+      }
+
+      function renderGroups(groups) {
+        if (!groups.length) {
+          renderEmpty();
+          return;
+        }
+
+        content.innerHTML = `
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome real</th>
+                  <th>Evolution group id</th>
+                  <th>Segmento</th>
+                  <th>Envia video</th>
+                  <th>Trilha override</th>
+                  <th>Acao</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        `;
+
+        const tbody = content.querySelector("tbody");
+
+        groups.forEach((group) => {
+          const row = document.createElement("tr");
+          row.dataset.groupId = group.id;
+          row.innerHTML = `
+            <td class="group-name"></td>
+            <td class="group-id"></td>
+            <td>
+              <input data-field="segmento" type="text" list="segmentOptions" autocomplete="off" placeholder="Selecionar ou informar">
+            </td>
+            <td class="checkbox-cell">
+              <input data-field="envia_video" type="checkbox" aria-label="Envia video">
+            </td>
+            <td>
+              <input data-field="trilha_override" type="text" autocomplete="off" placeholder="Opcional">
+            </td>
+            <td>
+              <button type="button" data-action="save">Salvar</button>
+            </td>
+            <td data-row-status class="row-status"></td>
+          `;
+
+          row.querySelector(".group-name").textContent = textOrEmpty(group.nome);
+          row.querySelector(".group-id").textContent = textOrEmpty(group.evolution_group_id);
+          row.querySelector("[data-field='segmento']").value = textOrEmpty(group.segmento);
+          row.querySelector("[data-field='envia_video']").checked = group.envia_video === true;
+          row.querySelector("[data-field='trilha_override']").value = textOrEmpty(group.trilha_override);
+          row.querySelector("[data-action='save']").addEventListener("click", () => saveGroup(row, group.id));
+
+          tbody.appendChild(row);
+        });
+      }
+
+      async function loadGroups() {
+        reloadButton.disabled = true;
+        setStatus("Carregando grupos...");
+
+        try {
+          const response = await fetch("/groups/unclassified");
+          const groups = await response.json();
+
+          if (!response.ok) {
+            throw new Error(groups.error || "Falha ao carregar grupos");
+          }
+
+          renderGroups(Array.isArray(groups) ? groups : []);
+          setStatus(`${Array.isArray(groups) ? groups.length : 0} grupo(s) pendente(s).`, "success");
+        } catch (error) {
+          content.innerHTML = "";
+          setStatus(error.message, "error");
+        } finally {
+          reloadButton.disabled = false;
+        }
+      }
+
+      reloadButton.addEventListener("click", loadGroups);
+      loadGroups();
+    </script>
+  </body>
+</html>
