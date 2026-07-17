@@ -1,4 +1,4 @@
-const APPROVED_VIDEO_STATUS = "aprovado";
+const APPROVED_VIDEO_STATUS = true;
 const END_OF_QUEUE_PAUSE_REASON = "end_of_queue";
 
 function normalizeText(value) {
@@ -43,7 +43,11 @@ function resolveVideoApprovalDate(video = {}) {
 }
 
 function isApprovedVideo(video = {}) {
-  return normalizeComparableText(video.status) === APPROVED_VIDEO_STATUS;
+  if (typeof video.status === "boolean") {
+    return video.status === APPROVED_VIDEO_STATUS;
+  }
+
+  return ["true", "1", "sim", "aprovado"].includes(normalizeComparableText(video.status));
 }
 
 function isVideoForTrail(video = {}, trail) {

@@ -1,12 +1,36 @@
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 
+function normalizeStatus(value, defaultValue = false) {
+  if (value === undefined || value === null || value === "") {
+    return defaultValue;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+
+    if (["true", "1", "sim", "aprovado"].includes(normalized)) {
+      return true;
+    }
+
+    if (["false", "0", "nao", "não", "pendente_revisao", "reprovado", "inativo"].includes(normalized)) {
+      return false;
+    }
+  }
+
+  throw new Error("Invalid status");
+}
+
 function createVideoCatalogService(dependencies = {}) {
   const repository = dependencies.repository || videoCatalogRepository;
 
   async function create(payload) {
     const driveFileId = payload?.drive_file_id?.trim();
     const etapa = Number(payload?.etapa);
-    const status = payload?.status || "pendente_revisao";
+    const status = normalizeStatus(payload?.status, false);
 
     if (!driveFileId) {
       throw new Error("Drive file id is required");
@@ -22,21 +46,7 @@ function createVideoCatalogService(dependencies = {}) {
       throw new Error("Drive file id already exists");
     }
 
-    const validStatuses = ["pendente_revisao", "aprovado", "reprovado", "inativo"];
-
-    if (!validStatuses.includes(status)) {
-      throw new Error("Invalid status");
-    }
-
     const normalizedPayload = { ...payload, drive_file_id: driveFileId, etapa, status };
-
-    if (status === "aprovado" && !normalizedPayload.data_aprovacao) {
-      normalizedPayload.data_aprovacao = new Date().toISOString();
-    }
-
-    if (status !== "aprovado") {
-      normalizedPayload.data_aprovacao = null;
-    }
 
     return repository.create(normalizedPayload);
   }
@@ -81,19 +91,7 @@ function createVideoCatalogService(dependencies = {}) {
     }
 
     if (nextPayload.status !== undefined) {
-      const validStatuses = ["pendente_revisao", "aprovado", "reprovado", "inativo"];
-
-      if (!validStatuses.includes(nextPayload.status)) {
-        throw new Error("Invalid status");
-      }
-
-      if (nextPayload.status === "aprovado" && !nextPayload.data_aprovacao) {
-        nextPayload.data_aprovacao = new Date().toISOString();
-      }
-
-      if (nextPayload.status !== "aprovado") {
-        nextPayload.data_aprovacao = null;
-      }
+      nextPayload.status = normalizeStatus(nextPayload.status);
     }
 
     return repository.update(id, nextPayload);
@@ -146,11 +144,11 @@ function createVideoCatalogService(dependencies = {}) {
   }
 
   async function listByStatus(status) {
-    if (!status) {
+    if (status === undefined || status === null || status === "") {
       throw new Error("Status is required");
     }
 
-    return repository.listByStatus(status);
+    return repository.listByStatus(normalizeStatus(status));
   }
 
   async function getByDriveFileId(driveFileId) {
@@ -177,3 +175,4 @@ function createVideoCatalogService(dependencies = {}) {
 
 module.exports = createVideoCatalogService();
 module.exports.createVideoCatalogService = createVideoCatalogService;
+module.exports.normalizeStatus = normalizeStatus;

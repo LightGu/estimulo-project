@@ -137,6 +137,15 @@ function buildEvolutionRequest(params, config = evolutionConfig) {
   };
 }
 
+function buildFetchAllGroupsRequest(config = evolutionConfig) {
+  return {
+    endpoint: `/group/fetchAllGroups/${config.instanceName}`,
+    params: {
+      getParticipants: true,
+    },
+  };
+}
+
 function parseEvolutionError(error) {
   // Converte erros do axios em um erro unico do modulo, com dados uteis para log/retry.
   if (error.response) {
@@ -183,6 +192,23 @@ class EvolutionDeliveryProvider {
       throw parseEvolutionError(error);
     }
   }
+
+  async fetchAllGroups() {
+    const request = buildFetchAllGroupsRequest(this.config);
+
+    try {
+      const response = await this.client.get(request.endpoint, { params: request.params });
+
+      return {
+        provider: "evolution",
+        endpoint: request.endpoint,
+        status: response.status,
+        data: response.data,
+      };
+    } catch (error) {
+      throw parseEvolutionError(error);
+    }
+  }
 }
 
 async function sendToEvolution(params, options = {}) {
@@ -192,9 +218,17 @@ async function sendToEvolution(params, options = {}) {
   return provider.send(params);
 }
 
+async function fetchAllGroupsFromEvolution(options = {}) {
+  const provider = new EvolutionDeliveryProvider(options);
+
+  return provider.fetchAllGroups();
+}
+
 module.exports = {
   EvolutionApiError,
   EvolutionDeliveryProvider,
+  buildFetchAllGroupsRequest,
   buildEvolutionRequest,
+  fetchAllGroupsFromEvolution,
   sendToEvolution,
 };
