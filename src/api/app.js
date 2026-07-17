@@ -18,6 +18,7 @@ function createApp(dependencies = {}) {
   app.post("/campaigns", campaignsController);
   app.get("/groups/unclassified", groupsController.listWithoutSegment);
   app.post("/groups/sync", groupsController.syncFromEvolution);
+  app.patch("/groups/:id/operational-settings", groupsController.updateOperationalSettings);
   app.get("/health", healthController);
 
   return app;

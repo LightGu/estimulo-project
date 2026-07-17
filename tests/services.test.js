@@ -29,7 +29,13 @@ async function main() {
     findAll: async () => [],
     findByEvolutionGroupId: async (evolutionGroupId) =>
       persistedGroups.find((group) => group.evolution_group_id === evolutionGroupId) || null,
-    findById: async (id) => (id === "group-1" ? { id, nome: "Grupo", evolution_group_id: "evo-1" } : null),
+    findById: async (id) => {
+      if (id === "group-1") {
+        return { id, nome: "Grupo", evolution_group_id: "evo-1" };
+      }
+
+      return persistedGroups.find((group) => group.id === id) || null;
+    },
     listByOrganization: async () => [{ id: "group-1" }],
     listVideoEnabled: async () => [{ id: "group-1", envia_video: true }],
     listWithoutSegment: async () => persistedGroups.filter((group) => group.segmento === null),
@@ -148,6 +154,22 @@ async function main() {
   const groupsWithoutSegment = await groupService.listWithoutSegment();
   assert.equal(groupsWithoutSegment.length, 1);
   assert.equal(groupsWithoutSegment[0].evolution_group_id, "120363new@g.us");
+  const updatedOperationalSettings = await groupService.updateOperationalSettings(insertedGroup.id, {
+    segmento: "Pre infancia",
+    envia_video: true,
+    trilha_override: "Trilha A",
+    nome: "Nome vindo da Evolution nao deve mudar",
+    evolution_group_id: "outro@g.us",
+  });
+  assert.equal(updatedOperationalSettings.segmento, "Pre infancia");
+  assert.equal(updatedOperationalSettings.envia_video, true);
+  assert.equal(updatedOperationalSettings.trilha_override, "Trilha A");
+  assert.equal(updatedOperationalSettings.nome, "Grupo Novo");
+  assert.equal(updatedOperationalSettings.evolution_group_id, "120363new@g.us");
+  await assert.rejects(
+    () => groupService.updateOperationalSettings(insertedGroup.id, { envia_video: "true" }),
+    /boolean/,
+  );
 
   const createdCampaign = await campaignService.create({ nome: "Campanha", organization_id: "org-1", cron_expression: "0 * * * *" });
   assert.ok(createdCampaign.id);
