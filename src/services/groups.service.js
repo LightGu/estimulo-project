@@ -67,6 +67,20 @@ function normalizeEvolutionGroups(payload) {
     .filter(Boolean);
 }
 
+function normalizeNullableText(value, fieldName) {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName} must be a string or null`);
+  }
+
+  const normalized = value.trim();
+
+  return normalized || null;
+}
+
 function createGroupsService(dependencies = {}) {
   const repository = dependencies.repository || groupsRepository;
   const organizationRepository = dependencies.organizationRepository || organizationsRepository;
@@ -153,6 +167,45 @@ function createGroupsService(dependencies = {}) {
       if (!Number.isInteger(nextPayload.maturidade) || nextPayload.maturidade < 1 || nextPayload.maturidade > 4) {
         throw new Error("Maturidade must be between 1 and 4");
       }
+    }
+
+    return repository.update(id, nextPayload);
+  }
+
+  async function updateOperationalSettings(id, payload = {}) {
+    if (!id) {
+      throw new Error("Group id is required");
+    }
+
+    const allowedFields = ["segmento", "envia_video", "trilha_override"];
+    const hasAllowedField = allowedFields.some((field) => Object.prototype.hasOwnProperty.call(payload, field));
+
+    if (!hasAllowedField) {
+      throw new Error("At least one operational setting is required");
+    }
+
+    const current = await repository.findById(id);
+
+    if (!current) {
+      throw new Error("Group not found");
+    }
+
+    const nextPayload = {};
+
+    if (Object.prototype.hasOwnProperty.call(payload, "segmento")) {
+      nextPayload.segmento = normalizeNullableText(payload.segmento, "Segmento");
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "trilha_override")) {
+      nextPayload.trilha_override = normalizeNullableText(payload.trilha_override, "Trilha override");
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "envia_video")) {
+      if (typeof payload.envia_video !== "boolean") {
+        throw new Error("Envia video must be boolean");
+      }
+
+      nextPayload.envia_video = payload.envia_video;
     }
 
     return repository.update(id, nextPayload);
@@ -292,6 +345,7 @@ function createGroupsService(dependencies = {}) {
     listWithoutSegment,
     syncGroupsFromEvolution,
     update,
+    updateOperationalSettings,
   };
 }
 

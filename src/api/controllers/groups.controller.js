@@ -36,9 +36,38 @@ function createGroupsController(dependencies = {}) {
     }
   }
 
+  async function updateOperationalSettings(req, res) {
+    try {
+      const group = await groupService.updateOperationalSettings(req.params.id, req.body || {});
+
+      return res.status(200).json(group);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (
+        [
+          "Group id is required",
+          "At least one operational setting is required",
+          "Segmento must be a string or null",
+          "Trilha override must be a string or null",
+          "Envia video must be boolean",
+        ].includes(message)
+      ) {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Group not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   return {
     listWithoutSegment,
     syncFromEvolution,
+    updateOperationalSettings,
   };
 }
 

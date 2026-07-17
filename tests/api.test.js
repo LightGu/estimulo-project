@@ -35,6 +35,15 @@ async function main() {
         ignored: 0,
         groups: [{ id: "120363@g.us", nome: "Grupo", quantidade_membros: 10 }],
       }),
+      updateOperationalSettings: async (id, payload) => ({
+        id,
+        nome: "Grupo sem segmento",
+        evolution_group_id: "120363@g.us",
+        quantidade_membros: 10,
+        segmento: payload.segmento,
+        envia_video: payload.envia_video,
+        trilha_override: payload.trilha_override,
+      }),
     },
   });
 
@@ -78,6 +87,29 @@ async function main() {
       },
     ]);
 
+    const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/operational-settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        segmento: "Pre infancia",
+        envia_video: true,
+        trilha_override: "Trilha A",
+        nome: "Nao deve ser usado",
+      }),
+    });
+
+    assert.equal(operationalSettingsResponse.status, 200);
+    const operationalSettingsPayload = await operationalSettingsResponse.json();
+    assert.deepEqual(operationalSettingsPayload, {
+      id: "group-1",
+      nome: "Grupo sem segmento",
+      evolution_group_id: "120363@g.us",
+      quantidade_membros: 10,
+      segmento: "Pre infancia",
+      envia_video: true,
+      trilha_override: "Trilha A",
+    });
+
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);
     const healthPayload = await healthResponse.json();
@@ -105,6 +137,7 @@ async function main() {
           ignored: 0,
           groups: [],
         }),
+        updateOperationalSettings: async (id, payload) => ({ id, ...payload }),
       },
     });
 
