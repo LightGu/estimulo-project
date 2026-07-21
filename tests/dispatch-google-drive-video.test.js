@@ -87,6 +87,7 @@ async function testDispatchDownloadsVideoAndSendsBase64Payload() {
 async function testDispatchSelectsUnusedCaptionForVideo() {
   const sentPayloads = [];
   const selectedCaptions = [];
+  const markedCaptions = [];
   const jobData = buildDispatchJobData({
     group_id: "120363000000000000@g.us",
     campaign_id: "campaign-1",
@@ -114,6 +115,9 @@ async function testDispatchSelectsUnusedCaptionForVideo() {
           text: "Legenda variada",
         };
       },
+      async markCaptionUsed(captionId, options) {
+        markedCaptions.push({ captionId, usedAt: options.usedAt });
+      },
     },
     sender: async (payload) => {
       sentPayloads.push(JSON.parse(JSON.stringify(payload)));
@@ -129,6 +133,49 @@ async function testDispatchSelectsUnusedCaptionForVideo() {
 
   assert.deepEqual(selectedCaptions, ["video-1"]);
   assert.equal(sentPayloads[0].message, "Legenda variada");
+  assert.equal(markedCaptions.length, 1);
+  assert.equal(markedCaptions[0].captionId, "caption-1");
+  assert.ok(markedCaptions[0].usedAt instanceof Date);
+}
+
+async function testDispatchDoesNotMarkCaptionUsedWhenSendFails() {
+  let markedCaption = false;
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+    },
+    legenda: "Legenda fallback",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    videoCaptionsService: {
+      async selectCaptionForVideo() {
+        return {
+          caption: { id: "caption-1" },
+          text: "Legenda variada",
+        };
+      },
+      async markCaptionUsed() {
+        markedCaption = true;
+      },
+    },
+    sender: async () => {
+      throw new Error("Falha simulada no envio");
+    },
+  });
+
+  await assert.rejects(() => processor(createFakeJob(jobData)), /Falha simulada no envio/);
+  assert.equal(markedCaption, false);
 }
 
 async function testDispatchRegistersProgressAfterConfirmedSend() {
@@ -350,7 +397,8 @@ async function testPreparesReviewedCaptionBeforeQueueCreation() {
     },
   });
 
-  assert.equal(caption, "Legenda aprovada antes do job");
+  assert.equal(caption.text, "Legenda aprovada antes do job");
+  assert.equal(caption.caption.id, "caption-1");
   assert.deepEqual(calls, [
     {
       videoId: "video-1",
@@ -399,6 +447,7 @@ async function testRejectedCaptionDoesNotReachSender() {
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
   await testDispatchSelectsUnusedCaptionForVideo();
+  await testDispatchDoesNotMarkCaptionUsedWhenSendFails();
   await testDispatchRegistersProgressAfterConfirmedSend();
   await testDispatchDoesNotRegisterProgressWhenSendFails();
   await testDispatchStillAcceptsLegacyVideoUrl();
