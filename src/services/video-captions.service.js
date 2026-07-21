@@ -113,6 +113,9 @@ function createVideoCaptionsService(dependencies = {}) {
     const todayStart = getStartOfTodayInTimeZone(now, options.timeZone || timeZone);
     const captions = await repository.listUnusedTodayByVideo(videoId, todayStart);
     const shouldReviewCaption = Boolean(options.requireCaptionReview || options.transcript);
+    const hasTranscriptOption = Object.prototype.hasOwnProperty.call(options, "transcript");
+    let transcriptResolved = false;
+    let resolvedTranscript;
     const reviewCaption = shouldReviewCaption
       ? typeof options.reviewCaption === "function"
         ? options.reviewCaption
@@ -120,6 +123,19 @@ function createVideoCaptionsService(dependencies = {}) {
           ? captionReviewService.reviewCaption
           : null
       : null;
+
+    async function getTranscript() {
+      if (!hasTranscriptOption) {
+        return undefined;
+      }
+
+      if (!transcriptResolved) {
+        resolvedTranscript = String(await Promise.resolve(options.transcript) || "").trim();
+        transcriptResolved = true;
+      }
+
+      return resolvedTranscript;
+    }
 
     async function approveCaption(captionRecord, generated) {
       const text = normalizeCaptionText(captionRecord);
@@ -129,9 +145,10 @@ function createVideoCaptionsService(dependencies = {}) {
       }
 
       if (reviewCaption) {
+        const transcript = await getTranscript();
         const review = await reviewCaption({
           caption: text,
-          transcript: options.transcript,
+          transcript,
           campaign_id: options.campaign_id,
           group_id: options.group_id,
           progress_group_id: options.progress_group_id,
@@ -180,15 +197,19 @@ function createVideoCaptionsService(dependencies = {}) {
       }
     }
 
-    if (!options.downloadedVideo && !options.transcript) {
+    const hasDownloadedVideoOption = Object.prototype.hasOwnProperty.call(options, "downloadedVideo");
+    const downloadedVideo = hasDownloadedVideoOption ? await Promise.resolve(options.downloadedVideo) : undefined;
+    const transcript = await getTranscript();
+
+    if (!downloadedVideo && !transcript) {
       return null;
     }
 
     const adapter = getAIProviderAdapter();
     const generatedText = String(
-      options.downloadedVideo
-        ? await generateCaption(adapter, options.downloadedVideo, options.ai || {})
-        : await generateCaptionFromTranscript(adapter, options.transcript, options.ai || {})
+      downloadedVideo
+        ? await generateCaption(adapter, downloadedVideo, options.ai || {})
+        : await generateCaptionFromTranscript(adapter, transcript, options.ai || {})
     ).trim();
 
     if (!generatedText) {
