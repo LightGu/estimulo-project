@@ -283,6 +283,7 @@ function createVideoTranscriptionService(dependencies = {}) {
   return {
     transcribeByDriveFileId,
     transcribeById,
+    transcribeVideo: transcribeRecord,
     transcribeRecord,
   };
 }
