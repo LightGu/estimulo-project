@@ -31,7 +31,7 @@
     "test:api": "node tests/api.test.js",
     "db:test": "node scripts/test-supabase-connection.js",
     "seed": "node scripts/seed.js",
-    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/services.test.js && node tests/video-transcription-service.test.js && node tests/google-drive-video-indexer.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/dispatch-google-drive-video.test.js && node tests/campaign-trigger-processor.test.js && node tests/group-sync-schedule.test.js"
+    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/services.test.js && node tests/video-transcription-service.test.js && node tests/video-captions-service.test.js && node tests/google-drive-video-indexer.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/dispatch-google-drive-video.test.js && node tests/campaign-trigger-processor.test.js && node tests/group-sync-schedule.test.js"
   },
   "repository": {
     "type": "git",

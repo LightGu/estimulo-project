@@ -83,6 +83,53 @@ async function testDispatchDownloadsVideoAndSendsBase64Payload() {
   assert.equal(downloadedVideoRef.bytes, undefined);
 }
 
+async function testDispatchSelectsUnusedCaptionForVideo() {
+  const sentPayloads = [];
+  const selectedCaptions = [];
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+    },
+    legenda: "Legenda fallback",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    videoCaptionsService: {
+      async selectCaptionForVideo(videoId) {
+        selectedCaptions.push(videoId);
+
+        return {
+          caption: { id: "caption-1" },
+          text: "Legenda variada",
+        };
+      },
+    },
+    sender: async (payload) => {
+      sentPayloads.push(JSON.parse(JSON.stringify(payload)));
+
+      return {
+        provider: "fake",
+        status: 200,
+      };
+    },
+  });
+
+  await processor(createFakeJob(jobData));
+
+  assert.deepEqual(selectedCaptions, ["video-1"]);
+  assert.equal(sentPayloads[0].message, "Legenda variada");
+}
+
 async function testDispatchRegistersProgressAfterConfirmedSend() {
   const progressCalls = [];
   const jobData = buildDispatchJobData({
@@ -279,6 +326,7 @@ async function testDispatchRejectsDisabledVideoGroupBeforeJobData() {
 
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
+  await testDispatchSelectsUnusedCaptionForVideo();
   await testDispatchRegistersProgressAfterConfirmedSend();
   await testDispatchDoesNotRegisterProgressWhenSendFails();
   await testDispatchStillAcceptsLegacyVideoUrl();

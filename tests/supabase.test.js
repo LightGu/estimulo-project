@@ -112,7 +112,8 @@ function testVideoCaptionsMigrationContainsRequiredSchemaPieces() {
   const migrationSql = fs.readFileSync(migrationPath, "utf8");
 
   assert.match(migrationSql, /CREATE TABLE IF NOT EXISTS public\.video_captions/i);
-  assert.match(migrationSql, /video_id uuid PRIMARY KEY/i);
+  assert.match(migrationSql, /id uuid PRIMARY KEY DEFAULT gen_random_uuid\(\)/i);
+  assert.match(migrationSql, /video_id uuid NOT NULL/i);
   assert.match(migrationSql, /caption_text text NOT NULL/i);
   assert.match(migrationSql, /criado_em timestamptz NOT NULL DEFAULT now\(\)/i);
   assert.match(migrationSql, /ultimo_uso_em timestamptz/i);
@@ -120,6 +121,7 @@ function testVideoCaptionsMigrationContainsRequiredSchemaPieces() {
   assert.match(migrationSql, /ALTER TABLE public\.video_captions ENABLE ROW LEVEL SECURITY/i);
   assert.match(migrationSql, /CREATE POLICY video_captions_select_policy/i);
   assert.match(migrationSql, /CREATE INDEX IF NOT EXISTS idx_video_captions_ultimo_uso_em/i);
+  assert.match(migrationSql, /CREATE INDEX IF NOT EXISTS idx_video_captions_video_ultimo_uso/i);
 }
 
 async function main() {
