@@ -158,6 +158,63 @@ async function testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday() {
   ]);
 }
 
+async function testAcceptsPendingDownloadedVideoForGeneration() {
+  const calls = [];
+  let finishDownload;
+  const downloadedVideoPromise = new Promise((resolve) => {
+    finishDownload = () =>
+      resolve({
+        bytes: Buffer.from("video-bytes"),
+        mime_type: "video/mp4",
+        name: "aula-01.mp4",
+      });
+  });
+  const service = createVideoCaptionsService({
+    aiProviderAdapter: {
+      async generateCaption(video) {
+        calls.push({ type: "generate", videoName: video.name });
+
+        return "Legenda gerada";
+      },
+    },
+    repository: {
+      async listUnusedTodayByVideo() {
+        calls.push({ type: "list" });
+
+        return [];
+      },
+      async create(payload) {
+        calls.push({ type: "create", payload });
+
+        return { id: "caption-ai-1", ...payload };
+      },
+    },
+  });
+
+  const selecting = service.selectCaptionForVideo("video-1", {
+    downloadedVideo: downloadedVideoPromise,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [{ type: "list" }]);
+
+  finishDownload();
+  const selected = await selecting;
+
+  assert.equal(selected.text, "Legenda gerada");
+  assert.deepEqual(calls, [
+    { type: "list" },
+    { type: "generate", videoName: "aula-01.mp4" },
+    {
+      type: "create",
+      payload: {
+        video_id: "video-1",
+        caption_text: "Legenda gerada",
+      },
+    },
+  ]);
+}
+
 async function testRejectsCaptionAndGeneratesNewOneFromTranscript() {
   const calls = [];
   const service = createVideoCaptionsService({
@@ -235,6 +292,7 @@ async function main() {
   await testMarksCaptionUsedOnDemand();
   await testReturnsNullWhenNoUnusedCaptionExists();
   await testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday();
+  await testAcceptsPendingDownloadedVideoForGeneration();
   await testRejectsCaptionAndGeneratesNewOneFromTranscript();
 
   console.log("video-captions-service tests OK");

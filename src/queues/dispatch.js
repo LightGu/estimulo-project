@@ -178,6 +178,10 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
         })
       );
 
+    if (options.failOnCaptionError) {
+      throw error;
+    }
+
     return {
       caption: null,
       generated: false,
@@ -372,54 +376,69 @@ function createDeliveryExecutor(params = {}) {
     let deliveryPayload;
 
     try {
-      if (shouldDownloadVideo) {
-        logger.info &&
-          logger.info(
-            JSON.stringify({
-              event: "dispatch.video_download.started",
-              campaign_id: jobData.campaign_id,
-              group_id: jobData.group_id,
-              progress_group_id: jobData.progress_group_id,
-              video_id: jobData.video_id,
-              drive_file_id: jobData.drive_file_id,
-            })
-          );
+      const downloadPromise = shouldDownloadVideo
+        ? (async () => {
+            logger.info &&
+              logger.info(
+                JSON.stringify({
+                  event: "dispatch.video_download.started",
+                  campaign_id: jobData.campaign_id,
+                  group_id: jobData.group_id,
+                  progress_group_id: jobData.progress_group_id,
+                  video_id: jobData.video_id,
+                  drive_file_id: jobData.drive_file_id,
+                })
+              );
 
-        downloadedVideo = await videoDownloader({
-          drive,
-          videoCatalogRepository,
-          videoCatalogRecord: jobData.video_catalog,
-          videoId: jobData.video_id,
-          driveFileId: jobData.drive_file_id,
+            const video = await videoDownloader({
+              drive,
+              videoCatalogRepository,
+              videoCatalogRecord: jobData.video_catalog,
+              videoId: jobData.video_id,
+              driveFileId: jobData.drive_file_id,
+            });
+
+            logger.info &&
+              logger.info(
+                JSON.stringify({
+                  event: "dispatch.video_download.completed",
+                  campaign_id: jobData.campaign_id,
+                  group_id: jobData.group_id,
+                  progress_group_id: jobData.progress_group_id,
+                  video_id: jobData.video_id,
+                  drive_file_id: jobData.drive_file_id,
+                  bytes: video && video.bytes && video.bytes.length,
+                  mime_type: video && video.mime_type,
+                })
+              );
+
+            return video;
+          })()
+        : Promise.resolve(null);
+      const transcriptPromise =
+        jobData.video_id && captionReviewService
+          ? resolveVideoTranscript(jobData, videoCatalogRepository)
+          : Promise.resolve(undefined);
+      const captionPromise = (async () => {
+        return resolveDispatchCaption(jobData, videoCaptionsService, logger, {
+          downloadedVideo: shouldDownloadVideo ? downloadPromise : undefined,
+          transcript: transcriptPromise,
+          requireCaptionReview: Boolean(jobData.video_id && captionReviewService),
+          failOnCaptionError: Boolean(jobData.video_id && videoCaptionsService),
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.group_id,
+          progress_group_id: jobData.progress_group_id,
         });
+      })();
+      const [downloadedVideoResult, captionSelection] = await Promise.all([downloadPromise, captionPromise]);
+      const transcript = await transcriptPromise;
 
-        logger.info &&
-          logger.info(
-            JSON.stringify({
-              event: "dispatch.video_download.completed",
-              campaign_id: jobData.campaign_id,
-              group_id: jobData.group_id,
-              progress_group_id: jobData.progress_group_id,
-              video_id: jobData.video_id,
-              drive_file_id: jobData.drive_file_id,
-              bytes: downloadedVideo && downloadedVideo.bytes && downloadedVideo.bytes.length,
-              mime_type: downloadedVideo && downloadedVideo.mime_type,
-            })
-          );
-      }
+      downloadedVideo = downloadedVideoResult;
 
-      const captionSelection = await resolveDispatchCaption(jobData, videoCaptionsService, logger, {
-        downloadedVideo,
-        transcript: jobData.video_id && captionReviewService ? await resolveVideoTranscript(jobData, videoCatalogRepository) : undefined,
-        requireCaptionReview: Boolean(jobData.video_id && captionReviewService),
-        campaign_id: jobData.campaign_id,
-        group_id: jobData.group_id,
-        progress_group_id: jobData.progress_group_id,
-      });
       if (jobData.video_id && captionReviewService && typeof captionReviewService.assertCaptionApproved === "function") {
         await captionReviewService.assertCaptionApproved({
           caption: captionSelection.text,
-          transcript: await resolveVideoTranscript(jobData, videoCatalogRepository),
+          transcript,
           campaign_id: jobData.campaign_id,
           group_id: jobData.group_id,
           progress_group_id: jobData.progress_group_id,
@@ -467,16 +486,10 @@ function createDeliveryExecutor(params = {}) {
 
 async function addDispatchJob(params, options = {}) {
   const jobData = buildDispatchJobData(params);
-  const { dependencies, ...jobOptionOverrides } = options;
-  const captionSelection = await prepareDispatchCaptionBeforeQueue(jobData, dependencies || {});
+  const { dependencies: _ignoredDependencies, ...jobOptionOverrides } = options;
   const jobOptions = buildDispatchJobOptions(jobData, jobOptionOverrides);
 
-  return getDispatchQueue().add(DISPATCH_JOB_NAME, {
-    ...jobData,
-    legenda: captionSelection.text,
-    caption_id: captionSelection.caption && captionSelection.caption.id,
-    caption_generated: Boolean(captionSelection.generated),
-  }, jobOptions);
+  return getDispatchQueue().add(DISPATCH_JOB_NAME, jobData, jobOptions);
 }
 
 async function addJitteredDispatchJobs(params, options = {}) {
