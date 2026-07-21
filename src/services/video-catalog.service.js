@@ -1,4 +1,5 @@
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const videoTranscriptionService = require("./video-transcription.service");
 
 function normalizeStatus(value, defaultValue = false) {
   if (value === undefined || value === null || value === "") {
@@ -26,6 +27,12 @@ function normalizeStatus(value, defaultValue = false) {
 
 function createVideoCatalogService(dependencies = {}) {
   const repository = dependencies.repository || videoCatalogRepository;
+  const transcriptionService =
+    dependencies.transcriptionService ||
+    videoTranscriptionService.createVideoTranscriptionService({
+      repository,
+      ...(dependencies.videoTranscription || {}),
+    });
 
   async function create(payload) {
     const driveFileId = payload?.drive_file_id?.trim();
@@ -179,6 +186,22 @@ function createVideoCatalogService(dependencies = {}) {
     return repository.findByDriveFileId(driveFileId);
   }
 
+  async function transcribeById(id, options = {}) {
+    if (!id) {
+      throw new Error("Video id is required");
+    }
+
+    return transcriptionService.transcribeById(id, options);
+  }
+
+  async function transcribeByDriveFileId(driveFileId, options = {}) {
+    if (!driveFileId) {
+      throw new Error("Drive file id is required");
+    }
+
+    return transcriptionService.transcribeByDriveFileId(driveFileId, options);
+  }
+
   return {
     create,
     delete: remove,
@@ -191,6 +214,8 @@ function createVideoCatalogService(dependencies = {}) {
     listByStatus,
     listTrailsByProfile,
     getFirstApprovedByProfileAndTrail,
+    transcribeByDriveFileId,
+    transcribeById,
     update,
   };
 }

@@ -28,6 +28,8 @@ function createApp(dependencies = {}) {
   app.post("/campaigns", campaignsController);
   app.get("/organizations", organizationsController.list);
   app.get("/video-catalog/trails", videoCatalogController.listTrailsByProfile);
+  app.post("/video-catalog/transcript", videoCatalogController.transcribeByDriveFileId);
+  app.post("/video-catalog/:id/transcript", videoCatalogController.transcribeById);
   app.get("/groups/search", groupsController.search);
   app.get("/groups/unclassified", groupsController.listWithoutSegment);
   app.post("/groups/sync", groupsController.syncFromEvolution);
