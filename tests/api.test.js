@@ -27,6 +27,19 @@ async function main() {
     organizationService: {
       list: async () => [{ id: "org-1", nome: "AMBEV" }],
     },
+    videoCatalogService: {
+      listTrailsByProfile: async () => [],
+      transcribeByDriveFileId: async (driveFileId, options) => ({
+        skipped: options.force !== "true",
+        transcript: options.force === "true" ? "Transcricao nova" : "Transcricao existente",
+        video: { id: "video-1", drive_file_id: driveFileId },
+      }),
+      transcribeById: async (id) => ({
+        skipped: false,
+        transcript: "Transcricao por id",
+        video: { id, drive_file_id: "drive-1" },
+      }),
+    },
     groupService: {
       listWithoutSegment: async () => [
         {
@@ -91,6 +104,36 @@ async function main() {
     assert.equal(organizationsResponse.status, 200);
     const organizationsPayload = await organizationsResponse.json();
     assert.deepEqual(organizationsPayload, [{ id: "org-1", nome: "AMBEV" }]);
+
+    const skippedTranscriptResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/transcript`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drive_file_id: "drive-1" }),
+    });
+
+    assert.equal(skippedTranscriptResponse.status, 200);
+    const skippedTranscriptPayload = await skippedTranscriptResponse.json();
+    assert.equal(skippedTranscriptPayload.skipped, true);
+    assert.equal(skippedTranscriptPayload.transcript, "Transcricao existente");
+
+    const forcedTranscriptResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/transcript?force=true`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drive_file_id: "drive-1" }),
+    });
+
+    assert.equal(forcedTranscriptResponse.status, 201);
+    const forcedTranscriptPayload = await forcedTranscriptResponse.json();
+    assert.equal(forcedTranscriptPayload.skipped, false);
+    assert.equal(forcedTranscriptPayload.transcript, "Transcricao nova");
+
+    const transcriptByIdResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-1/transcript`, {
+      method: "POST",
+    });
+
+    assert.equal(transcriptByIdResponse.status, 201);
+    const transcriptByIdPayload = await transcriptByIdResponse.json();
+    assert.equal(transcriptByIdPayload.transcript, "Transcricao por id");
 
     const groupSyncResponse = await fetch(`http://127.0.0.1:${port}/groups/sync`, {
       method: "POST",
@@ -181,6 +224,11 @@ async function main() {
       },
       organizationService: {
         list: async () => [],
+      },
+      videoCatalogService: {
+        listTrailsByProfile: async () => [],
+        transcribeByDriveFileId: async () => ({ skipped: true, transcript: "", video: null }),
+        transcribeById: async () => ({ skipped: true, transcript: "", video: null }),
       },
       groupService: {
         listWithoutSegment: async () => [],
