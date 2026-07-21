@@ -4,6 +4,7 @@ const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
 const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
+const defaultVideoCaptionsService = require("../services/video-captions.service");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
@@ -137,6 +138,52 @@ function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
   };
 }
 
+async function resolveDispatchCaption(jobData, captionSelector, logger = console) {
+  const fallbackCaption = jobData.legenda || "";
+
+  if (!jobData.video_id || !captionSelector || typeof captionSelector.selectCaptionForVideo !== "function") {
+    return fallbackCaption;
+  }
+
+  let selected;
+
+  try {
+    selected = await captionSelector.selectCaptionForVideo(jobData.video_id);
+  } catch (error) {
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "dispatch.caption.selection_failed",
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.group_id,
+          progress_group_id: jobData.progress_group_id,
+          video_id: jobData.video_id,
+          error_message: error.message,
+        })
+      );
+
+    return fallbackCaption;
+  }
+
+  if (!selected || !selected.text) {
+    return fallbackCaption;
+  }
+
+  logger.info &&
+    logger.info(
+      JSON.stringify({
+        event: "dispatch.caption.selected",
+        campaign_id: jobData.campaign_id,
+        group_id: jobData.group_id,
+        progress_group_id: jobData.progress_group_id,
+        video_id: jobData.video_id,
+        caption_id: selected.caption && selected.caption.id,
+      })
+    );
+
+  return selected.text;
+}
+
 function releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload) {
   if (downloadedVideo) {
     downloadedVideo.bytes = undefined;
@@ -164,6 +211,7 @@ function createDeliveryExecutor(params = {}) {
     logger = console,
     sender,
     videoCatalogRepository,
+    videoCaptionsService,
     videoDownloader,
   } = params;
   const shouldDownloadVideo = Boolean(
@@ -213,7 +261,8 @@ function createDeliveryExecutor(params = {}) {
           );
       }
 
-      deliveryPayload = buildDispatchDeliveryPayload(jobData, downloadedVideo);
+      const caption = await resolveDispatchCaption(jobData, videoCaptionsService, logger);
+      deliveryPayload = buildDispatchDeliveryPayload({ ...jobData, legenda: caption }, downloadedVideo);
       logger.info &&
         logger.info(
           JSON.stringify({
@@ -299,6 +348,7 @@ function createDispatchProcessor(options = {}) {
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
     dispatchConsistencyService,
+    videoCaptionsService,
     logger = console,
   } = options;
 
@@ -331,6 +381,7 @@ function createDispatchProcessor(options = {}) {
         logger,
         sender,
         videoCatalogRepository,
+        videoCaptionsService,
         videoDownloader,
       });
       const useDispatchConsistency = canUseDispatchConsistency(job.data, dispatchConsistencyService);
@@ -413,7 +464,10 @@ function createDispatchProcessor(options = {}) {
   };
 }
 
-const dispatchWorker = createDispatchProcessor({ dispatchConsistencyService: defaultDispatchConsistencyService });
+const dispatchWorker = createDispatchProcessor({
+  dispatchConsistencyService: defaultDispatchConsistencyService,
+  videoCaptionsService: defaultVideoCaptionsService,
+});
 
 function createDispatchWorker(options = {}) {
   const {
@@ -423,6 +477,7 @@ function createDispatchWorker(options = {}) {
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
     dispatchConsistencyService = defaultDispatchConsistencyService,
+    videoCaptionsService = defaultVideoCaptionsService,
     logger = console,
     ...workerOptions
   } = options;
@@ -436,6 +491,7 @@ function createDispatchWorker(options = {}) {
       videoCatalogRepository,
       progressRepository,
       dispatchConsistencyService,
+      videoCaptionsService,
       logger,
     }),
     workerOptions
@@ -463,6 +519,7 @@ module.exports = {
   createDispatchWorker,
   dispatchWorker,
   registerDispatchProgress,
+  resolveDispatchCaption,
   get dispatchQueue() {
     return getDispatchQueue();
   },

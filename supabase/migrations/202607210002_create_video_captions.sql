@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS public.video_captions (
-    video_id uuid PRIMARY KEY,
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    video_id uuid NOT NULL,
     caption_text text NOT NULL,
     criado_em timestamptz NOT NULL DEFAULT now(),
     ultimo_uso_em timestamptz,
@@ -54,3 +55,6 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_video_captions_ultimo_uso_em
     ON public.video_captions (ultimo_uso_em);
+
+CREATE INDEX IF NOT EXISTS idx_video_captions_video_ultimo_uso
+    ON public.video_captions (video_id, ultimo_uso_em);
