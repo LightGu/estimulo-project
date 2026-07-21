@@ -164,12 +164,57 @@ async function testIncrementalIndexingReportsProcessedCountAndPeriod() {
   assert.equal(result.videos[0].modified_time, "2026-07-14T10:30:00.000Z");
 }
 
+async function testStartsTranscriptionOnlyForNewVideosWithoutBlockingIndexing() {
+  const drive = createFakeDrive({
+    root: [{ id: "step-1", name: "Etapa 01", mimeType: FOLDER_MIME_TYPE }],
+    "step-1": [{ id: "persona-p", name: "#P01", mimeType: FOLDER_MIME_TYPE }],
+    "persona-p": [
+      {
+        id: "video-new",
+        name: "novo.mp4",
+        mimeType: "video/mp4",
+        fileExtension: "mp4",
+      },
+      {
+        id: "video-existing",
+        name: "existente.mp4",
+        mimeType: "video/mp4",
+        fileExtension: "mp4",
+      },
+    ],
+  });
+  const transcriptionCalls = [];
+
+  const result = await indexGoogleDriveVideos({
+    drive,
+    rootFolderId: "root",
+    upsertVideo: async (video) => ({
+      created: video.drive_file_id === "video-new",
+      video: {
+        id: `catalog-${video.drive_file_id}`,
+        ...video,
+      },
+    }),
+    transcribeVideo: async (video) => {
+      transcriptionCalls.push(video.drive_file_id);
+      await new Promise(() => {});
+    },
+    logger: {},
+  });
+
+  await Promise.resolve();
+
+  assert.equal(result.indexed_count, 2);
+  assert.deepEqual(transcriptionCalls, ["video-new"]);
+}
+
 async function main() {
   await testRecursiveIndexingMapsEtapaAndTrilha();
   await testFolderErrorsDoNotStopIndexing();
   await testInvalidVideosAreIgnored();
   await testIncrementalQueryKeepsFoldersAndFiltersFilesByModifiedTime();
   await testIncrementalIndexingReportsProcessedCountAndPeriod();
+  await testStartsTranscriptionOnlyForNewVideosWithoutBlockingIndexing();
 
   console.log("google-drive-video-indexer tests OK");
 }
