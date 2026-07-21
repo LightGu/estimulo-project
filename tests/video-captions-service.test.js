@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 
 const {
   createVideoCaptionsService,
+  generateCaptionFromTranscript,
   getStartOfTodayInTimeZone,
   normalizeCaptionText,
 } = require("../src/services/video-captions.service");
@@ -133,8 +134,75 @@ async function testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday() {
   ]);
 }
 
+async function testRejectsCaptionAndGeneratesNewOneFromTranscript() {
+  const calls = [];
+  const service = createVideoCaptionsService({
+    aiProviderAdapter: {
+      async generateCaptionFromTranscript(transcript) {
+        calls.push({ type: "generateFromTranscript", transcript });
+
+        return "Legenda coerente";
+      },
+    },
+    captionReviewService: {
+      async reviewCaption({ caption, transcript }) {
+        calls.push({ type: "review", caption, transcript });
+
+        return {
+          approved: caption === "Legenda coerente",
+          reason: caption === "Legenda coerente" ? "ok" : "fora da transcricao",
+        };
+      },
+    },
+    logger: {},
+    repository: {
+      async listUnusedTodayByVideo() {
+        calls.push({ type: "list" });
+
+        return [{ id: "caption-1", caption_text: "Legenda inventada" }];
+      },
+      async markUsed() {
+        calls.push({ type: "mark" });
+      },
+      async create(payload) {
+        calls.push({ type: "create", payload });
+
+        return { id: "caption-2", ...payload };
+      },
+    },
+  });
+
+  const selected = await service.selectCaptionForVideo("video-1", {
+    transcript: "Transcricao real do video",
+    requireCaptionReview: true,
+    now: new Date("2026-07-21T15:00:00.000Z"),
+  });
+
+  assert.equal(selected.text, "Legenda coerente");
+  assert.equal(selected.generated, true);
+  assert.deepEqual(calls, [
+    { type: "list" },
+    { type: "review", caption: "Legenda inventada", transcript: "Transcricao real do video" },
+    { type: "generateFromTranscript", transcript: "Transcricao real do video" },
+    { type: "review", caption: "Legenda coerente", transcript: "Transcricao real do video" },
+    {
+      type: "create",
+      payload: {
+        video_id: "video-1",
+        caption_text: "Legenda coerente",
+        ultimo_uso_em: "2026-07-21T15:00:00.000Z",
+      },
+    },
+  ]);
+}
+
 async function main() {
   assert.equal(normalizeCaptionText({ caption_text: " Texto " }), "Texto");
+  assert.equal(await generateCaptionFromTranscript({
+    async generateCaptionFromTranscript(transcript) {
+      return `Legenda de ${transcript}`;
+    },
+  }, "transcricao"), "Legenda de transcricao");
   assert.equal(
     getStartOfTodayInTimeZone(new Date("2026-07-21T15:00:00.000Z"), "America/Bahia").toISOString(),
     "2026-07-21T03:00:00.000Z"
@@ -143,6 +211,7 @@ async function main() {
   await testSelectsAndMarksUnusedCaption();
   await testReturnsNullWhenNoUnusedCaptionExists();
   await testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday();
+  await testRejectsCaptionAndGeneratesNewOneFromTranscript();
 
   console.log("video-captions-service tests OK");
 }

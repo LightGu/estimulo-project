@@ -3,9 +3,11 @@ const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
+const defaultCaptionReviewService = require("../services/caption-review.service");
 const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
 const defaultVideoCaptionsService = require("../services/video-captions.service");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
+const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
 const DISPATCH_INITIAL_STATUS = "pending";
@@ -185,6 +187,89 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
   return selected.text;
 }
 
+async function resolveVideoTranscript(jobData, videoCatalogRepository = defaultVideoCatalogRepository) {
+  const catalogTranscript = jobData.video_catalog && (jobData.video_catalog.transcript || jobData.video_catalog.transcricao);
+
+  if (catalogTranscript) {
+    return String(catalogTranscript).trim();
+  }
+
+  if (!jobData.video_id || !videoCatalogRepository || typeof videoCatalogRepository.findById !== "function") {
+    return "";
+  }
+
+  const video = await videoCatalogRepository.findById(jobData.video_id);
+
+  return String((video && (video.transcript || video.transcricao)) || "").trim();
+}
+
+async function prepareDispatchCaptionBeforeQueue(jobData, dependencies = {}) {
+  const {
+    captionReviewService = defaultCaptionReviewService,
+    logger = console,
+    videoCaptionsService = defaultVideoCaptionsService,
+    videoCatalogRepository = defaultVideoCatalogRepository,
+  } = dependencies;
+  const transcript = await resolveVideoTranscript(jobData, videoCatalogRepository);
+
+  if (!jobData.video_id) {
+    return jobData.legenda || "";
+  }
+
+  if (!jobData.video_id || !videoCaptionsService || typeof videoCaptionsService.selectCaptionForVideo !== "function") {
+    if (captionReviewService && typeof captionReviewService.assertCaptionApproved === "function") {
+      await captionReviewService.assertCaptionApproved({
+        caption: jobData.legenda,
+        transcript,
+        campaign_id: jobData.campaign_id,
+        group_id: jobData.group_id,
+        progress_group_id: jobData.progress_group_id,
+        video_id: jobData.video_id,
+      });
+    }
+
+    return jobData.legenda || "";
+  }
+
+  const selected = await videoCaptionsService.selectCaptionForVideo(jobData.video_id, {
+    transcript,
+    requireCaptionReview: true,
+    campaign_id: jobData.campaign_id,
+    group_id: jobData.group_id,
+    progress_group_id: jobData.progress_group_id,
+  });
+
+  if (selected && selected.text) {
+    logger.info &&
+      logger.info(
+        JSON.stringify({
+          event: "dispatch.caption.prepared",
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.group_id,
+          progress_group_id: jobData.progress_group_id,
+          video_id: jobData.video_id,
+          caption_id: selected.caption && selected.caption.id,
+          generated: Boolean(selected.generated),
+        })
+      );
+
+    return selected.text;
+  }
+
+  if (captionReviewService && typeof captionReviewService.assertCaptionApproved === "function") {
+    await captionReviewService.assertCaptionApproved({
+      caption: jobData.legenda,
+      transcript,
+      campaign_id: jobData.campaign_id,
+      group_id: jobData.group_id,
+      progress_group_id: jobData.progress_group_id,
+      video_id: jobData.video_id,
+    });
+  }
+
+  return jobData.legenda || "";
+}
+
 function releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload) {
   if (downloadedVideo) {
     downloadedVideo.bytes = undefined;
@@ -211,6 +296,7 @@ function createDeliveryExecutor(params = {}) {
     jobData,
     logger = console,
     sender,
+    captionReviewService,
     videoCatalogRepository,
     videoCaptionsService,
     videoDownloader,
@@ -262,7 +348,24 @@ function createDeliveryExecutor(params = {}) {
           );
       }
 
-      const caption = await resolveDispatchCaption(jobData, videoCaptionsService, logger, { downloadedVideo });
+      const caption = await resolveDispatchCaption(jobData, videoCaptionsService, logger, {
+        downloadedVideo,
+        transcript: jobData.video_id && captionReviewService ? await resolveVideoTranscript(jobData, videoCatalogRepository) : undefined,
+        requireCaptionReview: Boolean(jobData.video_id && captionReviewService),
+        campaign_id: jobData.campaign_id,
+        group_id: jobData.group_id,
+        progress_group_id: jobData.progress_group_id,
+      });
+      if (jobData.video_id && captionReviewService && typeof captionReviewService.assertCaptionApproved === "function") {
+        await captionReviewService.assertCaptionApproved({
+          caption,
+          transcript: await resolveVideoTranscript(jobData, videoCatalogRepository),
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.group_id,
+          progress_group_id: jobData.progress_group_id,
+          video_id: jobData.video_id,
+        });
+      }
       deliveryPayload = buildDispatchDeliveryPayload({ ...jobData, legenda: caption }, downloadedVideo);
       logger.info &&
         logger.info(
@@ -297,9 +400,11 @@ function createDeliveryExecutor(params = {}) {
 
 async function addDispatchJob(params, options = {}) {
   const jobData = buildDispatchJobData(params);
-  const jobOptions = buildDispatchJobOptions(jobData, options);
+  const { dependencies, ...jobOptionOverrides } = options;
+  const caption = await prepareDispatchCaptionBeforeQueue(jobData, dependencies || {});
+  const jobOptions = buildDispatchJobOptions(jobData, jobOptionOverrides);
 
-  return getDispatchQueue().add(DISPATCH_JOB_NAME, jobData, jobOptions);
+  return getDispatchQueue().add(DISPATCH_JOB_NAME, { ...jobData, legenda: caption }, jobOptions);
 }
 
 async function addJitteredDispatchJobs(params, options = {}) {
@@ -349,6 +454,7 @@ function createDispatchProcessor(options = {}) {
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
     dispatchConsistencyService,
+    captionReviewService,
     videoCaptionsService,
     logger = console,
   } = options;
@@ -381,6 +487,7 @@ function createDispatchProcessor(options = {}) {
         jobData: job.data,
         logger,
         sender,
+        captionReviewService,
         videoCatalogRepository,
         videoCaptionsService,
         videoDownloader,
@@ -466,6 +573,7 @@ function createDispatchProcessor(options = {}) {
 }
 
 const dispatchWorker = createDispatchProcessor({
+  captionReviewService: defaultCaptionReviewService,
   dispatchConsistencyService: defaultDispatchConsistencyService,
   videoCaptionsService: defaultVideoCaptionsService,
 });
@@ -478,6 +586,7 @@ function createDispatchWorker(options = {}) {
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
     dispatchConsistencyService = defaultDispatchConsistencyService,
+    captionReviewService = defaultCaptionReviewService,
     videoCaptionsService = defaultVideoCaptionsService,
     logger = console,
     ...workerOptions
@@ -492,6 +601,7 @@ function createDispatchWorker(options = {}) {
       videoCatalogRepository,
       progressRepository,
       dispatchConsistencyService,
+      captionReviewService,
       videoCaptionsService,
       logger,
     }),
@@ -519,7 +629,9 @@ module.exports = {
   createDispatchEvents,
   createDispatchWorker,
   dispatchWorker,
+  prepareDispatchCaptionBeforeQueue,
   registerDispatchProgress,
+  resolveVideoTranscript,
   resolveDispatchCaption,
   get dispatchQueue() {
     return getDispatchQueue();
