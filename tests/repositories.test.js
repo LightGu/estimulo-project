@@ -129,8 +129,21 @@ async function main() {
 
     await videoCaptionsRepository.listUnusedTodayByVideo("video-1", new Date("2026-07-21T03:00:00.000Z"), client);
     await videoCaptionsRepository.markUsed("caption-1", new Date("2026-07-21T15:00:00.000Z"), client);
+    await videoCaptionsRepository.create(
+      {
+        video_id: "video-1",
+        caption_text: "Legenda gerada",
+        ultimo_uso_em: "2026-07-21T15:00:00.000Z",
+      },
+      client
+    );
     assert.ok(client.__calls.some((call) => call.type === "from" && call.tableName === "video_captions"));
     assert.ok(client.__calls.some((call) => call.type === "or" && call.condition.includes("ultimo_uso_em.is.null")));
+    assert.ok(
+      client.__calls.some(
+        (call) => call.type === "insert" && call.payload.caption_text === "Legenda gerada"
+      )
+    );
 
     await groupVideoProgressRepository.registerDelivery({ group_id: "group-1", video_id: "video-1" }, client);
     await groupVideoProgressRepository.listDelivered("group-1", client);

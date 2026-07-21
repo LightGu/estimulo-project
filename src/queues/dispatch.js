@@ -138,7 +138,7 @@ function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
   };
 }
 
-async function resolveDispatchCaption(jobData, captionSelector, logger = console) {
+async function resolveDispatchCaption(jobData, captionSelector, logger = console, options = {}) {
   const fallbackCaption = jobData.legenda || "";
 
   if (!jobData.video_id || !captionSelector || typeof captionSelector.selectCaptionForVideo !== "function") {
@@ -148,7 +148,7 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
   let selected;
 
   try {
-    selected = await captionSelector.selectCaptionForVideo(jobData.video_id);
+    selected = await captionSelector.selectCaptionForVideo(jobData.video_id, options);
   } catch (error) {
     logger.warn &&
       logger.warn(
@@ -178,6 +178,7 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
         progress_group_id: jobData.progress_group_id,
         video_id: jobData.video_id,
         caption_id: selected.caption && selected.caption.id,
+        generated: Boolean(selected.generated),
       })
     );
 
@@ -261,7 +262,7 @@ function createDeliveryExecutor(params = {}) {
           );
       }
 
-      const caption = await resolveDispatchCaption(jobData, videoCaptionsService, logger);
+      const caption = await resolveDispatchCaption(jobData, videoCaptionsService, logger, { downloadedVideo });
       deliveryPayload = buildDispatchDeliveryPayload({ ...jobData, legenda: caption }, downloadedVideo);
       logger.info &&
         logger.info(
