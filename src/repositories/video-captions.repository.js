@@ -34,7 +34,22 @@ async function markUsed(id, usedAt = new Date(), client) {
   return data;
 }
 
+async function create(payload, client) {
+  const { data, error } = await getClient(client)
+    .from("video_captions")
+    .insert(payload)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 module.exports = {
+  create,
   listUnusedTodayByVideo,
   markUsed,
 };
