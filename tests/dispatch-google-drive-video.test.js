@@ -5,6 +5,7 @@ const {
   DISPATCH_SUCCESS_STATUS,
   buildDispatchJobData,
   createDispatchProcessor,
+  prepareDispatchCaptionBeforeQueue,
 } = require("../src/queues/dispatch");
 
 function createFakeJob(data) {
@@ -324,6 +325,77 @@ async function testDispatchRejectsDisabledVideoGroupBeforeJobData() {
   );
 }
 
+async function testPreparesReviewedCaptionBeforeQueueCreation() {
+  const calls = [];
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+      transcript: "Transcricao do video sobre planejamento financeiro",
+    },
+    legenda: "Legenda fallback",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+
+  const caption = await prepareDispatchCaptionBeforeQueue(jobData, {
+    logger: {},
+    videoCaptionsService: {
+      async selectCaptionForVideo(videoId, options) {
+        calls.push({ videoId, transcript: options.transcript, requireCaptionReview: options.requireCaptionReview });
+
+        return { text: "Legenda aprovada antes do job", caption: { id: "caption-1" }, generated: false };
+      },
+    },
+  });
+
+  assert.equal(caption, "Legenda aprovada antes do job");
+  assert.deepEqual(calls, [
+    {
+      videoId: "video-1",
+      transcript: "Transcricao do video sobre planejamento financeiro",
+      requireCaptionReview: true,
+    },
+  ]);
+}
+
+async function testRejectedCaptionDoesNotReachSender() {
+  const sentPayloads = [];
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+      transcript: "Transcricao real",
+    },
+    legenda: "Legenda inventada",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    captionReviewService: {
+      async assertCaptionApproved() {
+        throw new Error("Legenda reprovada: conteudo inventado");
+      },
+    },
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    sender: async (payload) => {
+      sentPayloads.push(payload);
+      return { provider: "fake" };
+    },
+  });
+
+  await assert.rejects(() => processor(createFakeJob(jobData)), /Legenda reprovada/);
+  assert.equal(sentPayloads.length, 0);
+}
+
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
   await testDispatchSelectsUnusedCaptionForVideo();
@@ -334,6 +406,8 @@ async function main() {
   await testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo();
   await testDispatchDoesNotSendWhenDownloadFails();
   await testDispatchRejectsDisabledVideoGroupBeforeJobData();
+  await testPreparesReviewedCaptionBeforeQueueCreation();
+  await testRejectedCaptionDoesNotReachSender();
 
   console.log("dispatch-google-drive-video tests OK");
 }

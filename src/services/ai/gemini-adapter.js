@@ -1,7 +1,11 @@
 const process = require("node:process");
 
 const AIProviderAdapter = require("./ai-provider-adapter");
-const { DEFAULT_TRANSCRIPTION_PROMPT } = require("./constants");
+const {
+  DEFAULT_CAPTION_GENERATION_PROMPT,
+  DEFAULT_CAPTION_REVIEW_PROMPT,
+  DEFAULT_TRANSCRIPTION_PROMPT,
+} = require("./constants");
 const { assertFetch, readResponseJson } = require("./http-utils");
 
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
@@ -125,6 +129,64 @@ async function waitForGeminiFile(file, options = {}) {
 }
 
 class GeminiAdapter extends AIProviderAdapter {
+  async generateText(prompt, callOptions = {}) {
+    const apiKey = callOptions.apiKey || this.options.apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
+    const fetchImplementation = callOptions.fetch || this.options.fetch || globalThis.fetch;
+    const model = callOptions.model || this.options.model || process.env.GEMINI_TEXT_MODEL || DEFAULT_GEMINI_MODEL;
+    const baseUrl = callOptions.baseUrl || this.options.baseUrl || "https://generativelanguage.googleapis.com";
+
+    assertFetch(fetchImplementation, "Gemini");
+
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY ou GOOGLE_AI_API_KEY e obrigatorio para gerar legenda");
+    }
+
+    const response = await fetchImplementation(
+      `${baseUrl}/v1beta/${resolveGeminiModelPath(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
+        }),
+      }
+    );
+
+    return extractGeminiText(await readResponseJson(response, "Falha ao gerar texto com Gemini"));
+  }
+
+  async generateCaptionFromTranscript(transcript, callOptions = {}) {
+    const prompt = [
+      callOptions.prompt || this.options.captionGenerationPrompt || DEFAULT_CAPTION_GENERATION_PROMPT,
+      "",
+      "Transcricao:",
+      String(transcript || "").trim(),
+    ].join("\n");
+
+    return this.generateText(prompt, callOptions);
+  }
+
+  async reviewCaptionConsistency({ caption, transcript }, callOptions = {}) {
+    const prompt = [
+      callOptions.prompt || this.options.captionReviewPrompt || DEFAULT_CAPTION_REVIEW_PROMPT,
+      "",
+      "Legenda:",
+      String(caption || "").trim(),
+      "",
+      "Transcricao:",
+      String(transcript || "").trim(),
+    ].join("\n");
+
+    return this.generateText(prompt, callOptions);
+  }
+
   async generateCaption(downloadedVideo, callOptions = {}) {
     const apiKey = callOptions.apiKey || this.options.apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
     const fetchImplementation = callOptions.fetch || this.options.fetch || globalThis.fetch;
