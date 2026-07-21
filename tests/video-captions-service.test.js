@@ -7,7 +7,7 @@ const {
   normalizeCaptionText,
 } = require("../src/services/video-captions.service");
 
-async function testSelectsAndMarksUnusedCaption() {
+async function testSelectsUnusedCaptionWithoutMarkingUse() {
   const calls = [];
   const service = createVideoCaptionsService({
     repository: {
@@ -43,6 +43,31 @@ async function testSelectsAndMarksUnusedCaption() {
   assert.equal(selected.text, "Legenda nova");
   assert.deepEqual(calls, [
     { type: "list", videoId: "video-1", todayStart: "2026-07-21T03:00:00.000Z" },
+  ]);
+}
+
+async function testMarksCaptionUsedOnDemand() {
+  const calls = [];
+  const service = createVideoCaptionsService({
+    repository: {
+      async markUsed(id, usedAt) {
+        calls.push({ type: "mark", id, usedAt: usedAt.toISOString() });
+
+        return {
+          id,
+          caption_text: "Legenda nova",
+          ultimo_uso_em: usedAt.toISOString(),
+        };
+      },
+    },
+  });
+
+  const marked = await service.markCaptionUsed("caption-1", {
+    usedAt: new Date("2026-07-21T15:00:00.000Z"),
+  });
+
+  assert.equal(marked.ultimo_uso_em, "2026-07-21T15:00:00.000Z");
+  assert.deepEqual(calls, [
     { type: "mark", id: "caption-1", usedAt: "2026-07-21T15:00:00.000Z" },
   ]);
 }
@@ -128,7 +153,6 @@ async function testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday() {
       payload: {
         video_id: "video-1",
         caption_text: "Legenda gerada por IA",
-        ultimo_uso_em: "2026-07-21T15:00:00.000Z",
       },
     },
   ]);
@@ -190,7 +214,6 @@ async function testRejectsCaptionAndGeneratesNewOneFromTranscript() {
       payload: {
         video_id: "video-1",
         caption_text: "Legenda coerente",
-        ultimo_uso_em: "2026-07-21T15:00:00.000Z",
       },
     },
   ]);
@@ -208,7 +231,8 @@ async function main() {
     "2026-07-21T03:00:00.000Z"
   );
 
-  await testSelectsAndMarksUnusedCaption();
+  await testSelectsUnusedCaptionWithoutMarkingUse();
+  await testMarksCaptionUsedOnDemand();
   await testReturnsNullWhenNoUnusedCaptionExists();
   await testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday();
   await testRejectsCaptionAndGeneratesNewOneFromTranscript();

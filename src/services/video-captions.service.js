@@ -112,7 +112,6 @@ function createVideoCaptionsService(dependencies = {}) {
     const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
     const todayStart = getStartOfTodayInTimeZone(now, options.timeZone || timeZone);
     const captions = await repository.listUnusedTodayByVideo(videoId, todayStart);
-    const usedAt = options.usedAt instanceof Date ? options.usedAt : now;
     const shouldReviewCaption = Boolean(options.requireCaptionReview || options.transcript);
     const reviewCaption = shouldReviewCaption
       ? typeof options.reviewCaption === "function"
@@ -159,12 +158,10 @@ function createVideoCaptionsService(dependencies = {}) {
       }
 
       if (captionRecord && captionRecord.id) {
-        const marked = await repository.markUsed(captionRecord.id, usedAt);
-
         return {
-          caption: marked || captionRecord,
+          caption: captionRecord,
           generated: Boolean(generated),
-          text: normalizeCaptionText(marked || captionRecord) || text,
+          text,
         };
       }
 
@@ -207,7 +204,6 @@ function createVideoCaptionsService(dependencies = {}) {
     const created = await repository.create({
       video_id: videoId,
       caption_text: generatedText,
-      ultimo_uso_em: usedAt.toISOString(),
     });
 
     return {
@@ -217,7 +213,18 @@ function createVideoCaptionsService(dependencies = {}) {
     };
   }
 
+  async function markCaptionUsed(captionId, options = {}) {
+    if (!captionId || !repository || typeof repository.markUsed !== "function") {
+      return null;
+    }
+
+    const usedAt = options.usedAt instanceof Date ? options.usedAt : new Date(options.usedAt || Date.now());
+
+    return repository.markUsed(captionId, usedAt);
+  }
+
   return {
+    markCaptionUsed,
     selectCaptionForVideo,
   };
 }
