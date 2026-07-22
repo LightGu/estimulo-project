@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Campanhas · Estímulo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+  </head>
+  <body data-page="campanhas">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Campanhas</h1>
+            <p>Criação e acompanhamento de campanhas de envio. (RF11–RF19, RF28)</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3>Nova campanha</h3></div>
+              <div class="card-body">
+                <div class="field-row" style="grid-template-columns:2fr 1fr;">
+                  <div class="field">
+                    <label for="campNome">Nome da campanha</label>
+                    <input id="campNome" type="text" placeholder="Ex.: Eufrásio - Gestão Financeira - Agosto">
+                  </div>
+                  <div class="field">
+                    <label for="campTrilha">Trilha</label>
+                    <select id="campTrilha"></select>
+                  </div>
+                </div>
+
+                <div class="callout" id="autoAssocCallout">
+                  A campanha associa automaticamente <strong id="autoAssocCount">0</strong> grupo(s) com a trilha selecionada e seleciona,
+                  para cada um, o próximo vídeo aprovado ainda não enviado (RF12, RF17–RF19).
+                </div>
+
+                <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;margin-top:14px;">
+                  <div class="field">
+                    <label for="campData">Data do disparo (RF14)</label>
+                    <input id="campData" type="date">
+                  </div>
+                  <div class="field">
+                    <label for="campJanelaInicio">Janela — início (RF15)</label>
+                    <input id="campJanelaInicio" type="time" value="08:00">
+                  </div>
+                  <div class="field">
+                    <label for="campJanelaFim">Janela — fim (RF15)</label>
+                    <input id="campJanelaFim" type="time" value="18:00">
+                  </div>
+                </div>
+
+                <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                  <div class="field">
+                    <label for="campIntervaloMin">Intervalo mínimo entre envios, min (RF16 / RF07)</label>
+                    <input id="campIntervaloMin" type="number" min="1" value="4">
+                  </div>
+                  <div class="field">
+                    <label for="campIntervaloMax">Intervalo máximo entre envios, min (RF16 / RF07)</label>
+                    <input id="campIntervaloMax" type="number" min="1" value="12">
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn" id="createCampaignButton" type="button">Criar campanha</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head"><h2>Campanhas cadastradas</h2></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Campanha</th>
+                    <th>Trilha</th>
+                    <th>Status</th>
+                    <th>Progresso</th>
+                    <th>Data de disparo</th>
+                    <th>Janela</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="campaignsBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="overlay" id="campaignGroupsOverlay" hidden>
+      <div class="modal" style="width:min(720px,100%);">
+        <div class="modal-header">
+          <h3 id="campaignGroupsTitle">Grupos da campanha</h3>
+          <button class="icon-btn-close" id="closeCampaignGroups" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-faint" style="font-size:12px;">RF13 — o operador pode cancelar grupos antes do disparo. RF28 — grupos pausados por fim de fila são sinalizados.</p>
+          <div class="table-wrap" style="border:0;">
+            <table>
+              <thead><tr><th>Grupo</th><th>Status</th><th>Ação</th></tr></thead>
+              <tbody id="campaignGroupsBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="closeCampaignGroups2" type="button">Fechar</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      const cancelledGroups = new Set();
+      const STATUS_BADGE = {
+        em_andamento: "badge-warning",
+        agendada: "badge-info",
+        concluida: "badge-success",
+      };
+
+      function trailGroupCount(trailName) {
+        return MOCK.groups.filter((g) => g.trilha === trailName && g.enviaVideo).length;
+      }
+
+      function populateTrailSelect() {
+        const select = document.getElementById("campTrilha");
+        select.innerHTML = MOCK.trails.map((t) => `<option value="${t.nome}">${t.nome}</option>`).join("");
+        updateAutoAssocCount();
+      }
+
+      function updateAutoAssocCount() {
+        const trilha = document.getElementById("campTrilha").value;
+        document.getElementById("autoAssocCount").textContent = trailGroupCount(trilha);
+      }
+
+      function renderCampaigns() {
+        document.getElementById("campaignsBody").innerHTML = MOCK.campaigns
+          .map((c) => {
+            const pct = Math.round((c.gruposEnviados / c.gruposTotal) * 100);
+            return `
+              <tr>
+                <td class="strong">${c.nome}</td>
+                <td>${c.trilha}</td>
+                <td><span class="badge ${STATUS_BADGE[c.status]}">${c.status.replace("_", " ")}</span></td>
+                <td style="min-width:160px;">
+                  <div class="progress"><span style="width:${pct}%"></span></div>
+                  <span class="text-faint" style="font-size:11.5px;">${c.gruposEnviados}/${c.gruposTotal} · ${c.gruposPausados} pausado(s) · ${c.gruposCancelados} cancelado(s)</span>
+                </td>
+                <td class="mono">${c.dataEnvio}</td>
+                <td>${c.janelaInicio}–${c.janelaFim}</td>
+                <td><button class="btn btn-secondary btn-sm" data-groups="${c.id}">Ver grupos</button></td>
+              </tr>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-groups]").forEach((btn) => btn.addEventListener("click", () => openCampaignGroups(btn.dataset.groups)));
+      }
+
+      function openCampaignGroups(campaignId) {
+        const campaign = MOCK.campaigns.find((c) => c.id === campaignId);
+        const groups = MOCK.groups.filter((g) => g.trilha === campaign.trilha);
+
+        document.getElementById("campaignGroupsTitle").textContent = `Grupos · ${campaign.nome}`;
+        document.getElementById("campaignGroupsBody").innerHTML = groups
+          .map((g) => {
+            const key = `${campaignId}:${g.id}`;
+            const cancelled = cancelledGroups.has(key);
+            let statusBadge;
+            if (cancelled) statusBadge = '<span class="badge badge-neutral">Cancelado</span>';
+            else if (g.filaStatus === "fim_de_fila") statusBadge = '<span class="badge badge-warning">Pausado — fim de fila</span>';
+            else if (campaign.status === "concluida") statusBadge = '<span class="badge badge-success">Enviado</span>';
+            else statusBadge = '<span class="badge badge-info">Pendente</span>';
+
+            const canCancel = !cancelled && campaign.status !== "concluida" && g.filaStatus !== "fim_de_fila";
+
+            return `
+              <tr>
+                <td class="strong">${g.nome}</td>
+                <td>${statusBadge}</td>
+                <td>${canCancel ? `<button class="btn btn-ghost btn-sm" data-cancel="${key}">Cancelar grupo</button>` : '<span class="text-faint">—</span>'}</td>
+              </tr>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-cancel]").forEach((btn) =>
+          btn.addEventListener("click", () => {
+            cancelledGroups.add(btn.dataset.cancel);
+            campaign.gruposCancelados += 1;
+            openCampaignGroups(campaignId);
+            renderCampaigns();
+            // TODO: DELETE /campaigns/:id/groups/:groupId (cancelar antes do disparo)
+          })
+        );
+
+        document.getElementById("campaignGroupsOverlay").hidden = false;
+      }
+
+      function closeCampaignGroups() {
+        document.getElementById("campaignGroupsOverlay").hidden = true;
+      }
+      document.getElementById("closeCampaignGroups").addEventListener("click", closeCampaignGroups);
+      document.getElementById("closeCampaignGroups2").addEventListener("click", closeCampaignGroups);
+
+      document.getElementById("campTrilha").addEventListener("change", updateAutoAssocCount);
+
+      document.getElementById("createCampaignButton").addEventListener("click", () => {
+        const nome = document.getElementById("campNome").value.trim();
+        const trilha = document.getElementById("campTrilha").value;
+        const data = document.getElementById("campData").value;
+        const janelaInicio = document.getElementById("campJanelaInicio").value;
+        const janelaFim = document.getElementById("campJanelaFim").value;
+        const intervaloMinMin = Number(document.getElementById("campIntervaloMin").value);
+        const intervaloMaxMin = Number(document.getElementById("campIntervaloMax").value);
+        if (!nome || !data) return;
+
+        const total = trailGroupCount(trilha);
+        MOCK.campaigns.unshift({
+          id: `camp-${Date.now()}`,
+          nome,
+          trilha,
+          status: "agendada",
+          gruposTotal: total,
+          gruposEnviados: 0,
+          gruposCancelados: 0,
+          gruposPausados: MOCK.groups.filter((g) => g.trilha === trilha && g.filaStatus === "fim_de_fila").length,
+          dataEnvio: data,
+          janelaInicio,
+          janelaFim,
+          intervaloMinMin,
+          intervaloMaxMin,
+        });
+
+        document.getElementById("campNome").value = "";
+        document.getElementById("campData").value = "";
+        renderCampaigns();
+        // TODO: POST /campaigns { nome, trilha, group_ids: [...todos os grupos da trilha], execution_at, janela, intervalo }
+      });
+
+      populateTrailSelect();
+      renderCampaigns();
+    </script>
+  </body>
+</html>
