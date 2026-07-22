@@ -1,5 +1,8 @@
 require("dotenv").config({ quiet: true });
 
+const { clearLoopbackDiscardProxyEnv } = require("../src/config/network");
+clearLoopbackDiscardProxyEnv(process.env, { logger: console });
+
 const createApp = require("../src/api/app");
 
 const port = Number(process.env.PORT || 3000);

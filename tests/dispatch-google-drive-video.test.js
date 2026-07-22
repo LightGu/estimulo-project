@@ -287,6 +287,65 @@ async function testDispatchRegistersProgressAfterConfirmedSend() {
   assert.equal(job.updates[1].progress_duplicate, false);
 }
 
+async function testManualDispatchBypassesCampaignConsistency() {
+  let consistencyCalled = false;
+  const progressCalls = [];
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    progress_group_id: "68ce77b5-b48e-4a41-8097-42be9002c09d",
+    campaign_id: "manual-test",
+    video_catalog: {
+      id: "74cc60eb-67f8-4a05-8839-d7dff4d512ce",
+      drive_file_id: "drive-file-1",
+    },
+    legenda: "Legenda de teste",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    dispatchConsistencyService: {
+      async executeDispatch() {
+        consistencyCalled = true;
+      },
+    },
+    videoDownloader: async () => ({
+      video_id: "74cc60eb-67f8-4a05-8839-d7dff4d512ce",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    sender: async () => ({ provider: "fake", status: 200 }),
+    progressRepository: {
+      hasDuplicate: async (groupId, videoId) => {
+        progressCalls.push({ type: "hasDuplicate", groupId, videoId });
+        return false;
+      },
+      registerDelivery: async (payload) => {
+        progressCalls.push({ type: "registerDelivery", payload });
+        return { id: "progress-1", ...payload };
+      },
+    },
+  });
+
+  await processor(createFakeJob(jobData));
+
+  assert.equal(consistencyCalled, false);
+  assert.deepEqual(progressCalls, [
+    {
+      type: "hasDuplicate",
+      groupId: "68ce77b5-b48e-4a41-8097-42be9002c09d",
+      videoId: "74cc60eb-67f8-4a05-8839-d7dff4d512ce",
+    },
+    {
+      type: "registerDelivery",
+      payload: {
+        group_id: "68ce77b5-b48e-4a41-8097-42be9002c09d",
+        video_id: "74cc60eb-67f8-4a05-8839-d7dff4d512ce",
+      },
+    },
+  ]);
+}
+
 async function testDispatchDoesNotRegisterProgressWhenSendFails() {
   let progressCalled = false;
   const jobData = buildDispatchJobData({
@@ -513,6 +572,7 @@ async function main() {
   await testDispatchStartsDownloadAndCaptionResolutionInParallel();
   await testDispatchDoesNotMarkCaptionUsedWhenSendFails();
   await testDispatchRegistersProgressAfterConfirmedSend();
+  await testManualDispatchBypassesCampaignConsistency();
   await testDispatchDoesNotRegisterProgressWhenSendFails();
   await testDispatchStillAcceptsLegacyVideoUrl();
   await testDispatchAcceptsMissingCaption();

@@ -66,6 +66,11 @@ async function main() {
         envia_video: payload.envia_video,
         trilha_override: payload.trilha_override,
       }),
+      dispatchTestVideo: async (id, payload) => ({
+        group: { id, ...payload, evolution_group_id: "120363@g.us" },
+        video: { id: "video-1", nome_do_arquivo: "aula.mp4", drive_file_id: "drive-1" },
+        dispatch_job: { id: "dispatch-1", name: "dispatch-content", queue: "dispatch" },
+      }),
     },
   });
 
@@ -168,6 +173,8 @@ async function main() {
     assert.match(unclassifiedGroupsPage, /fetch\("\/organizations"\)/);
     assert.match(unclassifiedGroupsPage, /name_contains/);
     assert.match(unclassifiedGroupsPage, /fetch\(`\/groups\/\$\{encodeURIComponent\(groupId\)\}`/);
+    assert.match(unclassifiedGroupsPage, /fetch\(`\/video-catalog\/\$\{encodeURIComponent\(videoId\)\}\/transcript`/);
+    assert.match(unclassifiedGroupsPage, /fetch\("\/campaigns"/);
     assert.match(unclassifiedGroupsPage, /Evolution group id/);
 
     const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1`, {
@@ -202,6 +209,21 @@ async function main() {
     });
 
     assert.equal(legacyOperationalSettingsResponse.status, 200);
+
+    const testDispatchResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/test-dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        segmento: "Pre infancia",
+        organization_id: "org-1",
+        envia_video: true,
+        trilha_override: "Trilha A",
+      }),
+    });
+
+    assert.equal(testDispatchResponse.status, 202);
+    const testDispatchPayload = await testDispatchResponse.json();
+    assert.equal(testDispatchPayload.dispatch_job.id, "dispatch-1");
 
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);
@@ -239,6 +261,11 @@ async function main() {
           groups: [],
         }),
         updateOperationalSettings: async (id, payload) => ({ id, ...payload }),
+        dispatchTestVideo: async (id, payload) => ({
+          group: { id, ...payload },
+          video: { id: "video-1" },
+          dispatch_job: { id: "dispatch-1" },
+        }),
       },
     });
 

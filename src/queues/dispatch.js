@@ -15,6 +15,7 @@ const DISPATCH_PROCESSING_STATUS = "processing";
 const DISPATCH_SUCCESS_STATUS = "sent";
 const DISPATCH_FAILED_STATUS = "failed";
 const DEFAULT_DISPATCH_JOB_TIMEOUT_MS = 25 * 60 * 1000;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let dispatchQueueInstance;
 
@@ -348,9 +349,9 @@ function canUseDispatchConsistency(jobData = {}, dispatchConsistencyService) {
   return Boolean(
     dispatchConsistencyService &&
       typeof dispatchConsistencyService.executeDispatch === "function" &&
-      jobData.campaign_id &&
-      jobData.progress_group_id &&
-      jobData.video_id
+      UUID_PATTERN.test(String(jobData.campaign_id || "")) &&
+      UUID_PATTERN.test(String(jobData.progress_group_id || "")) &&
+      UUID_PATTERN.test(String(jobData.video_id || ""))
   );
 }
 

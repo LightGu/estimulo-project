@@ -46,7 +46,8 @@ A geracao de legenda/transcricao de videos usa um adapter configuravel. Defina o
 ```env
 AI_PROVIDER=gemini
 GEMINI_API_KEY=change-me
-GEMINI_TRANSCRIPTION_MODEL=gemini-2.5-flash
+GEMINI_TRANSCRIPTION_MODEL=gemini-flash-latest
+GEMINI_TEXT_MODEL=gemini-flash-latest
 
 # ou
 AI_PROVIDER=gpt

@@ -276,6 +276,67 @@ async function testRejectsCaptionAndGeneratesNewOneFromTranscript() {
   ]);
 }
 
+async function testPrefersTranscriptOverDownloadedVideoForCaptionGeneration() {
+  const calls = [];
+  const service = createVideoCaptionsService({
+    aiProviderAdapter: {
+      async generateCaption(video) {
+        calls.push({ type: "generateFromVideo", videoName: video.name });
+
+        return "Transcricao crua";
+      },
+      async generateCaptionFromTranscript(transcript) {
+        calls.push({ type: "generateFromTranscript", transcript });
+
+        return "Legenda pronta";
+      },
+    },
+    captionReviewService: {
+      async reviewCaption({ caption, transcript }) {
+        calls.push({ type: "review", caption, transcript });
+
+        return { approved: true, reason: "ok" };
+      },
+    },
+    repository: {
+      async listUnusedTodayByVideo() {
+        calls.push({ type: "list" });
+
+        return [];
+      },
+      async create(payload) {
+        calls.push({ type: "create", payload });
+
+        return { id: "caption-1", ...payload };
+      },
+    },
+  });
+
+  const selected = await service.selectCaptionForVideo("video-1", {
+    downloadedVideo: {
+      bytes: Buffer.from("video-bytes"),
+      mime_type: "video/mp4",
+      name: "aula-01.mp4",
+    },
+    requireCaptionReview: true,
+    transcript: "Transcricao real do video",
+  });
+
+  assert.equal(selected.text, "Legenda pronta");
+  assert.deepEqual(calls, [
+    { type: "list" },
+    { type: "generateFromTranscript", transcript: "Transcricao real do video" },
+    { type: "review", caption: "Legenda pronta", transcript: "Transcricao real do video" },
+    {
+      type: "create",
+      payload: {
+        video_id: "video-1",
+        caption_text: "Legenda pronta",
+      },
+    },
+  ]);
+}
+
 async function main() {
   assert.equal(normalizeCaptionText({ caption_text: " Texto " }), "Texto");
   assert.equal(await generateCaptionFromTranscript({
@@ -294,6 +355,7 @@ async function main() {
   await testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday();
   await testAcceptsPendingDownloadedVideoForGeneration();
   await testRejectsCaptionAndGeneratesNewOneFromTranscript();
+  await testPrefersTranscriptOverDownloadedVideoForCaptionGeneration();
 
   console.log("video-captions-service tests OK");
 }
