@@ -400,6 +400,7 @@
             <td>
               <div class="actions">
                 <button type="button" data-action="save">Salvar</button>
+                <button type="button" data-action="transcribe" class="secondary">Transcrever</button>
                 <button type="button" data-action="dispatch" class="secondary">Enfileirar</button>
               </div>
             </td>
@@ -425,6 +426,7 @@
           segmentField.addEventListener("blur", () => loadTrailsForRow(row));
           trailField.addEventListener("change", () => updateVideoPreview(row));
           row.querySelector("[data-action='save']").addEventListener("click", () => saveGroup(row, group.id));
+          row.querySelector("[data-action='transcribe']").addEventListener("click", () => transcribeSelectedVideo(row));
           row.querySelector("[data-action='dispatch']").addEventListener("click", () => dispatchGroup(row, group.id));
 
           tbody.appendChild(row);
@@ -476,6 +478,7 @@
       }
 
       function updateVideoPreview(row) {
+        row.dataset.selectedVideoId = "";
         const trailField = row.querySelector("[data-field='trilha_override']");
         const preview = row.querySelector("[data-video-preview]");
         const selectedOption = trailField.selectedOptions[0];
@@ -486,7 +489,42 @@
           return;
         }
 
+        row.dataset.selectedVideoId = video.id;
         preview.textContent = `${video.ordem_geral || video.ordem || 1} - ${video.nome_do_arquivo || video.trilha || video.id}`;
+      }
+
+      async function transcribeSelectedVideo(row) {
+        const button = row.querySelector("[data-action='transcribe']");
+        const videoId = row.dataset.selectedVideoId;
+
+        if (!videoId) {
+          setRowStatus(row, "Selecione uma trilha com video", "error");
+          return;
+        }
+
+        button.disabled = true;
+        setRowStatus(row, "Transcrevendo video selecionado...");
+
+        try {
+          const response = await fetch(`/video-catalog/${encodeURIComponent(videoId)}/transcript`, {
+            method: "POST",
+          });
+          const payload = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Falha ao transcrever video");
+          }
+
+          setRowStatus(
+            row,
+            payload.skipped ? "Transcricao ja existia" : "Transcricao gerada",
+            "success"
+          );
+        } catch (error) {
+          setRowStatus(row, error.message, "error");
+        } finally {
+          button.disabled = false;
+        }
       }
 
       function padTimePart(value) {

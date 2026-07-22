@@ -207,9 +207,9 @@ function createVideoCaptionsService(dependencies = {}) {
 
     const adapter = getAIProviderAdapter();
     const generatedText = String(
-      downloadedVideo
-        ? await generateCaption(adapter, downloadedVideo, options.ai || {})
-        : await generateCaptionFromTranscript(adapter, transcript, options.ai || {})
+      transcript
+        ? await generateCaptionFromTranscript(adapter, transcript, options.ai || {})
+        : await generateCaption(adapter, downloadedVideo, options.ai || {})
     ).trim();
 
     if (!generatedText) {

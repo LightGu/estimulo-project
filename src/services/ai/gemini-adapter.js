@@ -8,7 +8,7 @@ const {
 } = require("./constants");
 const { assertFetch, readResponseJson } = require("./http-utils");
 
-const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
 
 function extractGeminiText(response) {
   const text = (response?.candidates || [])

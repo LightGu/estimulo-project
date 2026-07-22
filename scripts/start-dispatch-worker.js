@@ -1,3 +1,8 @@
+require("dotenv").config({ quiet: true });
+
+const { clearLoopbackDiscardProxyEnv } = require("../src/config/network");
+clearLoopbackDiscardProxyEnv(process.env, { logger: console });
+
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 const {
   createDispatchEvents,
