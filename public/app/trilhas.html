@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Trilhas de conteúdo · Estímulo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .trail-card { cursor: pointer; transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+      .trail-card:hover { box-shadow: var(--shadow-md); }
+      .trail-card.selected { border-color: var(--brand-blue); box-shadow: 0 0 0 3px rgba(78,121,255,0.15); }
+      .settings-row { display:flex; align-items:center; gap:12px; }
+    </style>
+  </head>
+  <body data-page="trilhas">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Trilhas de conteúdo</h1>
+            <p>Catálogo de vídeos por perfil de jornada. (RF10, RF26, RF27, RF30–RF34)</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn" id="newTrailButton" type="button">+ Nova trilha</button>
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="card card-pad settings-row">
+              <label class="switch" style="margin:0;"><input type="checkbox" id="requireReviewToggle" checked><span class="track"></span></label>
+              <div>
+                <strong style="font-size:13px;">Exigir revisão humana das legendas antes da disponibilização</strong>
+                <p class="text-faint" style="font-size:12px;">RF34 — quando ativado, vídeos com legenda gerada automaticamente ficam com status "Pendente" até aprovação manual (RF33).</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Trilhas por perfil de jornada</h2>
+              <div class="segmented" id="perfilTabs">
+                <button class="active" data-perfil="todos">Todos</button>
+                <button data-perfil="Maria">Maria</button>
+                <button data-perfil="Eufrásio">Eufrásio</button>
+                <button data-perfil="Pré-infância">Pré-infância</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-3" id="trailGrid"></div>
+          </section>
+
+          <section class="page-section" id="trailDetailSection" style="display:none;">
+            <div class="section-head">
+              <h2 id="trailDetailTitle">Vídeos da trilha</h2>
+              <span class="text-faint" id="trailDetailMeta"></span>
+            </div>
+            <div class="callout" id="importingCallout" style="display:none;">
+              Trilha detectada automaticamente no Google Drive: cadastro de vídeos e geração de legendas em processamento (RF30–RF32).
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ordem</th>
+                    <th>Arquivo</th>
+                    <th>Legenda</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="videosBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="overlay" id="newTrailOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Nova trilha</h3>
+          <button class="icon-btn-close" data-close-new type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label for="newTrailNome">Nome da trilha</label>
+            <input id="newTrailNome" type="text" placeholder="Ex.: Maria - Vendas pelo WhatsApp">
+          </div>
+          <div class="field">
+            <label for="newTrailPerfil">Perfil da jornada</label>
+            <select id="newTrailPerfil">
+              <option>Maria</option>
+              <option>Eufrásio</option>
+              <option>Pré-infância</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="newTrailVideos">Vídeos (um arquivo por linha)</label>
+            <textarea id="newTrailVideos" rows="4" placeholder="video-01.mp4&#10;video-02.mp4"></textarea>
+          </div>
+          <p class="text-faint" style="font-size:12px;">Todo vídeo cadastrado aqui é automaticamente associado a esta trilha (RF26).</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-close-new type="button">Cancelar</button>
+          <button class="btn" id="createTrailButton" type="button">Cadastrar trilha</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="moveOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Mover vídeo de trilha</h3>
+          <button class="icon-btn-close" data-close-move type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="moveVideoLabel" class="text-muted"></p>
+          <div class="field">
+            <label for="moveTargetTrail">Nova trilha</label>
+            <select id="moveTargetTrail"></select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-close-move type="button">Cancelar</button>
+          <button class="btn" id="confirmMoveButton" type="button">Mover vídeo (RF27)</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="captionOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Revisar legenda</h3>
+          <button class="icon-btn-close" data-close-caption type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="captionVideoLabel" class="text-muted"></p>
+          <div class="field">
+            <label for="captionText">Legenda gerada automaticamente</label>
+            <textarea id="captionText" rows="5"></textarea>
+          </div>
+          <p class="text-faint" style="font-size:12px;">RF33 — revise e edite o texto antes de aprovar a disponibilização do conteúdo.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-close-caption type="button">Cancelar</button>
+          <button class="btn" id="approveCaptionButton" type="button">Aprovar legenda</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      let activePerfil = "todos";
+      let selectedTrailId = MOCK.trails[0].id;
+      let movingVideo = null;
+      let reviewingVideo = null;
+
+      const CAPTION_BADGE = {
+        aprovada: "badge-success",
+        pendente: "badge-warning",
+        processando: "badge-info",
+      };
+
+      const TRAIL_STATUS_BADGE = {
+        ativa: '<span class="badge badge-success">Ativa</span>',
+        importando: '<span class="badge badge-info">Importando do Drive</span>',
+      };
+
+      function renderTrailGrid() {
+        const trails = MOCK.trails.filter((t) => activePerfil === "todos" || t.perfil === activePerfil);
+
+        document.getElementById("trailGrid").innerHTML = trails
+          .map(
+            (t) => `
+            <div class="card card-pad trail-card${t.id === selectedTrailId ? " selected" : ""}" data-trail="${t.id}">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <strong>${t.nome}</strong>
+                ${TRAIL_STATUS_BADGE[t.status]}
+              </div>
+              <p class="text-muted" style="margin-top:6px;font-size:12.5px;">Perfil: ${t.perfil} · Origem: ${t.origem}</p>
+              <p class="text-faint" style="margin-top:10px;font-size:12.5px;">${t.videosCount} vídeo(s) · importada em ${t.importadaEm}</p>
+            </div>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-trail]").forEach((card) => {
+          card.addEventListener("click", () => {
+            selectedTrailId = card.dataset.trail;
+            renderTrailGrid();
+            renderTrailDetail();
+          });
+        });
+      }
+
+      function renderTrailDetail() {
+        const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
+        const section = document.getElementById("trailDetailSection");
+        if (!trail) {
+          section.style.display = "none";
+          return;
+        }
+        section.style.display = "flex";
+        document.getElementById("trailDetailTitle").textContent = `Vídeos · ${trail.nome}`;
+        document.getElementById("trailDetailMeta").textContent = `${trail.videos.length} de ${trail.videosCount} vídeo(s) cadastrados`;
+        document.getElementById("importingCallout").style.display = trail.status === "importando" ? "flex" : "none";
+
+        document.getElementById("videosBody").innerHTML = trail.videos
+          .map(
+            (v) => `
+            <tr>
+              <td>${v.ordem}</td>
+              <td class="mono">${v.arquivo}</td>
+              <td><span class="badge ${CAPTION_BADGE[v.legendaStatus]}">${v.legendaStatus}</span></td>
+              <td style="display:flex;gap:6px;">
+                <button class="btn btn-secondary btn-sm" data-move="${v.id}">Mover de trilha</button>
+                ${v.legendaStatus !== "processando" ? `<button class="btn btn-ghost btn-sm" data-review="${v.id}">Revisar legenda</button>` : ""}
+              </td>
+            </tr>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(btn.dataset.move)));
+        document.querySelectorAll("[data-review]").forEach((btn) => btn.addEventListener("click", () => openCaption(btn.dataset.review)));
+      }
+
+      document.getElementById("perfilTabs").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-perfil]");
+        if (!btn) return;
+        document.querySelectorAll("#perfilTabs button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        activePerfil = btn.dataset.perfil;
+        renderTrailGrid();
+      });
+
+      // Nova trilha (RF26)
+      const newTrailOverlay = document.getElementById("newTrailOverlay");
+      document.getElementById("newTrailButton").addEventListener("click", () => (newTrailOverlay.hidden = false));
+      document.querySelectorAll("[data-close-new]").forEach((el) => el.addEventListener("click", () => (newTrailOverlay.hidden = true)));
+
+      document.getElementById("createTrailButton").addEventListener("click", () => {
+        const nome = document.getElementById("newTrailNome").value.trim();
+        const perfil = document.getElementById("newTrailPerfil").value;
+        const arquivos = document.getElementById("newTrailVideos").value.split("\n").map((s) => s.trim()).filter(Boolean);
+        if (!nome || !arquivos.length) return;
+
+        MOCK.trails.unshift({
+          id: `trilha-${Date.now()}`,
+          nome,
+          perfil,
+          origem: "Cadastro manual",
+          videosCount: arquivos.length,
+          status: "ativa",
+          importadaEm: new Date().toISOString().slice(0, 10),
+          videos: arquivos.map((arquivo, i) => ({ id: `vid-${Date.now()}-${i}`, ordem: i + 1, arquivo, legendaStatus: "pendente" })),
+        });
+
+        document.getElementById("newTrailNome").value = "";
+        document.getElementById("newTrailVideos").value = "";
+        newTrailOverlay.hidden = true;
+        renderTrailGrid();
+        // TODO: POST /video-catalog/trails { nome, perfil, videos }
+      });
+
+      // Mover vídeo de trilha (RF27)
+      const moveOverlay = document.getElementById("moveOverlay");
+      function openMove(videoId) {
+        const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
+        const video = trail.videos.find((v) => v.id === videoId);
+        movingVideo = { trailId: trail.id, videoId };
+        document.getElementById("moveVideoLabel").textContent = `Vídeo: ${video.arquivo}`;
+        const select = document.getElementById("moveTargetTrail");
+        select.innerHTML = MOCK.trails
+          .filter((t) => t.id !== trail.id)
+          .map((t) => `<option value="${t.id}">${t.nome}</option>`)
+          .join("");
+        moveOverlay.hidden = false;
+      }
+      document.querySelectorAll("[data-close-move]").forEach((el) => el.addEventListener("click", () => (moveOverlay.hidden = true)));
+
+      document.getElementById("confirmMoveButton").addEventListener("click", () => {
+        const fromTrail = MOCK.trails.find((t) => t.id === movingVideo.trailId);
+        const toTrail = MOCK.trails.find((t) => t.id === document.getElementById("moveTargetTrail").value);
+        const videoIndex = fromTrail.videos.findIndex((v) => v.id === movingVideo.videoId);
+        const [video] = fromTrail.videos.splice(videoIndex, 1);
+        video.ordem = toTrail.videos.length + 1;
+        toTrail.videos.push(video);
+        fromTrail.videosCount = fromTrail.videos.length;
+        toTrail.videosCount = toTrail.videos.length;
+
+        moveOverlay.hidden = true;
+        renderTrailGrid();
+        renderTrailDetail();
+        // TODO: PATCH /video-catalog/videos/:id { trilha_id }
+      });
+
+      // Revisar legenda (RF33)
+      const captionOverlay = document.getElementById("captionOverlay");
+      function openCaption(videoId) {
+        const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
+        const video = trail.videos.find((v) => v.id === videoId);
+        reviewingVideo = { trailId: trail.id, videoId };
+        document.getElementById("captionVideoLabel").textContent = `Vídeo: ${video.arquivo}`;
+        document.getElementById("captionText").value =
+          video.legendaStatus === "aprovada"
+            ? "Legenda já aprovada. Edite e salve para gerar uma nova revisão."
+            : "Legenda gerada automaticamente: revise o conteúdo antes de aprovar.";
+        captionOverlay.hidden = false;
+      }
+      document.querySelectorAll("[data-close-caption]").forEach((el) => el.addEventListener("click", () => (captionOverlay.hidden = true)));
+
+      document.getElementById("approveCaptionButton").addEventListener("click", () => {
+        const trail = MOCK.trails.find((t) => t.id === reviewingVideo.trailId);
+        const video = trail.videos.find((v) => v.id === reviewingVideo.videoId);
+        video.legendaStatus = "aprovada";
+        captionOverlay.hidden = true;
+        renderTrailDetail();
+        // TODO: PATCH /video-catalog/videos/:id { legenda, legenda_status: 'aprovada' }
+      });
+
+      renderTrailGrid();
+      renderTrailDetail();
+    </script>
+  </body>
+</html>

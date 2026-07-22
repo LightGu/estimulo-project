@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Configurações · Estímulo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .settings-row { display:flex; align-items:center; gap:12px; padding:16px 20px; }
+      .settings-row + .settings-row { border-top: 1px solid var(--line); }
+    </style>
+  </head>
+  <body data-page="configuracoes">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Configurações</h1>
+            <p>Parâmetros globais de agenda e regras de negócio. (RF07, RF34)</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3>Agenda de grupos (RF07)</h3></div>
+              <div class="card-body">
+                <p class="text-muted" style="margin-bottom:14px;">
+                  Tempo mínimo e máximo utilizado para gerar o horário randomizado de cada grupo (RF02) e o intervalo padrão sugerido ao criar campanhas (RF16).
+                </p>
+                <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                  <div class="field">
+                    <label for="minInterval">Tempo mínimo entre envios (minutos)</label>
+                    <input id="minInterval" type="number" min="1" value="4">
+                  </div>
+                  <div class="field">
+                    <label for="maxInterval">Tempo máximo entre envios (minutos)</label>
+                    <input id="maxInterval" type="number" min="1" value="12">
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="scheduleSaveStatus" style="margin-right:auto;"></span>
+                <button class="btn" id="saveScheduleButton" type="button">Salvar</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3>Legendas automáticas (RF34)</h3></div>
+              <div class="settings-row">
+                <label class="switch" style="margin:0;"><input type="checkbox" id="requireReviewToggle" checked><span class="track"></span></label>
+                <div>
+                  <strong style="font-size:13px;">Exigir revisão humana antes da disponibilização</strong>
+                  <p class="text-faint" style="font-size:12px;">Quando desativado, legendas geradas automaticamente (RF32) ficam disponíveis sem aprovação manual (RF33).</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3>Segmentos de grupo (RF06)</h3></div>
+              <div class="card-body">
+                <p class="text-muted" style="margin-bottom:12px;">Segmentos disponíveis para classificação de grupos.</p>
+                <div class="chip-list" id="segmentChips"></div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      document.getElementById("segmentChips").innerHTML = MOCK.segments.map((s) => `<span class="chip">${s}</span>`).join("");
+
+      document.getElementById("saveScheduleButton").addEventListener("click", () => {
+        const status = document.getElementById("scheduleSaveStatus");
+        status.textContent = "Configurações salvas.";
+        status.style.color = "var(--success)";
+        // TODO: PATCH /settings/schedule { min_interval_min, max_interval_min }
+        setTimeout(() => (status.textContent = ""), 2500);
+      });
+
+      document.getElementById("requireReviewToggle").addEventListener("change", () => {
+        // TODO: PATCH /settings/captions { require_human_review }
+      });
+    </script>
+  </body>
+</html>

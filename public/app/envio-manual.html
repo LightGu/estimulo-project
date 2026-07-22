@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Envio manual · Estímulo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+  </head>
+  <body data-page="envio-manual">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Envio manual</h1>
+            <p>Disparo imediato de conteúdo para um grupo. (RF01, RF02)</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3>Enviar conteúdo agora (RF01)</h3></div>
+              <div class="card-body">
+                <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                  <div class="field">
+                    <label for="sendGroup">Grupo</label>
+                    <select id="sendGroup"></select>
+                  </div>
+                  <div class="field">
+                    <label for="sendVideo">Vídeo</label>
+                    <select id="sendVideo"></select>
+                  </div>
+                </div>
+                <div class="callout" id="groupInfoCallout"></div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="sendStatus" style="margin-right:auto;"></span>
+                <button class="btn" id="sendNowButton" type="button">Enviar agora</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Próximos envios automáticos programados</h2>
+              <span class="text-faint">RF02 — horário gerado aleatoriamente pelo sistema dentro da janela da campanha</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Grupo</th>
+                    <th>Trilha</th>
+                    <th>Data</th>
+                    <th>Horário programado (randomizado)</th>
+                  </tr>
+                </thead>
+                <tbody id="scheduledBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      function videosForGroup(groupId) {
+        const group = MOCK.groups.find((g) => g.id === groupId);
+        if (!group || !group.trilha) return [];
+        const trail = MOCK.trails.find((t) => t.nome === group.trilha);
+        return trail ? trail.videos : [];
+      }
+
+      function populateGroupSelect() {
+        const select = document.getElementById("sendGroup");
+        select.innerHTML = MOCK.groups
+          .filter((g) => g.enviaVideo)
+          .map((g) => `<option value="${g.id}">${g.nome}</option>`)
+          .join("");
+        updateGroupInfo();
+      }
+
+      function updateGroupInfo() {
+        const groupId = document.getElementById("sendGroup").value;
+        const group = MOCK.groups.find((g) => g.id === groupId);
+        const videos = videosForGroup(groupId);
+
+        const select = document.getElementById("sendVideo");
+        select.innerHTML = videos.length
+          ? videos.map((v) => `<option value="${v.id}">${v.ordem} — ${v.arquivo}</option>`).join("")
+          : '<option value="">Nenhum vídeo disponível na trilha deste grupo</option>';
+
+        document.getElementById("groupInfoCallout").innerHTML = group
+          ? `Trilha: <strong>${group.trilha || "sem trilha definida"}</strong> · Próximo vídeo aprovado ainda não enviado é selecionado automaticamente (RF17–RF19), mas pode ser trocado acima.`
+          : "";
+      }
+
+      document.getElementById("sendGroup").addEventListener("change", updateGroupInfo);
+
+      document.getElementById("sendNowButton").addEventListener("click", () => {
+        const groupId = document.getElementById("sendGroup").value;
+        const group = MOCK.groups.find((g) => g.id === groupId);
+        const statusEl = document.getElementById("sendStatus");
+        const button = document.getElementById("sendNowButton");
+
+        button.disabled = true;
+        statusEl.textContent = "Processando envio…";
+        statusEl.className = "text-muted";
+
+        // TODO: POST /groups/:id/test-dispatch (ou endpoint de envio manual equivalente)
+        setTimeout(() => {
+          statusEl.textContent = `Vídeo enviado para "${group.nome}" via Evolution API (RF21).`;
+          statusEl.style.color = "var(--success)";
+          button.disabled = false;
+        }, 900);
+      });
+
+      function renderScheduled() {
+        const rows = MOCK.groups.filter((g) => g.enviaVideo && g.horarioProgramado);
+        document.getElementById("scheduledBody").innerHTML = rows
+          .map(
+            (g) => `
+            <tr>
+              <td class="strong">${g.nome}</td>
+              <td>${g.trilha || "—"}</td>
+              <td class="mono">2026-07-21</td>
+              <td><span class="badge badge-info">${g.horarioProgramado}</span></td>
+            </tr>`
+          )
+          .join("");
+      }
+
+      populateGroupSelect();
+      renderScheduled();
+    </script>
+  </body>
+</html>

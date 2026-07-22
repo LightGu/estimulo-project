@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Painel · Estímulo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+  </head>
+  <body data-page="dashboard">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Painel geral</h1>
+            <p>Visão consolidada dos envios de conteúdo da Estímulo.</p>
+          </div>
+          <div class="topbar-actions">
+            <span class="badge badge-info">Ambiente de demonstração</span>
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="grid grid-cols-4" id="kpiGrid"></div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Tentativas de envio recentes</h2>
+              <a class="btn btn-secondary btn-sm" href="monitoramento.html">Ver monitoramento completo</a>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Grupo</th>
+                    <th>Campanha</th>
+                    <th>Vídeo</th>
+                    <th>Status</th>
+                    <th>Tentativa em</th>
+                  </tr>
+                </thead>
+                <tbody id="dispatchBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Campanhas em destaque</h2>
+              <a class="btn btn-secondary btn-sm" href="campanhas.html">Ver todas as campanhas</a>
+            </div>
+            <div class="grid grid-cols-3" id="campaignCards"></div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Atalhos</h2>
+            </div>
+            <div class="grid grid-cols-4">
+              <a class="card card-pad" href="grupos.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
+                <strong>Classificar grupos</strong>
+                <span class="text-muted">Segmento, organização e trilha por grupo.</span>
+              </a>
+              <a class="card card-pad" href="envio-manual.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
+                <strong>Enviar conteúdo agora</strong>
+                <span class="text-muted">Disparo manual para um grupo específico.</span>
+              </a>
+              <a class="card card-pad" href="campanhas.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
+                <strong>Nova campanha</strong>
+                <span class="text-muted">Escolher trilha e programar disparo.</span>
+              </a>
+              <a class="card card-pad" href="trilhas.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
+                <strong>Cadastrar trilha</strong>
+                <span class="text-muted">Novos vídeos e legendas.</span>
+              </a>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      const STATUS_BADGE = {
+        enviado: "badge-success",
+        processando: "badge-warning",
+        erro: "badge-danger",
+      };
+
+      function renderKpis() {
+        const grupos = MOCK.groups;
+        const enviosHoje = MOCK.dispatchLog.filter((d) => d.tentativaEm.startsWith("2026-07-21"));
+        const erros = enviosHoje.filter((d) => d.status === "erro").length;
+        const taxaErro = enviosHoje.length ? Math.round((erros / enviosHoje.length) * 100) : 0;
+        const naoClassificados = grupos.filter((g) => !g.classificado).length;
+
+        const cards = [
+          { label: "Grupos sincronizados", value: grupos.length, sub: `${naoClassificados} ainda não classificados`, bar: "var(--brand-blue)" },
+          { label: "Campanhas ativas", value: MOCK.campaigns.filter((c) => c.status !== "concluida").length, sub: `${MOCK.campaigns.length} no total`, bar: "var(--brand-purple)" },
+          { label: "Envios hoje", value: enviosHoje.length, sub: "Registrados no log de tentativas", bar: "var(--brand-teal)" },
+          { label: "Taxa de erro hoje", value: `${taxaErro}%`, sub: `${erros} tentativa(s) com falha`, bar: "var(--danger)" },
+        ];
+
+        document.getElementById("kpiGrid").innerHTML = cards
+          .map(
+            (c) => `
+            <div class="card stat-card" style="--accent-bar:${c.bar}">
+              <span class="stat-label">${c.label}</span>
+              <span class="stat-value">${c.value}</span>
+              <span class="stat-sub">${c.sub}</span>
+            </div>`
+          )
+          .join("");
+      }
+
+      function renderDispatchLog() {
+        const rows = MOCK.dispatchLog.slice(0, 5);
+        document.getElementById("dispatchBody").innerHTML = rows
+          .map(
+            (d) => `
+            <tr>
+              <td class="strong">${d.grupo}</td>
+              <td>${d.campanha}</td>
+              <td>${d.video}</td>
+              <td><span class="badge ${STATUS_BADGE[d.status]}">${d.status}</span></td>
+              <td class="mono">${d.tentativaEm}</td>
+            </tr>`
+          )
+          .join("");
+      }
+
+      function renderCampaignCards() {
+        const cards = MOCK.campaigns.slice(0, 3).map((c) => {
+          const pct = Math.round((c.gruposEnviados / c.gruposTotal) * 100);
+          return `
+            <div class="card card-pad">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                <strong>${c.nome}</strong>
+                <span class="badge ${c.status === "concluida" ? "badge-success" : c.status === "agendada" ? "badge-info" : "badge-warning"}">${c.status.replace("_", " ")}</span>
+              </div>
+              <p class="text-muted" style="margin-top:6px;">Trilha: ${c.trilha}</p>
+              <div class="progress" style="margin-top:14px;"><span style="width:${pct}%"></span></div>
+              <p class="text-faint" style="margin-top:6px;">${c.gruposEnviados}/${c.gruposTotal} grupos enviados</p>
+            </div>`;
+        });
+        document.getElementById("campaignCards").innerHTML = cards.join("");
+      }
+
+      renderKpis();
+      renderDispatchLog();
+      renderCampaignCards();
+    </script>
+  </body>
+</html>
