@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Grupos · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
@@ -47,14 +49,6 @@
                   <option value="nao-classificados">Não classificados</option>
                 </select>
               </div>
-              <div class="field">
-                <label for="filaFilter">Status da fila</label>
-                <select id="filaFilter">
-                  <option value="todos">Todos</option>
-                  <option value="ativo">Em dia</option>
-                  <option value="fim_de_fila">Pausado (fim de fila)</option>
-                </select>
-              </div>
               <div class="toolbar-spacer"></div>
               <button class="btn btn-secondary" id="syncButton" type="button">Sincronizar com Evolution API</button>
             </div>
@@ -81,7 +75,6 @@
                     <th>Classificação</th>
                     <th>Envia vídeo</th>
                     <th>Trilha</th>
-                    <th>Fila</th>
                     <th>Ações</th>
                   </tr>
                 </thead>
@@ -104,19 +97,11 @@
             <label for="editOrg">Organização</label>
             <select id="editOrg"></select>
           </div>
-          <div class="field-row" style="grid-template-columns:1fr 1fr;">
-            <div class="field">
-              <label for="editSegmento">Perfil</label>
-              <select id="editSegmento">
-                <option value="">Sem perfil</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="editTrilha">Trilha</label>
-              <select id="editTrilha">
-                <option value="">Sem trilha definida</option>
-              </select>
-            </div>
+          <div class="field">
+            <label for="editSegmento">Perfil</label>
+            <select id="editSegmento">
+              <option value="">Sem perfil</option>
+            </select>
           </div>
 
           <div class="field" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
@@ -160,26 +145,18 @@
 
       function enviaVideoBadge(group) {
         if (!group.enviaVideo) {
-          return `<span class="badge badge-neutral">Não envia vídeo</span><span class="video-off-reason">${group.naoEnviaVideoMotivo || "Desabilitado manualmente"}</span>`;
+          return `<span class="badge badge-danger">Não envia vídeo</span><span class="video-off-reason">${group.naoEnviaVideoMotivo || "Desabilitado manualmente"}</span>`;
         }
         return '<span class="badge badge-info">Habilitado</span>';
-      }
-
-      function filaBadge(group) {
-        return group.filaStatus === "fim_de_fila"
-          ? '<span class="badge badge-warning">Fim de fila</span>'
-          : '<span class="badge badge-success">Em dia</span>';
       }
 
       function matchesFilters(group) {
         const q = document.getElementById("searchInput").value.trim().toLowerCase();
         const statusFilter = document.getElementById("statusFilter").value;
-        const filaFilter = document.getElementById("filaFilter").value;
 
         if (q && !group.nome.toLowerCase().includes(q)) return false;
         if (statusFilter === "classificados" && !group.classificado) return false;
         if (statusFilter === "nao-classificados" && group.classificado) return false;
-        if (filaFilter !== "todos" && group.filaStatus !== filaFilter) return false;
         return true;
       }
 
@@ -189,7 +166,7 @@
 
         if (!filtered.length) {
           document.getElementById("groupsBody").innerHTML = `
-            <tr><td colspan="8"><div class="empty-state"><strong>Nenhum grupo encontrado</strong><span>Ajuste os filtros ou sincronize novamente com a Evolution API.</span></div></td></tr>`;
+            <tr><td colspan="7"><div class="empty-state"><strong>Nenhum grupo encontrado</strong><span>Ajuste os filtros ou sincronize novamente com a Evolution API.</span></div></td></tr>`;
           return;
         }
 
@@ -203,7 +180,6 @@
               <td>${classificationBadge(g)}</td>
               <td>${enviaVideoBadge(g)}</td>
               <td>${g.trilha || '<span class="text-faint">Sem trilha</span>'}</td>
-              <td>${filaBadge(g)}</td>
               <td><button class="btn btn-secondary btn-sm" data-edit="${g.id}">Editar</button></td>
             </tr>`
           )
@@ -238,13 +214,6 @@
         );
         document.getElementById("editSegmento").value = group.segmento || "";
 
-        populateSelect(
-          document.getElementById("editTrilha"),
-          MOCK.trails.map((t) => ({ value: t.nome, label: t.nome })),
-          "Sem trilha definida"
-        );
-        document.getElementById("editTrilha").value = group.trilha || "";
-
         document.getElementById("editEnviaVideo").checked = group.enviaVideo;
         document.getElementById("editMotivo").value = group.naoEnviaVideoMotivo || "";
         document.getElementById("motivoField").style.display = group.enviaVideo ? "none" : "block";
@@ -275,19 +244,17 @@
 
         group.organizationId = document.getElementById("editOrg").value || null;
         group.segmento = document.getElementById("editSegmento").value || null;
-        group.trilha = document.getElementById("editTrilha").value || null;
         group.enviaVideo = document.getElementById("editEnviaVideo").checked;
         group.naoEnviaVideoMotivo = group.enviaVideo ? null : document.getElementById("editMotivo").value.trim() || "Desabilitado manualmente";
         group.classificado = Boolean(group.segmento && group.organizationId);
 
         closeEdit();
         renderGroups();
-        // TODO: PATCH /groups/:id com { organization_id, segmento, envia_video, trilha_override }
+        // TODO: PATCH /groups/:id com { organization_id, segmento, envia_video }
       });
 
       document.getElementById("searchInput").addEventListener("input", renderGroups);
       document.getElementById("statusFilter").addEventListener("change", renderGroups);
-      document.getElementById("filaFilter").addEventListener("change", renderGroups);
 
       document.getElementById("syncButton").addEventListener("click", () => {
         const panel = document.getElementById("syncPanel");

@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Relatório operacional · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
@@ -80,7 +82,6 @@
                     <th>Organização</th>
                     <th>Grupo</th>
                     <th>Campanha</th>
-                    <th>Trilha</th>
                     <th>Conteúdo</th>
                     <th>Status</th>
                   </tr>
@@ -155,7 +156,7 @@
       function renderTable(rows) {
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
         if (!rows.length) {
-          document.getElementById("reportBody").innerHTML = `<tr><td colspan="7"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
+          document.getElementById("reportBody").innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
         document.getElementById("reportBody").innerHTML = rows
@@ -166,9 +167,8 @@
               <td>${r.organizacao}</td>
               <td class="strong">${r.grupo}</td>
               <td>${r.campanha}</td>
-              <td>${r.trilha}</td>
               <td>${r.conteudo}</td>
-              <td><span class="badge ${STATUS_BADGE[r.status]}">${r.status}</span></td>
+              <td><span class="badge ${STATUS_BADGE[r.status]}" title="${r.motivo || ""}">${r.status}</span></td>
             </tr>`
           )
           .join("");

@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Trilhas de conteúdo · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
@@ -176,6 +178,7 @@
     </div>
 
     <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/helpers.js"></script>
     <script src="assets/js/nav.js"></script>
     <script>
       let activePerfil = "todos";
@@ -222,7 +225,7 @@
             (t) => `
             <div class="card card-pad trail-card${t.id === selectedTrailId ? " selected" : ""}" data-trail="${t.id}">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                <strong>${t.nome}</strong>
+                <strong>${trilhaShortName(t.nome)}</strong>
                 ${TRAIL_STATUS_BADGE[t.status]}
               </div>
               <p class="text-muted" style="margin-top:6px;font-size:12.5px;">Perfil: ${t.perfil} · Origem: ${t.origem}</p>
@@ -250,7 +253,7 @@
           return;
         }
         section.style.display = "flex";
-        document.getElementById("trailDetailTitle").textContent = `${trail.nome}`;
+        document.getElementById("trailDetailTitle").textContent = trilhaShortName(trail.nome);
         document.getElementById("trailDetailMeta").textContent = `${trail.subtemas.length} subtema(s) · ${trailVideoCount(trail)} de ${trail.videosCount} vídeo(s) cadastrados`;
         document.getElementById("importingCallout").style.display = trail.status === "importando" ? "flex" : "none";
 

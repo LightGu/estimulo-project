@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Calendário editorial · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
@@ -11,15 +13,21 @@
     <link rel="stylesheet" href="assets/css/layout.css">
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
-      .cal-grid { display:grid; grid-template-columns: repeat(7, 1fr); gap:8px; }
+      body[data-page="calendario"] .page {
+        max-width: none;
+        height: calc(100vh - var(--topbar-h, 73px));
+        overflow-y: auto;
+      }
+      .cal-fill { flex: 1 1 auto; min-height: 320px; display: flex; flex-direction: column; gap: 8px; }
+      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+      #calendarGrid { flex: 1 1 auto; grid-auto-rows: 1fr; }
       .cal-weekday { text-align:center; font-size:11.5px; font-weight:700; color:var(--text-faint); text-transform:uppercase; padding-bottom:4px; }
-      .cal-cell { min-height:96px; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; background:var(--surface); display:flex; flex-direction:column; gap:4px; }
+      .cal-cell { min-height:70px; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; background:var(--surface); display:flex; flex-direction:column; gap:4px; overflow:hidden; }
       .cal-cell.outside { opacity:0.35; }
       .cal-cell.today { border-color: var(--brand-blue); box-shadow: 0 0 0 2px rgba(78,121,255,0.15); }
       .cal-daynum { font-size:12px; font-weight:700; color:var(--text-muted); }
-      .cal-chip { font-size:10.5px; padding:3px 6px; border-radius:5px; font-weight:600; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      .cal-chip.pilula { background: rgba(78,121,255,0.15); color: var(--brand-blue); }
-      .cal-chip.mensagem { background: rgba(186,27,191,0.15); color: var(--brand-purple); }
+      .cal-chip { font-size:10.5px; padding:3px 6px; border-radius:5px; font-weight:600; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background: rgba(78,121,255,0.15); color: var(--brand-blue); }
+      .cal-chip.concluida { background: rgba(29,148,121,0.15); color: var(--success); }
       .cal-more { font-size:10.5px; color:var(--text-faint); cursor:pointer; }
       .cal-nav { display:flex; align-items:center; gap:10px; }
       .cal-nav button { border:1px solid var(--line); background:var(--surface); border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:14px; }
@@ -35,7 +43,7 @@
         <header class="topbar">
           <div class="topbar-titles">
             <h1>Calendário editorial</h1>
-            <p>Visão conjunta de pílulas automáticas e mensagens extraordinárias programadas.</p>
+            <p>Programação dos disparos de campanhas.</p>
           </div>
           <div class="topbar-actions">
             <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
@@ -56,31 +64,23 @@
                   <option value="todas">Todas</option>
                 </select>
               </div>
-              <div class="field">
-                <label for="tipoFilter">Tipo</label>
-                <select id="tipoFilter">
-                  <option value="todos">Todos</option>
-                  <option value="pilula">Pílulas</option>
-                  <option value="mensagem">Mensagens extraordinárias</option>
-                </select>
-              </div>
               <div class="toolbar-spacer"></div>
-              <span style="font-size:12px;"><span class="legend-dot" style="background:var(--brand-blue);"></span>Pílula <span class="legend-dot" style="background:var(--brand-purple);margin-left:14px;"></span>Mensagem</span>
+              <span style="font-size:12px;"><span class="legend-dot" style="background:var(--brand-blue);"></span>Programado <span class="legend-dot" style="background:var(--success);margin-left:14px;"></span>Concluído</span>
             </div>
           </section>
 
-          <section class="page-section">
+          <section class="page-section cal-fill">
             <div class="cal-grid" id="weekdaysRow"></div>
-            <div class="cal-grid" id="calendarGrid" style="margin-top:8px;"></div>
+            <div class="cal-grid" id="calendarGrid"></div>
           </section>
 
           <section class="page-section" id="dayDetailSection" style="display:none;">
             <div class="section-head">
-              <h2 id="dayDetailTitle">Envios do dia</h2>
+              <h2 id="dayDetailTitle">Campanhas do dia</h2>
             </div>
             <div class="table-wrap">
               <table>
-                <thead><tr><th>Hora</th><th>Tipo</th><th>Título</th><th>Grupos</th><th>Origem</th></tr></thead>
+                <thead><tr><th>Campanha</th><th>Trilha</th><th>Janela</th><th>Grupos</th><th>Status</th></tr></thead>
                 <tbody id="dayDetailBody"></tbody>
               </table>
             </div>
@@ -90,6 +90,7 @@
     </div>
 
     <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/helpers.js"></script>
     <script src="assets/js/nav.js"></script>
     <script>
       const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
@@ -103,23 +104,28 @@
       let viewMonth = 6; // 0-indexed: 6 = Julho
       let selectedDate = TODAY;
 
+      function syncTopbarHeight() {
+        const topbar = document.querySelector(".topbar");
+        if (topbar) document.documentElement.style.setProperty("--topbar-h", `${topbar.offsetHeight}px`);
+      }
+      window.addEventListener("resize", syncTopbarHeight);
+      window.addEventListener("load", syncTopbarHeight);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncTopbarHeight);
+      syncTopbarHeight();
+
       function populateOrgFilter() {
         document.getElementById("orgFilter").innerHTML =
           '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.id}">${o.nome}</option>`).join("");
       }
 
-      function eventMatchesOrg(event, orgId) {
+      function campaignMatchesOrg(campaign, orgId) {
         if (orgId === "todas") return true;
-        const orgGroupNames = MOCK.groups.filter((g) => g.organizationId === orgId).map((g) => g.nome);
-        return event.grupos.some((g) => orgGroupNames.includes(g));
+        return MOCK.groups.some((g) => g.trilha === campaign.trilha && g.organizationId === orgId);
       }
 
-      function eventsForDate(dateStr) {
+      function campaignsForDate(dateStr) {
         const orgId = document.getElementById("orgFilter").value;
-        const tipo = document.getElementById("tipoFilter").value;
-        return MOCK.calendarEvents.filter(
-          (e) => e.data === dateStr && (tipo === "todos" || e.tipo === tipo) && eventMatchesOrg(e, orgId)
-        );
+        return MOCK.campaigns.filter((c) => c.dataEnvio === dateStr && campaignMatchesOrg(c, orgId));
       }
 
       function renderWeekdaysRow() {
@@ -154,13 +160,18 @@
             if (cell.outside) {
               return `<div class="cal-cell outside"><span class="cal-daynum">${cell.day}</span></div>`;
             }
-            const events = eventsForDate(cell.dateStr);
-            const visible = events.slice(0, 3);
-            const rest = events.length - visible.length;
+            const campaigns = campaignsForDate(cell.dateStr);
+            const visible = campaigns.slice(0, 3);
+            const rest = campaigns.length - visible.length;
             return `
               <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}" data-date="${cell.dateStr}">
                 <span class="cal-daynum">${cell.day}</span>
-                ${visible.map((e) => `<span class="cal-chip ${e.tipo}" data-event-date="${cell.dateStr}" title="${e.titulo}">${e.hora} · ${e.titulo}</span>`).join("")}
+                ${visible
+                  .map(
+                    (c) =>
+                      `<span class="cal-chip ${c.status}" data-event-date="${cell.dateStr}" title="${perfilForTrilha(c.trilha)} - ${trilhaShortName(c.trilha)}">${trilhaShortName(c.trilha)}</span>`
+                  )
+                  .join("")}
                 ${rest > 0 ? `<span class="cal-more" data-event-date="${cell.dateStr}">+${rest} mais</span>` : ""}
               </div>`;
           })
@@ -177,24 +188,24 @@
 
       function renderDayDetail() {
         const section = document.getElementById("dayDetailSection");
-        const events = eventsForDate(selectedDate);
+        const campaigns = campaignsForDate(selectedDate);
         section.style.display = "flex";
-        document.getElementById("dayDetailTitle").textContent = `Envios de ${selectedDate}`;
+        document.getElementById("dayDetailTitle").textContent = `Campanhas de ${selectedDate}`;
 
-        if (!events.length) {
-          document.getElementById("dayDetailBody").innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Nenhum envio programado neste dia</strong></div></td></tr>`;
+        if (!campaigns.length) {
+          document.getElementById("dayDetailBody").innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Nenhuma campanha programada neste dia</strong></div></td></tr>`;
           return;
         }
 
-        document.getElementById("dayDetailBody").innerHTML = events
+        document.getElementById("dayDetailBody").innerHTML = campaigns
           .map(
-            (e) => `
+            (c) => `
             <tr>
-              <td class="mono">${e.hora}</td>
-              <td><span class="badge ${e.tipo === "pilula" ? "badge-info" : "badge-warning"}">${e.tipo === "pilula" ? "Pílula" : "Mensagem"}</span></td>
-              <td class="strong">${e.titulo}</td>
-              <td>${e.grupos.join(", ")}</td>
-              <td>${e.origem}</td>
+              <td class="strong">${c.nome}</td>
+              <td>${trilhaShortName(c.trilha)}</td>
+              <td class="mono">${c.janelaInicio}–${c.janelaFim}</td>
+              <td>${c.gruposTotal}</td>
+              <td><span class="badge ${campaignStatusBadgeClass(c.status)}">${campaignStatusLabel(c.status)}</span></td>
             </tr>`
           )
           .join("");
@@ -211,7 +222,6 @@
         renderCalendar();
       });
       document.getElementById("orgFilter").addEventListener("change", () => { renderCalendar(); renderDayDetail(); });
-      document.getElementById("tipoFilter").addEventListener("change", () => { renderCalendar(); renderDayDetail(); });
 
       populateOrgFilter();
       renderWeekdaysRow();

@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Envio automatizado · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
@@ -41,6 +43,10 @@
       .row-clickable { cursor: pointer; }
       .row-clickable.active td { background: rgba(78, 121, 255, 0.07); }
       .row-clickable.active td:first-child { box-shadow: inset 3px 0 0 0 var(--brand-blue); }
+      .row-blocked td { background: var(--danger-bg); }
+      .row-blocked.active td { background: var(--danger-bg); }
+      .row-blocked.active td:first-child { box-shadow: inset 3px 0 0 0 var(--danger); }
+      .block-flag { color: var(--danger); display: inline-flex; vertical-align: -2px; margin-left: 4px; cursor: help; }
       .group-name-cell { max-width: 0; }
       .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chevron-cell { width: 20px; color: var(--text-faint); text-align: right; }
@@ -276,6 +282,7 @@
         chevron: '<path d="M9 6l6 6-6 6" />',
         pencil: '<path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />',
         refresh: '<path d="M20 11A8 8 0 1 0 18.5 15.5" /><path d="M20 5v6h-6" />',
+        warning: '<path d="M10.3 3.9 1.9 18a1 1 0 0 0 .9 1.5h18.4a1 1 0 0 0 .9-1.5L13.7 3.9a1 1 0 0 0-1.7 0Z" /><path d="M12 9v4" /><path d="M12 16.5h.01" />',
       };
       function icon(name) {
         return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
@@ -300,6 +307,12 @@
       function orgName(id) {
         const org = MOCK.organizations.find((o) => o.id === id);
         return org ? org.nome : "—";
+      }
+
+      function trailsForGroup(group) {
+        const current = group.trilha ? MOCK.trails.find((t) => t.nome === group.trilha) : null;
+        if (!current) return MOCK.trails;
+        return MOCK.trails.filter((t) => t.perfil === current.perfil);
       }
 
       function eligibleGroups() {
@@ -336,6 +349,14 @@
           nextVideo: rows.find((r) => r.status === "proximo") || null,
           concluida: videos.length > 0 && delivered.length >= videos.length,
         };
+      }
+
+      function dispatchBlockReason(g) {
+        if (!g.trilha) return "Nenhuma trilha selecionada para este grupo.";
+        const status = trailStatusForGroup(g.id, g.trilha);
+        if (status.total === 0) return `A trilha '${g.trilha}' ainda não tem vídeos aprovados disponíveis.`;
+        if (status.concluida) return `A trilha '${g.trilha}' já foi concluída para este grupo — escolha uma nova trilha.`;
+        return null;
       }
 
       function historyForGroup(groupId) {
@@ -387,18 +408,19 @@
         if (!selectedGroupId && groups.length) selectedGroupId = groups[0].id;
 
         document.getElementById("groupList").innerHTML = groups
-          .map(
-            (g) => `
-            <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}" data-select-group="${g.id}">
+          .map((g) => {
+            const blockReason = dispatchBlockReason(g);
+            return `
+            <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}">
               <td class="strong group-name-cell">
-                <div class="ellipsis" title="${g.nome}">${g.nome}</div>
+                <div class="ellipsis" title="${g.nome}">${g.nome}${blockReason ? `<span class="block-flag" title="${blockReason}">${icon("warning")}</span>` : ""}</div>
                 <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${orgName(g.organizationId)}">${orgName(g.organizationId)}</div>
               </td>
               <td><span class="badge badge-wrap ${SEGMENT_BADGE[g.segmento] || "badge-neutral"}">${wrapSegmento(g.segmento) || "Sem perfil"}</span></td>
               <td class="group-name-cell"><div class="ellipsis" title="${g.trilha || ""}">${g.trilha || '<span class="text-faint">Sem trilha</span>'}</div></td>
               <td class="chevron-cell">${icon("chevron")}</td>
-            </tr>`
-          )
+            </tr>`;
+          })
           .join("");
 
         document.querySelectorAll("[data-select-group]").forEach((el) =>
@@ -453,7 +475,7 @@
             <div class="trilha-select-row">
               <select id="trilhaChangeSelect" style="max-width:260px;">
                 <option value="">Selecionar trilha</option>
-                ${MOCK.trails.map((t) => `<option value="${t.nome}"${t.nome === group.trilha ? " selected" : ""}>${t.nome}</option>`).join("")}
+                ${trailsForGroup(group).map((t) => `<option value="${t.nome}"${t.nome === group.trilha ? " selected" : ""}>${t.nome}</option>`).join("")}
               </select>
               <button class="btn btn-sm" id="confirmTrilhaChange" type="button">Confirmar</button>
               <button class="btn btn-ghost btn-sm" id="cancelTrilhaChange" type="button">Cancelar</button>
@@ -555,13 +577,8 @@
         if (!periods.length) errors.push("Adicione ao menos um período de envio.");
 
         eligibleGroups().forEach((g) => {
-          if (!g.trilha) {
-            errors.push(`Selecione uma trilha para "${g.nome}".`);
-            return;
-          }
-          const status = trailStatusForGroup(g.id, g.trilha);
-          if (status.total === 0) errors.push(`A trilha "${g.trilha}" ainda não tem vídeos aprovados para "${g.nome}".`);
-          else if (status.concluida) errors.push(`A trilha de "${g.nome}" já foi concluída — escolha uma nova trilha.`);
+          const reason = dispatchBlockReason(g);
+          if (reason) errors.push(`${g.nome}: ${reason}`);
         });
         return errors;
       }
@@ -756,7 +773,7 @@
 
         const successCallout = document.getElementById("sendSuccessCallout");
         successCallout.style.display = "flex";
-        successCallout.innerHTML = `Envio iniciado com sucesso! <strong>${captionItems.length}</strong> vídeo(s) programado(s) para ${dataEnvio} nos períodos configurados. Acompanhe em <a href="monitoramento.html">Monitoramento</a>.`;
+        successCallout.innerHTML = `Envio iniciado com sucesso! <strong>${captionItems.length}</strong> vídeo(s) programado(s) para ${dataEnvio} nos períodos configurados. Acompanhe em <a href="relatorios.html">Relatório operacional</a>.`;
         document.getElementById("startSendButton").disabled = true;
         // TODO: POST /dispatch/execute { campaign batch já validado } — worker assíncrono cuida do jitter/randomização
       }

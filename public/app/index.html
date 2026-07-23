@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Painel · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
@@ -76,7 +78,7 @@
           <section class="page-section">
             <div class="section-head">
               <h2>Tentativas de envio recentes</h2>
-              <a class="btn btn-secondary btn-sm" href="monitoramento.html">Ver monitoramento completo</a>
+              <a class="btn btn-secondary btn-sm" href="relatorios.html">Ver relatório completo</a>
             </div>
             <div class="table-wrap">
               <table>
@@ -130,6 +132,7 @@
     </div>
 
     <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/helpers.js"></script>
     <script src="assets/js/nav.js"></script>
     <script>
       const STATUS_BADGE = {
@@ -186,10 +189,9 @@
           return `
             <div class="card card-pad">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                <strong>${c.nome}</strong>
-                <span class="badge ${c.status === "concluida" ? "badge-success" : c.status === "agendada" ? "badge-info" : "badge-warning"}">${c.status.replace("_", " ")}</span>
+                <strong>${campaignLabel(c)}</strong>
+                <span class="badge ${campaignStatusBadgeClass(c.status)}">${campaignStatusLabel(c.status)}</span>
               </div>
-              <p class="text-muted" style="margin-top:6px;">Trilha: ${c.trilha}</p>
               <div class="progress" style="margin-top:14px;"><span style="width:${pct}%"></span></div>
               <p class="text-faint" style="margin-top:6px;">${c.gruposEnviados}/${c.gruposTotal} grupos enviados</p>
             </div>`;
