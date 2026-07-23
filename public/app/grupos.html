@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Grupos · Estímulo</title>
+    <title>Grupos &middot; Est&iacute;mulo</title>
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,10 +13,11 @@
     <link rel="stylesheet" href="assets/css/layout.css">
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
-      .fila-fim { color: var(--warning); }
       .video-off-reason { display:block; margin-top:2px; font-size:11.5px; color:var(--text-faint); max-width:220px; }
       .sync-panel { display:none; }
       .sync-panel.open { display:flex; }
+      .status-line { min-height:20px; margin-top:10px; font-size:12.5px; color:var(--text-muted); }
+      .status-line.error { color:var(--danger); }
     </style>
   </head>
   <body data-page="grupos">
@@ -42,11 +43,11 @@
                 <input id="searchInput" type="search" placeholder="Ex.: Zona Leste">
               </div>
               <div class="field">
-                <label for="statusFilter">Classificação</label>
+                <label for="statusFilter">Classifica&ccedil;&atilde;o</label>
                 <select id="statusFilter">
                   <option value="todos">Todos</option>
                   <option value="classificados">Classificados</option>
-                  <option value="nao-classificados">Não classificados</option>
+                  <option value="nao-classificados">N&atilde;o classificados</option>
                 </select>
               </div>
               <div class="toolbar-spacer"></div>
@@ -55,7 +56,7 @@
 
             <div class="card sync-panel" id="syncPanel">
               <div class="card-body" style="width:100%;">
-                <div id="syncStatus" class="text-muted">Sincronizando grupos com a Evolution API…</div>
+                <div id="syncStatus" class="text-muted">Sincronizando grupos com a Evolution API...</div>
                 <div id="newGroupsWrap" style="margin-top:14px;"></div>
               </div>
             </div>
@@ -70,12 +71,12 @@
                 <thead>
                   <tr>
                     <th>Grupo</th>
-                    <th>Organização</th>
+                    <th>Organiza&ccedil;&atilde;o</th>
                     <th>Perfil</th>
-                    <th>Classificação</th>
-                    <th>Envia vídeo</th>
+                    <th>Classifica&ccedil;&atilde;o</th>
+                    <th>Envia v&iacute;deo</th>
                     <th>Trilha</th>
-                    <th>Ações</th>
+                    <th>A&ccedil;&otilde;es</th>
                   </tr>
                 </thead>
                 <tbody id="groupsBody"></tbody>
@@ -90,78 +91,117 @@
       <div class="modal">
         <div class="modal-header">
           <h3 id="editTitle">Editar grupo</h3>
-          <button class="icon-btn-close" id="closeModal" type="button" aria-label="Fechar">✕</button>
+          <button class="icon-btn-close" id="closeModal" type="button" aria-label="Fechar">&times;</button>
         </div>
         <div class="modal-body">
           <div class="field">
-            <label for="editOrg">Organização</label>
+            <label for="editOrg">Organiza&ccedil;&atilde;o</label>
             <select id="editOrg"></select>
           </div>
           <div class="field">
             <label for="editSegmento">Perfil</label>
             <select id="editSegmento">
               <option value="">Sem perfil</option>
+              <option value="Pr&eacute;-Inf&acirc;ncia">Pr&eacute;-Inf&acirc;ncia</option>
+              <option value="Inf&acirc;ncia">Inf&acirc;ncia</option>
+              <option value="Adolescente">Adolescente</option>
+              <option value="Maturidade">Maturidade</option>
             </select>
           </div>
 
           <div class="field" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
             <label class="switch"><input type="checkbox" id="editEnviaVideo"><span class="track"></span></label>
             <div>
-              <strong style="font-size:13px;">Envia vídeo</strong>
-              <p class="text-faint" style="font-size:12px;">Desative para marcar como "não envia vídeo" (ex.: CS01, CS02, grupos de mulheres).</p>
+              <strong style="font-size:13px;">Envia v&iacute;deo</strong>
+              <p class="text-faint" style="font-size:12px;">Define se o grupo entra nos fluxos operacionais de envio de v&iacute;deo.</p>
             </div>
           </div>
-          <div class="field" id="motivoField">
-            <label for="editMotivo">Motivo de não enviar vídeo</label>
-            <input id="editMotivo" type="text" placeholder="Ex.: Grupo de mulheres — não recebe vídeos">
-          </div>
-
-          <div class="callout" id="filaCallout" style="display:none;">
-            Este grupo está pausado por <strong>fim de fila</strong>: não há vídeos posteriores não assistidos na trilha atual.
-          </div>
+          <div id="editStatus" class="status-line"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" id="cancelEdit" type="button">Cancelar</button>
-          <button class="btn" id="saveEdit" type="button">Salvar alterações</button>
+          <button class="btn" id="saveEdit" type="button">Salvar altera&ccedil;&otilde;es</button>
         </div>
       </div>
     </div>
 
-    <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
     <script>
+      const state = {
+        groups: [],
+        organizations: [],
+      };
       let editingGroupId = null;
 
-      function orgName(id) {
-        const org = MOCK.organizations.find((o) => o.id === id);
-        return org ? org.nome : "—";
+      function text(value, fallback = "-") {
+        if (value === null || value === undefined || value === "") return fallback;
+        return String(value);
+      }
+
+      function escapeHtml(value) {
+        return text(value, "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
+      }
+
+      function orgName(group) {
+        const org = state.organizations.find((item) => item.id === group.organization_id);
+        return org ? org.nome : text(group.organization_id, "-");
       }
 
       function classificationBadge(group) {
-        return group.classificado
+        return group.segmento
           ? '<span class="badge badge-success">Classificado</span>'
-          : '<span class="badge badge-warning">Não classificado</span>';
+          : '<span class="badge badge-warning">N&atilde;o classificado</span>';
       }
 
       function enviaVideoBadge(group) {
-        if (!group.enviaVideo) {
-          return `<span class="badge badge-danger">Não envia vídeo</span><span class="video-off-reason">${group.naoEnviaVideoMotivo || "Desabilitado manualmente"}</span>`;
-        }
-        return '<span class="badge badge-info">Habilitado</span>';
+        return group.envia_video === true
+          ? '<span class="badge badge-info">Habilitado</span>'
+          : '<span class="badge badge-danger">N&atilde;o envia v&iacute;deo</span>';
+      }
+
+      function normalizeSegmentoOption(value) {
+        const normalized = String(value || "")
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .trim()
+          .toLowerCase();
+
+        if (!normalized) return "";
+        if (normalized === "pre-infancia" || normalized === "pre infancia") return "Pr\u00e9-Inf\u00e2ncia";
+        if (normalized === "infancia") return "Inf\u00e2ncia";
+        if (normalized === "adolescente" || (normalized.includes("adolesc") && !normalized.includes("maturidade"))) return "Adolescente";
+        if (normalized === "maturidade") return "Maturidade";
+        return "";
       }
 
       function matchesFilters(group) {
         const q = document.getElementById("searchInput").value.trim().toLowerCase();
         const statusFilter = document.getElementById("statusFilter").value;
 
-        if (q && !group.nome.toLowerCase().includes(q)) return false;
-        if (statusFilter === "classificados" && !group.classificado) return false;
-        if (statusFilter === "nao-classificados" && group.classificado) return false;
+        if (q && !String(group.nome || "").toLowerCase().includes(q)) return false;
+        if (statusFilter === "classificados" && !group.segmento) return false;
+        if (statusFilter === "nao-classificados" && group.segmento) return false;
         return true;
       }
 
       function renderGroups() {
-        const filtered = MOCK.groups.filter(matchesFilters);
+        const filtered = state.groups.filter(matchesFilters);
         document.getElementById("resultCount").textContent = `${filtered.length} grupo(s)`;
 
         if (!filtered.length) {
@@ -171,55 +211,57 @@
         }
 
         document.getElementById("groupsBody").innerHTML = filtered
-          .map(
-            (g) => `
-            <tr>
-              <td class="strong">${g.nome}<br><span class="mono text-faint" style="font-weight:400;">${g.evolutionGroupId}</span></td>
-              <td>${orgName(g.organizationId)}</td>
-              <td>${g.segmento || '<span class="text-faint">—</span>'}</td>
-              <td>${classificationBadge(g)}</td>
-              <td>${enviaVideoBadge(g)}</td>
-              <td>${g.trilha || '<span class="text-faint">Sem trilha</span>'}</td>
-              <td><button class="btn btn-secondary btn-sm" data-edit="${g.id}">Editar</button></td>
-            </tr>`
-          )
+          .map((group) => {
+            const memberCount = Number(group.quantidade_membros);
+            const memberLine = Number.isFinite(memberCount)
+              ? `<br><span class="text-faint" style="font-weight:400;">${memberCount} membro(s)</span>`
+              : "";
+
+            return `
+              <tr>
+                <td class="strong">
+                  ${escapeHtml(group.nome)}
+                  <br><span class="mono text-faint" style="font-weight:400;">${escapeHtml(group.evolution_group_id)}</span>
+                  ${memberLine}
+                </td>
+                <td>${escapeHtml(orgName(group))}</td>
+                <td>${group.segmento ? escapeHtml(group.segmento) : '<span class="text-faint">-</span>'}</td>
+                <td>${classificationBadge(group)}</td>
+                <td>${enviaVideoBadge(group)}</td>
+                <td>${group.trilha_override ? escapeHtml(group.trilha_override) : '<span class="text-faint">Sem trilha</span>'}</td>
+                <td><button class="btn btn-secondary btn-sm" data-edit="${escapeHtml(group.id)}">Editar</button></td>
+              </tr>`;
+          })
           .join("");
 
-        document.querySelectorAll("[data-edit]").forEach((btn) => {
-          btn.addEventListener("click", () => openEdit(btn.dataset.edit));
+        document.querySelectorAll("[data-edit]").forEach((button) => {
+          button.addEventListener("click", () => openEdit(button.dataset.edit));
         });
       }
 
-      function populateSelect(select, options, placeholder) {
-        select.innerHTML = `<option value="">${placeholder}</option>` + options.map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
+      function populateOrganizations(select) {
+        select.innerHTML = '<option value="">Selecionar organiza&ccedil;&atilde;o</option>';
+
+        state.organizations.forEach((organization) => {
+          const option = document.createElement("option");
+          option.value = organization.id;
+          option.textContent = organization.nome;
+          select.appendChild(option);
+        });
       }
 
       function openEdit(groupId) {
-        const group = MOCK.groups.find((g) => g.id === groupId);
+        const group = state.groups.find((item) => item.id === groupId);
         if (!group) return;
+
         editingGroupId = groupId;
-
-        document.getElementById("editTitle").textContent = `Editar · ${group.nome}`;
-        populateSelect(
-          document.getElementById("editOrg"),
-          MOCK.organizations.map((o) => ({ value: o.id, label: o.nome })),
-          "Selecionar organização"
-        );
-        document.getElementById("editOrg").value = group.organizationId || "";
-
-        populateSelect(
-          document.getElementById("editSegmento"),
-          MOCK.segments.map((s) => ({ value: s, label: s })),
-          "Sem perfil"
-        );
-        document.getElementById("editSegmento").value = group.segmento || "";
-
-        document.getElementById("editEnviaVideo").checked = group.enviaVideo;
-        document.getElementById("editMotivo").value = group.naoEnviaVideoMotivo || "";
-        document.getElementById("motivoField").style.display = group.enviaVideo ? "none" : "block";
-
-        document.getElementById("filaCallout").style.display = group.filaStatus === "fim_de_fila" ? "flex" : "none";
-
+        document.getElementById("editTitle").textContent = `Editar - ${group.nome}`;
+        populateOrganizations(document.getElementById("editOrg"));
+        document.getElementById("editOrg").value = group.organization_id || "";
+        document.getElementById("editSegmento").value = normalizeSegmentoOption(group.segmento);
+        document.getElementById("editEnviaVideo").checked = group.envia_video === true;
+        document.getElementById("editStatus").textContent = "";
+        document.getElementById("editStatus").className = "status-line";
         document.getElementById("editOverlay").hidden = false;
       }
 
@@ -228,70 +270,139 @@
         editingGroupId = null;
       }
 
-      document.getElementById("editEnviaVideo").addEventListener("change", (e) => {
-        document.getElementById("motivoField").style.display = e.target.checked ? "none" : "block";
-      });
+      async function saveEdit() {
+        const group = state.groups.find((item) => item.id === editingGroupId);
+        if (!group) return;
+
+        const saveButton = document.getElementById("saveEdit");
+        const status = document.getElementById("editStatus");
+        saveButton.disabled = true;
+        status.textContent = "Salvando alteracoes...";
+        status.className = "status-line";
+
+        try {
+          const selectedSegmento = document.getElementById("editSegmento").value;
+          if (group.segmento && !normalizeSegmentoOption(group.segmento) && !selectedSegmento) {
+            throw new Error("Selecione um dos perfis validos antes de salvar.");
+          }
+
+          const updatedGroup = await requestJson(`/groups/${encodeURIComponent(editingGroupId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              organization_id: document.getElementById("editOrg").value || null,
+              segmento: selectedSegmento || null,
+              envia_video: document.getElementById("editEnviaVideo").checked,
+            }),
+          });
+
+          const index = state.groups.findIndex((item) => item.id === updatedGroup.id);
+          if (index >= 0) state.groups[index] = updatedGroup;
+
+          closeEdit();
+          renderGroups();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          saveButton.disabled = false;
+        }
+      }
+
+      function renderLoadError(error) {
+        document.getElementById("resultCount").textContent = "";
+        document.getElementById("groupsBody").innerHTML = `
+          <tr><td colspan="7"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+      }
+
+      async function loadOrganizations() {
+        const organizations = await requestJson("/organizations");
+        state.organizations = Array.isArray(organizations) ? organizations : [];
+      }
+
+      async function loadGroups() {
+        document.getElementById("groupsBody").innerHTML = `
+          <tr><td colspan="7"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
+
+        try {
+          const groups = await requestJson("/groups/search");
+          state.groups = Array.isArray(groups) ? groups : [];
+          renderGroups();
+        } catch (error) {
+          renderLoadError(error);
+        }
+      }
+
+      async function initialize() {
+        try {
+          await loadOrganizations();
+        } catch (error) {
+          state.organizations = [];
+        }
+
+        await loadGroups();
+      }
+
+      async function syncGroups() {
+        const panel = document.getElementById("syncPanel");
+        const status = document.getElementById("syncStatus");
+        const processedWrap = document.getElementById("newGroupsWrap");
+        const button = document.getElementById("syncButton");
+
+        panel.classList.add("open");
+        processedWrap.innerHTML = "";
+        status.textContent = "Sincronizando grupos com a Evolution API...";
+        button.disabled = true;
+
+        try {
+          const result = await requestJson("/groups/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ get_participants: false, timeout_ms: 180000 }),
+          });
+
+          status.innerHTML = `<span class="badge badge-success">Sincronizacao concluida</span> ${Number(result.inserted || 0)} inserido(s), ${Number(result.updated || 0)} atualizado(s), ${Number(result.ignored || 0)} ignorado(s).`;
+
+          const processedGroups = Array.isArray(result.groups) ? result.groups : [];
+          if (processedGroups.length) {
+            processedWrap.innerHTML = `
+              <div class="chip-list" style="margin-bottom:8px;">
+                <strong style="font-size:12.5px;color:var(--text-muted);">Grupos processados:</strong>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Grupo</th><th>Evolution group id</th><th>Membros</th></tr></thead>
+                  <tbody>
+                    ${processedGroups.map((group) => `
+                      <tr>
+                        <td class="strong">${escapeHtml(group.nome)}</td>
+                        <td class="mono">${escapeHtml(group.id)}</td>
+                        <td>${Number(group.quantidade_membros || 0)}</td>
+                      </tr>`).join("")}
+                  </tbody>
+                </table>
+              </div>`;
+          }
+
+          await loadGroups();
+        } catch (error) {
+          status.innerHTML = `<span class="badge badge-danger">Erro</span> ${escapeHtml(error.message)}`;
+        } finally {
+          button.disabled = false;
+        }
+      }
 
       document.getElementById("closeModal").addEventListener("click", closeEdit);
       document.getElementById("cancelEdit").addEventListener("click", closeEdit);
-      document.getElementById("editOverlay").addEventListener("click", (e) => {
-        if (e.target.id === "editOverlay") closeEdit();
+      document.getElementById("editOverlay").addEventListener("click", (event) => {
+        if (event.target.id === "editOverlay") closeEdit();
       });
-
-      document.getElementById("saveEdit").addEventListener("click", () => {
-        const group = MOCK.groups.find((g) => g.id === editingGroupId);
-        if (!group) return;
-
-        group.organizationId = document.getElementById("editOrg").value || null;
-        group.segmento = document.getElementById("editSegmento").value || null;
-        group.enviaVideo = document.getElementById("editEnviaVideo").checked;
-        group.naoEnviaVideoMotivo = group.enviaVideo ? null : document.getElementById("editMotivo").value.trim() || "Desabilitado manualmente";
-        group.classificado = Boolean(group.segmento && group.organizationId);
-
-        closeEdit();
-        renderGroups();
-        // TODO: PATCH /groups/:id com { organization_id, segmento, envia_video }
-      });
-
+      document.getElementById("saveEdit").addEventListener("click", saveEdit);
       document.getElementById("searchInput").addEventListener("input", renderGroups);
       document.getElementById("statusFilter").addEventListener("change", renderGroups);
+      document.getElementById("syncButton").addEventListener("click", syncGroups);
 
-      document.getElementById("syncButton").addEventListener("click", () => {
-        const panel = document.getElementById("syncPanel");
-        const status = document.getElementById("syncStatus");
-        const newGroupsWrap = document.getElementById("newGroupsWrap");
-        panel.classList.add("open");
-        newGroupsWrap.innerHTML = "";
-        status.textContent = "Sincronizando grupos com a Evolution API…";
-
-        // TODO: POST /groups/sync { name_contains, get_participants, timeout_ms }
-        setTimeout(() => {
-          status.innerHTML = '<span class="badge badge-success">Sincronização concluída</span> 2 grupo(s) novo(s) encontrado(s), 5 atualizado(s).';
-          newGroupsWrap.innerHTML = `
-            <div class="chip-list" style="margin-bottom:8px;">
-              <strong style="font-size:12.5px;color:var(--text-muted);">Novos grupos:</strong>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Grupo</th><th>Evolution group id</th><th>Ação</th></tr></thead>
-                <tbody>
-                  <tr>
-                    <td class="strong">Feira Livre Zona Sul</td>
-                    <td class="mono">120363049912@g.us</td>
-                    <td><button class="btn btn-sm">Importar</button></td>
-                  </tr>
-                  <tr>
-                    <td class="strong">Artesãs Vila Prudente</td>
-                    <td class="mono">120363049987@g.us</td>
-                    <td><button class="btn btn-sm">Importar</button></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>`;
-        }, 1200);
-      });
-
-      renderGroups();
+      initialize();
     </script>
   </body>
 </html>

@@ -177,6 +177,21 @@ async function main() {
     assert.match(unclassifiedGroupsPage, /fetch\("\/campaigns"/);
     assert.match(unclassifiedGroupsPage, /Evolution group id/);
 
+    const groupsAppPageResponse = await fetch(`http://127.0.0.1:${port}/app/grupos.html`);
+    assert.equal(groupsAppPageResponse.status, 200);
+    const groupsAppPage = await groupsAppPageResponse.text();
+    assert.doesNotMatch(groupsAppPage, /mock-data\.js/);
+    assert.doesNotMatch(groupsAppPage, /MOCK\./);
+    assert.doesNotMatch(groupsAppPage, /id="editTrilha"/);
+    assert.match(groupsAppPage, /value="Pr&eacute;-Inf&acirc;ncia"/);
+    assert.match(groupsAppPage, /value="Inf&acirc;ncia"/);
+    assert.match(groupsAppPage, /value="Adolescente"/);
+    assert.match(groupsAppPage, /value="Maturidade"/);
+    assert.match(groupsAppPage, /requestJson\("\/groups\/search"\)/);
+    assert.match(groupsAppPage, /requestJson\("\/organizations"\)/);
+    assert.match(groupsAppPage, /requestJson\("\/groups\/sync"/);
+    assert.match(groupsAppPage, /requestJson\(`\/groups\/\$\{encodeURIComponent\(editingGroupId\)\}`/);
+
     const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
