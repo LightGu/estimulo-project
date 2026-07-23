@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mensagens extraordinárias · Estímulo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .checkbox-list { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; }
+      .checkbox-list label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
+      .checkbox-list label:hover { background: var(--surface-strong); }
+      .preview-bubble { background: var(--surface-strong); border:1px solid var(--line); border-radius: var(--radius-lg); padding:16px; max-width:340px; }
+      .preview-bubble .ptitle { font-weight:700; font-size:13px; margin-bottom:6px; }
+      .preview-bubble .pattach { font-size:12px; color:var(--text-muted); margin-top:8px; padding:6px 8px; background:var(--surface); border-radius:6px; border:1px solid var(--line); }
+      .two-col { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; align-items:start; }
+      @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body data-page="mensagens">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Mensagens extraordinárias</h1>
+            <p>Comunicações fora do fluxo automático de trilhas: eventos, avisos, crédito, pesquisas.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="two-col">
+              <div class="card">
+                <div class="card-header"><h3>Nova mensagem</h3></div>
+                <div class="card-body">
+                  <div class="field">
+                    <label for="msgTitulo">Título (uso interno)</label>
+                    <input id="msgTitulo" type="text" placeholder="Ex.: Convite — Feira de Empreendedorismo">
+                  </div>
+
+                  <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                    <div class="field">
+                      <label for="msgTipo">Classificação</label>
+                      <select id="msgTipo">
+                        <option value="evento">Evento</option>
+                        <option value="credito">Crédito</option>
+                        <option value="pesquisa">Pesquisa</option>
+                        <option value="aviso">Aviso</option>
+                        <option value="outro">Outro</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="msgConteudoTipo">Tipo de conteúdo</label>
+                      <select id="msgConteudoTipo">
+                        <option value="texto">Somente texto</option>
+                        <option value="imagem">Imagem</option>
+                        <option value="video">Vídeo</option>
+                        <option value="documento">Documento (PDF)</option>
+                        <option value="link">Link</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label for="msgTexto">Texto da mensagem</label>
+                    <textarea id="msgTexto" rows="3" placeholder="Escreva o texto que acompanhará o envio..."></textarea>
+                  </div>
+
+                  <div class="field" id="anexoField">
+                    <label for="msgAnexo">Anexar arquivo</label>
+                    <input id="msgAnexo" type="text" placeholder="Ex.: convite-feira.png (upload será feito na integração)">
+                  </div>
+                  <div class="field" id="linkField" style="display:none;">
+                    <label for="msgLink">Link</label>
+                    <input id="msgLink" type="url" placeholder="https://...">
+                  </div>
+
+                  <div class="field">
+                    <label>Grupos destinatários</label>
+                    <div class="checkbox-list" id="groupCheckboxes"></div>
+                  </div>
+
+                  <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;">
+                    <div class="field">
+                      <label for="msgQuando">Envio</label>
+                      <select id="msgQuando">
+                        <option value="agendado">Agendar</option>
+                        <option value="imediato">Enviar agora</option>
+                      </select>
+                    </div>
+                    <div class="field" id="msgDataField">
+                      <label for="msgData">Data</label>
+                      <input id="msgData" type="date">
+                    </div>
+                    <div class="field" id="msgHoraField">
+                      <label for="msgHora">Hora</label>
+                      <input id="msgHora" type="time">
+                    </div>
+                  </div>
+
+                  <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                    <div class="field">
+                      <label for="testGroup">Grupo de teste</label>
+                      <select id="testGroup"></select>
+                    </div>
+                    <div class="field" style="justify-content:flex-end;display:flex;">
+                      <button class="btn btn-secondary" id="sendTestButton" type="button" style="width:100%;">Enviar teste para este grupo</button>
+                    </div>
+                  </div>
+                  <span class="text-muted" id="testStatus"></span>
+                </div>
+                <div class="modal-footer">
+                  <button class="btn btn-secondary" id="saveDraftButton" type="button">Salvar rascunho</button>
+                  <button class="btn" id="scheduleMessageButton" type="button">Programar mensagem</button>
+                </div>
+              </div>
+
+              <div>
+                <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:14px;">Prévia</h2></div>
+                <div class="preview-bubble" id="previewBubble"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head"><h2>Mensagens cadastradas</h2></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Título</th>
+                    <th>Tipo</th>
+                    <th>Conteúdo</th>
+                    <th>Grupos</th>
+                    <th>Envio</th>
+                    <th>Teste</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="messagesBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      const TIPO_LABEL = { evento: "Evento", credito: "Crédito", pesquisa: "Pesquisa", aviso: "Aviso", outro: "Outro" };
+      const CONTEUDO_LABEL = { texto: "Texto", imagem: "Imagem", video: "Vídeo", documento: "Documento", link: "Link" };
+      const STATUS_BADGE = { rascunho: "badge-neutral", agendada: "badge-info", enviada: "badge-success", cancelada: "badge-danger" };
+
+      function populateGroupCheckboxes() {
+        document.getElementById("groupCheckboxes").innerHTML = MOCK.groups
+          .map((g) => `<label><input type="checkbox" value="${g.id}" class="group-check"> ${g.nome}</label>`)
+          .join("");
+        document.querySelectorAll(".group-check").forEach((cb) => cb.addEventListener("change", updatePreview));
+      }
+
+      function populateTestGroupSelect() {
+        document.getElementById("testGroup").innerHTML = MOCK.groups.map((g) => `<option value="${g.id}">${g.nome}</option>`).join("");
+      }
+
+      function toggleContentFields() {
+        const tipo = document.getElementById("msgConteudoTipo").value;
+        document.getElementById("anexoField").style.display = tipo === "link" || tipo === "texto" ? "none" : "block";
+        document.getElementById("linkField").style.display = tipo === "link" ? "block" : "none";
+        updatePreview();
+      }
+
+      function toggleScheduleFields() {
+        const imediato = document.getElementById("msgQuando").value === "imediato";
+        document.getElementById("msgDataField").style.display = imediato ? "none" : "block";
+        document.getElementById("msgHoraField").style.display = imediato ? "none" : "block";
+        updatePreview();
+      }
+
+      function selectedGroupNames() {
+        return Array.from(document.querySelectorAll(".group-check:checked")).map((cb) => MOCK.groups.find((g) => g.id === cb.value).nome);
+      }
+
+      function updatePreview() {
+        const titulo = document.getElementById("msgTitulo").value.trim() || "(sem título)";
+        const texto = document.getElementById("msgTexto").value.trim() || "(sem texto ainda)";
+        const conteudoTipo = document.getElementById("msgConteudoTipo").value;
+        const anexo = document.getElementById("msgAnexo").value.trim();
+        const link = document.getElementById("msgLink").value.trim();
+        const grupos = selectedGroupNames();
+        const quando = document.getElementById("msgQuando").value;
+        const data = document.getElementById("msgData").value;
+        const hora = document.getElementById("msgHora").value;
+
+        let anexoHtml = "";
+        if (conteudoTipo === "link" && link) anexoHtml = `<div class="pattach">🔗 ${link}</div>`;
+        else if (conteudoTipo !== "texto" && anexo) anexoHtml = `<div class="pattach">📎 ${anexo} (${CONTEUDO_LABEL[conteudoTipo]})</div>`;
+
+        document.getElementById("previewBubble").innerHTML = `
+          <div class="ptitle">${titulo}</div>
+          <div style="font-size:13px;white-space:pre-wrap;">${texto}</div>
+          ${anexoHtml}
+          <div class="pattach">👥 ${grupos.length ? grupos.join(", ") : "nenhum grupo selecionado"}</div>
+          <div class="pattach">🕒 ${quando === "imediato" ? "Envio imediato" : data && hora ? `${data} às ${hora}` : "data/hora não definidas"}</div>
+        `;
+      }
+
+      document.getElementById("msgConteudoTipo").addEventListener("change", toggleContentFields);
+      document.getElementById("msgQuando").addEventListener("change", toggleScheduleFields);
+      ["msgTitulo", "msgTexto", "msgAnexo", "msgLink", "msgData", "msgHora"].forEach((id) =>
+        document.getElementById(id).addEventListener("input", updatePreview)
+      );
+
+      document.getElementById("sendTestButton").addEventListener("click", () => {
+        const group = MOCK.groups.find((g) => g.id === document.getElementById("testGroup").value);
+        const status = document.getElementById("testStatus");
+        status.textContent = "Enviando teste…";
+        status.style.color = "var(--text-muted)";
+        // TODO: POST /extraordinary-messages/test-dispatch { group_id, conteudo }
+        setTimeout(() => {
+          status.textContent = `Teste enviado para "${group.nome}" via Evolution API.`;
+          status.style.color = "var(--success)";
+        }, 800);
+      });
+
+      function collectMessageFromForm(status) {
+        const grupos = Array.from(document.querySelectorAll(".group-check:checked")).map((cb) => cb.value);
+        return {
+          id: `msg-${Date.now()}`,
+          titulo: document.getElementById("msgTitulo").value.trim() || "Sem título",
+          tipo: document.getElementById("msgTipo").value,
+          conteudoTipo: document.getElementById("msgConteudoTipo").value,
+          texto: document.getElementById("msgTexto").value.trim(),
+          anexoNome: document.getElementById("msgAnexo").value.trim() || null,
+          link: document.getElementById("msgLink").value.trim() || null,
+          grupos,
+          dataEnvio: document.getElementById("msgQuando").value === "imediato" ? "imediato" : document.getElementById("msgData").value,
+          hora: document.getElementById("msgQuando").value === "imediato" ? "-" : document.getElementById("msgHora").value,
+          status,
+          criadoPor: "Gustavo Luz",
+          testeEnviado: false,
+        };
+      }
+
+      function resetForm() {
+        document.getElementById("msgTitulo").value = "";
+        document.getElementById("msgTexto").value = "";
+        document.getElementById("msgAnexo").value = "";
+        document.getElementById("msgLink").value = "";
+        document.getElementById("msgData").value = "";
+        document.getElementById("msgHora").value = "";
+        document.querySelectorAll(".group-check:checked").forEach((cb) => (cb.checked = false));
+        updatePreview();
+      }
+
+      document.getElementById("saveDraftButton").addEventListener("click", () => {
+        MOCK.extraordinaryMessages.unshift(collectMessageFromForm("rascunho"));
+        resetForm();
+        renderMessages();
+        // TODO: POST /extraordinary-messages { ..., status: 'rascunho' }
+      });
+
+      document.getElementById("scheduleMessageButton").addEventListener("click", () => {
+        const imediato = document.getElementById("msgQuando").value === "imediato";
+        const msg = collectMessageFromForm(imediato ? "enviada" : "agendada");
+        if (!msg.grupos.length) return;
+        MOCK.extraordinaryMessages.unshift(msg);
+        resetForm();
+        renderMessages();
+        // TODO: POST /extraordinary-messages { ..., status: 'agendada' | 'enviada' }
+      });
+
+      function renderMessages() {
+        document.getElementById("messagesBody").innerHTML = MOCK.extraordinaryMessages
+          .map(
+            (m) => `
+            <tr>
+              <td class="strong">${m.titulo}</td>
+              <td>${TIPO_LABEL[m.tipo]}</td>
+              <td>${CONTEUDO_LABEL[m.conteudoTipo]}</td>
+              <td>${m.grupos.length}</td>
+              <td class="mono">${m.dataEnvio === "imediato" ? "Imediato" : `${m.dataEnvio || "—"} ${m.hora || ""}`}</td>
+              <td>${m.testeEnviado ? '<span class="badge badge-info">Testado</span>' : '<span class="badge badge-neutral">Sem teste</span>'}</td>
+              <td><span class="badge ${STATUS_BADGE[m.status]}">${m.status}</span></td>
+              <td>${m.status === "rascunho" || m.status === "agendada" ? `<button class="btn btn-ghost btn-sm" data-cancel="${m.id}">Cancelar</button>` : '<span class="text-faint">—</span>'}</td>
+            </tr>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-cancel]").forEach((btn) =>
+          btn.addEventListener("click", () => {
+            const msg = MOCK.extraordinaryMessages.find((m) => m.id === btn.dataset.cancel);
+            msg.status = "cancelada";
+            renderMessages();
+            // TODO: PATCH /extraordinary-messages/:id { status: 'cancelada' }
+          })
+        );
+      }
+
+      populateGroupCheckboxes();
+      populateTestGroupSelect();
+      toggleContentFields();
+      toggleScheduleFields();
+      updatePreview();
+      renderMessages();
+    </script>
+  </body>
+</html>

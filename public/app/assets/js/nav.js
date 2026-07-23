@@ -13,6 +13,12 @@
     manual: '<path d="M5 12 20 4l-3.2 16-5-6-6-2Z" />',
     monitor: '<path d="M4 19V10M11 19V5M18 19v-6" /><path d="M2 19h20" />',
     settings: '<circle cx="12" cy="12" r="3" /><path d="M19.4 12a7.4 7.4 0 0 0-.1-1.2l2-1.6-2-3.4-2.4.9a7.6 7.6 0 0 0-2-1.2L14.5 3h-4l-.4 2.5a7.6 7.6 0 0 0-2 1.2l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-.9c.6.5 1.3.9 2 1.2L10.5 21h4l.4-2.5a7.6 7.6 0 0 0 2-1.2l2.4.9 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z" />',
+    pause: '<rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" />',
+    megaphone: '<path d="M3 11v2a1 1 0 0 0 1 1h2l9 5V5L6 10H4a1 1 0 0 0-1 1Z" /><path d="M15 8.5a4 4 0 0 1 0 7" />',
+    calendar: '<rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /><path d="M7.5 14h1M11.5 14h1M15.5 14h1M7.5 17.5h1M11.5 17.5h1" />',
+    users: '<circle cx="9" cy="8" r="3" /><path d="M3.5 19c.6-3 3-5 5.5-5s4.9 2 5.5 5" /><path d="M16 4.5a3 3 0 0 1 0 6" /><path d="M15 14.3c2.3.4 4 2.2 4.5 4.7" />',
+    audit: '<path d="M6 3h9l4 4v14a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z" /><path d="M14 3v5h5" /><path d="M8 12h7M8 15.5h7M8 9h3" />',
+    report: '<path d="M5 20V10M11 20V4M17 20v-7" /><path d="M3 20h18" />',
   };
 
   function icon(name) {
@@ -37,8 +43,22 @@
       items: [
         { key: "campanhas", label: "Campanhas", href: "campanhas.html", icon: "campaigns" },
         { key: "envio-manual", label: "Envio manual", href: "envio-manual.html", icon: "manual" },
+        { key: "mensagens", label: "Mensagens extraordinárias", href: "mensagens.html", icon: "megaphone" },
+        { key: "calendario", label: "Calendário editorial", href: "calendario.html", icon: "calendar" },
+        { key: "pausas", label: "Pausas", href: "pausas.html", icon: "pause" },
         { key: "monitoramento", label: "Monitoramento", href: "monitoramento.html", icon: "monitor" },
       ],
+    },
+    {
+      group: "Governança",
+      items: [
+        { key: "usuarios", label: "Usuários e permissões", href: "usuarios.html", icon: "users" },
+        { key: "auditoria", label: "Auditoria", href: "auditoria.html", icon: "audit" },
+      ],
+    },
+    {
+      group: "Relatórios",
+      items: [{ key: "relatorios", label: "Relatório operacional", href: "relatorios.html", icon: "report" }],
     },
     {
       group: "Sistema",

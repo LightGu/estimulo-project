@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pausas · Estímulo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+  </head>
+  <body data-page="pausas">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Pausas temporárias</h1>
+            <p>Pause envios automáticos de um grupo ou de uma organização inteira, por um período determinado.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3>Nova pausa</h3></div>
+              <div class="card-body">
+                <div class="field-row" style="grid-template-columns:1fr 2fr;">
+                  <div class="field">
+                    <label for="pauseScope">Abrangência</label>
+                    <select id="pauseScope">
+                      <option value="grupo">Um grupo</option>
+                      <option value="organizacao">Uma organização inteira</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="pauseTarget">Alvo</label>
+                    <select id="pauseTarget"></select>
+                  </div>
+                </div>
+
+                <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                  <div class="field">
+                    <label for="pauseInicio">Início</label>
+                    <input id="pauseInicio" type="date">
+                  </div>
+                  <div class="field">
+                    <label for="pauseFim">Fim</label>
+                    <input id="pauseFim" type="date">
+                  </div>
+                </div>
+
+                <div class="field" style="display:flex;align-items:center;gap:12px;">
+                  <label class="switch" style="margin:0;"><input type="checkbox" id="pauseApenasPilulas" checked><span class="track"></span></label>
+                  <div>
+                    <strong style="font-size:13px;">Pausar apenas as pílulas automáticas</strong>
+                    <p class="text-faint" style="font-size:12px;">Quando ativado, mensagens manuais e extraordinárias (eventos, avisos prioritários) continuam sendo enviadas normalmente.</p>
+                  </div>
+                </div>
+
+                <div class="field">
+                  <label for="pauseMotivo">Motivo</label>
+                  <textarea id="pauseMotivo" rows="2" placeholder="Ex.: Feira local, assembleia, período de festas..."></textarea>
+                </div>
+
+                <div class="field">
+                  <label for="pauseAoEncerrar">Ao encerrar o período, o que fazer com o conteúdo represado?</label>
+                  <select id="pauseAoEncerrar">
+                    <option value="devolver_fila">Devolver à fila (envia normalmente na próxima janela)</option>
+                    <option value="reagendar">Reagendar para o dia seguinte ao término</option>
+                    <option value="descartar">Descartar o(s) envio(s) perdido(s)</option>
+                  </select>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button class="btn" id="createPauseButton" type="button">Criar pausa</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="toolbar">
+              <div class="field" style="min-width:200px;">
+                <label for="statusFilter">Status</label>
+                <select id="statusFilter">
+                  <option value="todos">Todos</option>
+                  <option value="ativa">Ativa</option>
+                  <option value="agendada">Agendada</option>
+                  <option value="encerrada">Encerrada</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Abrangência</th>
+                    <th>Alvo</th>
+                    <th>Período</th>
+                    <th>Apenas pílulas</th>
+                    <th>Ao encerrar</th>
+                    <th>Status</th>
+                    <th>Criado por</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="pausesBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      const STATUS_BADGE = {
+        ativa: "badge-warning",
+        agendada: "badge-info",
+        encerrada: "badge-neutral",
+      };
+      const AO_ENCERRAR_LABEL = {
+        devolver_fila: "Devolver à fila",
+        reagendar: "Reagendar",
+        descartar: "Descartar",
+      };
+
+      function populatePauseTarget() {
+        const scope = document.getElementById("pauseScope").value;
+        const select = document.getElementById("pauseTarget");
+        select.innerHTML =
+          scope === "grupo"
+            ? MOCK.groups.map((g) => `<option value="${g.id}">${g.nome}</option>`).join("")
+            : MOCK.organizations.map((o) => `<option value="${o.id}">${o.nome}</option>`).join("");
+      }
+
+      document.getElementById("pauseScope").addEventListener("change", populatePauseTarget);
+
+      function renderPauses() {
+        const statusFilter = document.getElementById("statusFilter").value;
+        const rows = MOCK.pauses.filter((p) => statusFilter === "todos" || p.status === statusFilter);
+
+        if (!rows.length) {
+          document.getElementById("pausesBody").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>Nenhuma pausa encontrada</strong></div></td></tr>`;
+          return;
+        }
+
+        document.getElementById("pausesBody").innerHTML = rows
+          .map(
+            (p) => `
+            <tr>
+              <td>${p.escopo === "grupo" ? "Grupo" : "Organização"}</td>
+              <td class="strong">${p.alvoNome}</td>
+              <td class="mono">${p.inicio} → ${p.fim}</td>
+              <td>${p.apenasPilulas ? '<span class="badge badge-info">Sim</span>' : '<span class="badge badge-neutral">Não (pausa tudo)</span>'}</td>
+              <td>${AO_ENCERRAR_LABEL[p.aoEncerrar]}</td>
+              <td><span class="badge ${STATUS_BADGE[p.status]}">${p.status}</span></td>
+              <td>${p.criadoPor}</td>
+              <td>${p.status !== "encerrada" ? `<button class="btn btn-ghost btn-sm" data-end="${p.id}">Encerrar agora</button>` : '<span class="text-faint">—</span>'}</td>
+            </tr>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-end]").forEach((btn) =>
+          btn.addEventListener("click", () => {
+            const pause = MOCK.pauses.find((p) => p.id === btn.dataset.end);
+            pause.status = "encerrada";
+            renderPauses();
+            // TODO: PATCH /pauses/:id { status: 'encerrada' } — aplica a regra "aoEncerrar" definida
+          })
+        );
+      }
+
+      document.getElementById("statusFilter").addEventListener("change", renderPauses);
+
+      document.getElementById("createPauseButton").addEventListener("click", () => {
+        const scope = document.getElementById("pauseScope").value;
+        const targetId = document.getElementById("pauseTarget").value;
+        const inicio = document.getElementById("pauseInicio").value;
+        const fim = document.getElementById("pauseFim").value;
+        const apenasPilulas = document.getElementById("pauseApenasPilulas").checked;
+        const motivo = document.getElementById("pauseMotivo").value.trim();
+        const aoEncerrar = document.getElementById("pauseAoEncerrar").value;
+        if (!targetId || !inicio || !fim) return;
+
+        const alvoNome =
+          scope === "grupo"
+            ? MOCK.groups.find((g) => g.id === targetId).nome
+            : MOCK.organizations.find((o) => o.id === targetId).nome;
+
+        MOCK.pauses.unshift({
+          id: `pausa-${Date.now()}`,
+          escopo: scope,
+          alvoId: targetId,
+          alvoNome,
+          inicio,
+          fim,
+          apenasPilulas,
+          motivo: motivo || "Sem motivo informado",
+          aoEncerrar,
+          status: "agendada",
+          criadoPor: "Gustavo Luz",
+        });
+
+        document.getElementById("pauseInicio").value = "";
+        document.getElementById("pauseFim").value = "";
+        document.getElementById("pauseMotivo").value = "";
+        renderPauses();
+        // TODO: POST /pauses { escopo, alvo_id, inicio, fim, apenas_pilulas, motivo, ao_encerrar }
+      });
+
+      populatePauseTarget();
+      renderPauses();
+    </script>
+  </body>
+</html>

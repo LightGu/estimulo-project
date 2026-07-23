@@ -19,7 +19,7 @@
         <header class="topbar">
           <div class="topbar-titles">
             <h1>Campanhas</h1>
-            <p>Criação e acompanhamento de campanhas de envio. (RF11–RF19, RF28)</p>
+            <p>Criação e acompanhamento de campanhas de envio.</p>
           </div>
           <div class="topbar-actions">
             <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
@@ -29,7 +29,7 @@
         <main class="page">
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3>Nova campanha</h3></div>
+              <div class="card-header"><h3 id="formTitle">Nova campanha</h3></div>
               <div class="card-body">
                 <div class="field-row" style="grid-template-columns:2fr 1fr;">
                   <div class="field">
@@ -44,36 +44,38 @@
 
                 <div class="callout" id="autoAssocCallout">
                   A campanha associa automaticamente <strong id="autoAssocCount">0</strong> grupo(s) com a trilha selecionada e seleciona,
-                  para cada um, o próximo vídeo aprovado ainda não enviado (RF12, RF17–RF19).
+                  para cada um, o próximo vídeo aprovado ainda não enviado.
                 </div>
 
                 <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;margin-top:14px;">
                   <div class="field">
-                    <label for="campData">Data do disparo (RF14)</label>
+                    <label for="campData">Data do disparo</label>
                     <input id="campData" type="date">
                   </div>
                   <div class="field">
-                    <label for="campJanelaInicio">Janela — início (RF15)</label>
+                    <label for="campJanelaInicio">Janela — início</label>
                     <input id="campJanelaInicio" type="time" value="08:00">
                   </div>
                   <div class="field">
-                    <label for="campJanelaFim">Janela — fim (RF15)</label>
+                    <label for="campJanelaFim">Janela — fim</label>
                     <input id="campJanelaFim" type="time" value="18:00">
                   </div>
                 </div>
 
                 <div class="field-row" style="grid-template-columns:1fr 1fr;">
                   <div class="field">
-                    <label for="campIntervaloMin">Intervalo mínimo entre envios, min (RF16 / RF07)</label>
+                    <label for="campIntervaloMin">Intervalo mínimo entre envios, min</label>
                     <input id="campIntervaloMin" type="number" min="1" value="4">
                   </div>
                   <div class="field">
-                    <label for="campIntervaloMax">Intervalo máximo entre envios, min (RF16 / RF07)</label>
+                    <label for="campIntervaloMax">Intervalo máximo entre envios, min</label>
                     <input id="campIntervaloMax" type="number" min="1" value="12">
                   </div>
                 </div>
               </div>
               <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancelEditButton" type="button" style="display:none;">Cancelar edição</button>
+                <button class="btn btn-secondary" id="saveDraftCampaignButton" type="button">Salvar rascunho</button>
                 <button class="btn" id="createCampaignButton" type="button">Criar campanha</button>
               </div>
             </div>
@@ -109,7 +111,7 @@
           <button class="icon-btn-close" id="closeCampaignGroups" type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
-          <p class="text-faint" style="font-size:12px;">RF13 — o operador pode cancelar grupos antes do disparo. RF28 — grupos pausados por fim de fila são sinalizados.</p>
+          <p class="text-faint" style="font-size:12px;">O operador pode cancelar grupos antes do disparo. Grupos pausados por fim de fila são sinalizados.</p>
           <div class="table-wrap" style="border:0;">
             <table>
               <thead><tr><th>Grupo</th><th>Status</th><th>Ação</th></tr></thead>
@@ -127,10 +129,12 @@
     <script src="assets/js/nav.js"></script>
     <script>
       const cancelledGroups = new Set();
+      let editingCampaignId = null;
       const STATUS_BADGE = {
         em_andamento: "badge-warning",
         agendada: "badge-info",
         concluida: "badge-success",
+        rascunho: "badge-neutral",
       };
 
       function trailGroupCount(trailName) {
@@ -151,7 +155,9 @@
       function renderCampaigns() {
         document.getElementById("campaignsBody").innerHTML = MOCK.campaigns
           .map((c) => {
-            const pct = Math.round((c.gruposEnviados / c.gruposTotal) * 100);
+            const pct = c.gruposTotal ? Math.round((c.gruposEnviados / c.gruposTotal) * 100) : 0;
+            const canEdit = c.status === "rascunho" || c.status === "agendada";
+            const canViewGroups = c.gruposTotal > 0;
             return `
               <tr>
                 <td class="strong">${c.nome}</td>
@@ -161,14 +167,65 @@
                   <div class="progress"><span style="width:${pct}%"></span></div>
                   <span class="text-faint" style="font-size:11.5px;">${c.gruposEnviados}/${c.gruposTotal} · ${c.gruposPausados} pausado(s) · ${c.gruposCancelados} cancelado(s)</span>
                 </td>
-                <td class="mono">${c.dataEnvio}</td>
+                <td class="mono">${c.dataEnvio || "—"}</td>
                 <td>${c.janelaInicio}–${c.janelaFim}</td>
-                <td><button class="btn btn-secondary btn-sm" data-groups="${c.id}">Ver grupos</button></td>
+                <td style="display:flex;gap:6px;flex-wrap:wrap;">
+                  ${canViewGroups ? `<button class="btn btn-secondary btn-sm" data-groups="${c.id}">Ver grupos</button>` : ""}
+                  ${canEdit ? `<button class="btn btn-ghost btn-sm" data-edit="${c.id}">Editar</button>` : ""}
+                  <button class="btn btn-ghost btn-sm" data-duplicate="${c.id}">Duplicar</button>
+                </td>
               </tr>`;
           })
           .join("");
 
         document.querySelectorAll("[data-groups]").forEach((btn) => btn.addEventListener("click", () => openCampaignGroups(btn.dataset.groups)));
+        document.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => startEditCampaign(btn.dataset.edit)));
+        document.querySelectorAll("[data-duplicate]").forEach((btn) => btn.addEventListener("click", () => duplicateCampaign(btn.dataset.duplicate)));
+      }
+
+      function startEditCampaign(campaignId) {
+        const c = MOCK.campaigns.find((camp) => camp.id === campaignId);
+        editingCampaignId = campaignId;
+
+        document.getElementById("formTitle").textContent = `Editando · ${c.nome}`;
+        document.getElementById("campNome").value = c.nome;
+        document.getElementById("campTrilha").value = c.trilha;
+        document.getElementById("campData").value = c.dataEnvio || "";
+        document.getElementById("campJanelaInicio").value = c.janelaInicio;
+        document.getElementById("campJanelaFim").value = c.janelaFim;
+        document.getElementById("campIntervaloMin").value = c.intervaloMinMin;
+        document.getElementById("campIntervaloMax").value = c.intervaloMaxMin;
+        updateAutoAssocCount();
+
+        document.getElementById("createCampaignButton").textContent = "Salvar alterações";
+        document.getElementById("cancelEditButton").style.display = "inline-flex";
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      function cancelEdit() {
+        editingCampaignId = null;
+        document.getElementById("formTitle").textContent = "Nova campanha";
+        document.getElementById("campNome").value = "";
+        document.getElementById("campData").value = "";
+        document.getElementById("createCampaignButton").textContent = "Criar campanha";
+        document.getElementById("cancelEditButton").style.display = "none";
+      }
+      document.getElementById("cancelEditButton").addEventListener("click", cancelEdit);
+
+      function duplicateCampaign(campaignId) {
+        const c = MOCK.campaigns.find((camp) => camp.id === campaignId);
+        MOCK.campaigns.unshift({
+          ...c,
+          id: `camp-${Date.now()}`,
+          nome: `${c.nome} (cópia)`,
+          status: "rascunho",
+          gruposEnviados: 0,
+          gruposCancelados: 0,
+          gruposPausados: 0,
+          dataEnvio: null,
+        });
+        renderCampaigns();
+        // TODO: POST /campaigns/:id/duplicate
       }
 
       function openCampaignGroups(campaignId) {
@@ -218,37 +275,93 @@
 
       document.getElementById("campTrilha").addEventListener("change", updateAutoAssocCount);
 
+      function readCampaignForm() {
+        return {
+          nome: document.getElementById("campNome").value.trim(),
+          trilha: document.getElementById("campTrilha").value,
+          data: document.getElementById("campData").value,
+          janelaInicio: document.getElementById("campJanelaInicio").value,
+          janelaFim: document.getElementById("campJanelaFim").value,
+          intervaloMinMin: Number(document.getElementById("campIntervaloMin").value),
+          intervaloMaxMin: Number(document.getElementById("campIntervaloMax").value),
+        };
+      }
+
       document.getElementById("createCampaignButton").addEventListener("click", () => {
-        const nome = document.getElementById("campNome").value.trim();
-        const trilha = document.getElementById("campTrilha").value;
-        const data = document.getElementById("campData").value;
-        const janelaInicio = document.getElementById("campJanelaInicio").value;
-        const janelaFim = document.getElementById("campJanelaFim").value;
-        const intervaloMinMin = Number(document.getElementById("campIntervaloMin").value);
-        const intervaloMaxMin = Number(document.getElementById("campIntervaloMax").value);
-        if (!nome || !data) return;
+        const f = readCampaignForm();
+        if (!f.nome || !f.data) return;
 
-        const total = trailGroupCount(trilha);
-        MOCK.campaigns.unshift({
-          id: `camp-${Date.now()}`,
-          nome,
-          trilha,
-          status: "agendada",
-          gruposTotal: total,
-          gruposEnviados: 0,
-          gruposCancelados: 0,
-          gruposPausados: MOCK.groups.filter((g) => g.trilha === trilha && g.filaStatus === "fim_de_fila").length,
-          dataEnvio: data,
-          janelaInicio,
-          janelaFim,
-          intervaloMinMin,
-          intervaloMaxMin,
-        });
+        const total = trailGroupCount(f.trilha);
+        const gruposPausados = MOCK.groups.filter((g) => g.trilha === f.trilha && g.filaStatus === "fim_de_fila").length;
 
-        document.getElementById("campNome").value = "";
-        document.getElementById("campData").value = "";
+        if (editingCampaignId) {
+          const c = MOCK.campaigns.find((camp) => camp.id === editingCampaignId);
+          Object.assign(c, {
+            nome: f.nome,
+            trilha: f.trilha,
+            status: c.status === "rascunho" ? "agendada" : c.status,
+            gruposTotal: total,
+            gruposPausados,
+            dataEnvio: f.data,
+            janelaInicio: f.janelaInicio,
+            janelaFim: f.janelaFim,
+            intervaloMinMin: f.intervaloMinMin,
+            intervaloMaxMin: f.intervaloMaxMin,
+          });
+          // TODO: PATCH /campaigns/:id { ... } (somente permitido antes do processamento começar)
+          cancelEdit();
+        } else {
+          MOCK.campaigns.unshift({
+            id: `camp-${Date.now()}`,
+            nome: f.nome,
+            trilha: f.trilha,
+            status: "agendada",
+            gruposTotal: total,
+            gruposEnviados: 0,
+            gruposCancelados: 0,
+            gruposPausados,
+            dataEnvio: f.data,
+            janelaInicio: f.janelaInicio,
+            janelaFim: f.janelaFim,
+            intervaloMinMin: f.intervaloMinMin,
+            intervaloMaxMin: f.intervaloMaxMin,
+          });
+          document.getElementById("campNome").value = "";
+          document.getElementById("campData").value = "";
+          // TODO: POST /campaigns { nome, trilha, group_ids: [...todos os grupos da trilha], execution_at, janela, intervalo }
+        }
         renderCampaigns();
-        // TODO: POST /campaigns { nome, trilha, group_ids: [...todos os grupos da trilha], execution_at, janela, intervalo }
+      });
+
+      document.getElementById("saveDraftCampaignButton").addEventListener("click", () => {
+        const f = readCampaignForm();
+        if (!f.nome || !f.trilha) return;
+
+        if (editingCampaignId) {
+          const c = MOCK.campaigns.find((camp) => camp.id === editingCampaignId);
+          Object.assign(c, { nome: f.nome, trilha: f.trilha, janelaInicio: f.janelaInicio, janelaFim: f.janelaFim, intervaloMinMin: f.intervaloMinMin, intervaloMaxMin: f.intervaloMaxMin, dataEnvio: f.data || null });
+          cancelEdit();
+        } else {
+          MOCK.campaigns.unshift({
+            id: `camp-${Date.now()}`,
+            nome: f.nome,
+            trilha: f.trilha,
+            status: "rascunho",
+            gruposTotal: 0,
+            gruposEnviados: 0,
+            gruposCancelados: 0,
+            gruposPausados: 0,
+            dataEnvio: f.data || null,
+            janelaInicio: f.janelaInicio,
+            janelaFim: f.janelaFim,
+            intervaloMinMin: f.intervaloMinMin,
+            intervaloMaxMin: f.intervaloMaxMin,
+          });
+          document.getElementById("campNome").value = "";
+          document.getElementById("campData").value = "";
+        }
+        renderCampaigns();
+        // TODO: POST /campaigns { ..., status: 'rascunho' } — grupos só são associados ao sair do rascunho
       });
 
       populateTrailSelect();
