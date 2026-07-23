@@ -27,6 +27,19 @@ async function main() {
     organizationService: {
       list: async () => [{ id: "org-1", nome: "AMBEV" }],
     },
+    videoCatalogService: {
+      listTrailsByProfile: async () => [],
+      transcribeByDriveFileId: async (driveFileId, options) => ({
+        skipped: options.force !== "true",
+        transcript: options.force === "true" ? "Transcricao nova" : "Transcricao existente",
+        video: { id: "video-1", drive_file_id: driveFileId },
+      }),
+      transcribeById: async (id) => ({
+        skipped: false,
+        transcript: "Transcricao por id",
+        video: { id, drive_file_id: "drive-1" },
+      }),
+    },
     groupService: {
       listWithoutSegment: async () => [
         {
@@ -52,6 +65,11 @@ async function main() {
         segmento: payload.segmento,
         envia_video: payload.envia_video,
         trilha_override: payload.trilha_override,
+      }),
+      dispatchTestVideo: async (id, payload) => ({
+        group: { id, ...payload, evolution_group_id: "120363@g.us" },
+        video: { id: "video-1", nome_do_arquivo: "aula.mp4", drive_file_id: "drive-1" },
+        dispatch_job: { id: "dispatch-1", name: "dispatch-content", queue: "dispatch" },
       }),
     },
   });
@@ -92,6 +110,36 @@ async function main() {
     const organizationsPayload = await organizationsResponse.json();
     assert.deepEqual(organizationsPayload, [{ id: "org-1", nome: "AMBEV" }]);
 
+    const skippedTranscriptResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/transcript`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drive_file_id: "drive-1" }),
+    });
+
+    assert.equal(skippedTranscriptResponse.status, 200);
+    const skippedTranscriptPayload = await skippedTranscriptResponse.json();
+    assert.equal(skippedTranscriptPayload.skipped, true);
+    assert.equal(skippedTranscriptPayload.transcript, "Transcricao existente");
+
+    const forcedTranscriptResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/transcript?force=true`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drive_file_id: "drive-1" }),
+    });
+
+    assert.equal(forcedTranscriptResponse.status, 201);
+    const forcedTranscriptPayload = await forcedTranscriptResponse.json();
+    assert.equal(forcedTranscriptPayload.skipped, false);
+    assert.equal(forcedTranscriptPayload.transcript, "Transcricao nova");
+
+    const transcriptByIdResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-1/transcript`, {
+      method: "POST",
+    });
+
+    assert.equal(transcriptByIdResponse.status, 201);
+    const transcriptByIdPayload = await transcriptByIdResponse.json();
+    assert.equal(transcriptByIdPayload.transcript, "Transcricao por id");
+
     const groupSyncResponse = await fetch(`http://127.0.0.1:${port}/groups/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -125,6 +173,8 @@ async function main() {
     assert.match(unclassifiedGroupsPage, /fetch\("\/organizations"\)/);
     assert.match(unclassifiedGroupsPage, /name_contains/);
     assert.match(unclassifiedGroupsPage, /fetch\(`\/groups\/\$\{encodeURIComponent\(groupId\)\}`/);
+    assert.match(unclassifiedGroupsPage, /fetch\(`\/video-catalog\/\$\{encodeURIComponent\(videoId\)\}\/transcript`/);
+    assert.match(unclassifiedGroupsPage, /fetch\("\/campaigns"/);
     assert.match(unclassifiedGroupsPage, /Evolution group id/);
 
     const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1`, {
@@ -160,6 +210,21 @@ async function main() {
 
     assert.equal(legacyOperationalSettingsResponse.status, 200);
 
+    const testDispatchResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/test-dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        segmento: "Pre infancia",
+        organization_id: "org-1",
+        envia_video: true,
+        trilha_override: "Trilha A",
+      }),
+    });
+
+    assert.equal(testDispatchResponse.status, 202);
+    const testDispatchPayload = await testDispatchResponse.json();
+    assert.equal(testDispatchPayload.dispatch_job.id, "dispatch-1");
+
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);
     const healthPayload = await healthResponse.json();
@@ -182,6 +247,11 @@ async function main() {
       organizationService: {
         list: async () => [],
       },
+      videoCatalogService: {
+        listTrailsByProfile: async () => [],
+        transcribeByDriveFileId: async () => ({ skipped: true, transcript: "", video: null }),
+        transcribeById: async () => ({ skipped: true, transcript: "", video: null }),
+      },
       groupService: {
         listWithoutSegment: async () => [],
         syncGroupsFromEvolution: async () => ({
@@ -191,6 +261,11 @@ async function main() {
           groups: [],
         }),
         updateOperationalSettings: async (id, payload) => ({ id, ...payload }),
+        dispatchTestVideo: async (id, payload) => ({
+          group: { id, ...payload },
+          video: { id: "video-1" },
+          dispatch_job: { id: "dispatch-1" },
+        }),
       },
     });
 

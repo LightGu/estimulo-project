@@ -5,6 +5,7 @@ const groupsRepository = require("../src/repositories/groups.repository");
 const campaignsRepository = require("../src/repositories/campaigns.repository");
 const campaignGroupsRepository = require("../src/repositories/campaign-groups.repository");
 const videoCatalogRepository = require("../src/repositories/video-catalog.repository");
+const videoCaptionsRepository = require("../src/repositories/video-captions.repository");
 const groupVideoProgressRepository = require("../src/repositories/group-video-progress.repository");
 const dispatchLogsRepository = require("../src/repositories/dispatch-logs.repository");
 
@@ -32,6 +33,10 @@ function createMockClient() {
     },
     is(column, value) {
       calls.push({ type: "is", column, value });
+      return this;
+    },
+    or(condition) {
+      calls.push({ type: "or", condition });
       return this;
     },
     order() {
@@ -121,6 +126,24 @@ async function main() {
     await videoCatalogRepository.listByStatus(true, client);
     await videoCatalogRepository.findByDriveFileId("drive-1", client);
     await videoCatalogRepository.delete("video-1", client);
+
+    await videoCaptionsRepository.listUnusedTodayByVideo("video-1", new Date("2026-07-21T03:00:00.000Z"), client);
+    await videoCaptionsRepository.markUsed("caption-1", new Date("2026-07-21T15:00:00.000Z"), client);
+    await videoCaptionsRepository.create(
+      {
+        video_id: "video-1",
+        caption_text: "Legenda gerada",
+        ultimo_uso_em: "2026-07-21T15:00:00.000Z",
+      },
+      client
+    );
+    assert.ok(client.__calls.some((call) => call.type === "from" && call.tableName === "video_captions"));
+    assert.ok(client.__calls.some((call) => call.type === "or" && call.condition.includes("ultimo_uso_em.is.null")));
+    assert.ok(
+      client.__calls.some(
+        (call) => call.type === "insert" && call.payload.caption_text === "Legenda gerada"
+      )
+    );
 
     await groupVideoProgressRepository.registerDelivery({ group_id: "group-1", video_id: "video-1" }, client);
     await groupVideoProgressRepository.listDelivered("group-1", client);
