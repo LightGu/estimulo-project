@@ -10,6 +10,7 @@
     orgs: '<path d="M4 21V5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v16" /><path d="M14 21v-9a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v9" /><path d="M4 21h16" /><path d="M7 8h1M7 11h1M7 14h1M10 8h1M10 11h1M10 14h1" />',
     trails: '<path d="M4 6h16" /><path d="M4 12h10" /><path d="M4 18h13" /><circle cx="20" cy="12" r="1.6" /><circle cx="19" cy="18" r="1.6" />',
     campaigns: '<rect x="3" y="5" width="18" height="15" rx="2" /><path d="M8 3v4M16 3v4M3 10h18" /><path d="M8 14h3M8 17h6" />',
+    auto: '<path d="M5 12 20 4l-3.2 16-5-6-6-2Z" /><circle cx="18.3" cy="5.7" r="3.1" fill="currentColor" stroke="none" />',
     manual: '<path d="M5 12 20 4l-3.2 16-5-6-6-2Z" />',
     monitor: '<path d="M4 19V10M11 19V5M18 19v-6" /><path d="M2 19h20" />',
     settings: '<circle cx="12" cy="12" r="3" /><path d="M19.4 12a7.4 7.4 0 0 0-.1-1.2l2-1.6-2-3.4-2.4.9a7.6 7.6 0 0 0-2-1.2L14.5 3h-4l-.4 2.5a7.6 7.6 0 0 0-2 1.2l-2.4-.9-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-.9c.6.5 1.3.9 2 1.2L10.5 21h4l.4-2.5a7.6 7.6 0 0 0 2-1.2l2.4.9 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z" />',
@@ -41,6 +42,7 @@
     {
       group: "Envios",
       items: [
+        { key: "envio-automatizado", label: "Envio automatizado", href: "envio-automatizado.html", icon: "auto" },
         { key: "campanhas", label: "Campanhas", href: "campanhas.html", icon: "campaigns" },
         { key: "envio-manual", label: "Envio manual", href: "envio-manual.html", icon: "manual" },
         { key: "mensagens", label: "Mensagens extraordinárias", href: "mensagens.html", icon: "megaphone" },
