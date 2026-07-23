@@ -22,17 +22,24 @@
       .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
       #calendarGrid { flex: 1 1 auto; grid-auto-rows: 1fr; }
       .cal-weekday { text-align:center; font-size:11.5px; font-weight:700; color:var(--text-faint); text-transform:uppercase; padding-bottom:4px; }
-      .cal-cell { min-height:70px; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; background:var(--surface); display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+      .cal-cell {
+        min-height:64px; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px;
+        background:var(--surface); display:flex; flex-direction:column; gap:6px; overflow:hidden;
+      }
       .cal-cell.outside { opacity:0.35; }
       .cal-cell.today { border-color: var(--brand-blue); box-shadow: 0 0 0 2px rgba(78,121,255,0.15); }
+      .cal-cell.has-items { cursor: pointer; }
+      .cal-cell.has-items:hover { background: var(--surface-strong); }
       .cal-daynum { font-size:12px; font-weight:700; color:var(--text-muted); }
-      .cal-chip { font-size:10.5px; padding:3px 6px; border-radius:5px; font-weight:600; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background: rgba(78,121,255,0.15); color: var(--brand-blue); }
-      .cal-chip.concluida { background: rgba(29,148,121,0.15); color: var(--success); }
-      .cal-more { font-size:10.5px; color:var(--text-faint); cursor:pointer; }
+      .cal-cell-body { flex:1; display:flex; align-items:center; justify-content:center; }
+      .cal-count-pill {
+        display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:999px;
+        background: rgba(78,121,255,0.12); color: var(--brand-blue); font-size:12px; font-weight:700;
+      }
+      .cal-count-pill .dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
       .cal-nav { display:flex; align-items:center; gap:10px; }
       .cal-nav button { border:1px solid var(--line); background:var(--surface); border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:14px; }
       .cal-nav button:hover { background: var(--surface-strong); }
-      .legend-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; }
     </style>
   </head>
   <body data-page="calendario">
@@ -58,6 +65,16 @@
                 <strong id="monthLabel" style="min-width:170px;text-align:center;"></strong>
                 <button id="nextMonth" type="button">›</button>
               </div>
+              <div class="field" style="min-width:200px;">
+                <label for="nameFilter">Pesquisar por nome</label>
+                <input id="nameFilter" type="search" placeholder="Nome da campanha...">
+              </div>
+              <div class="field" style="min-width:160px;">
+                <label for="levelFilter">Nível</label>
+                <select id="levelFilter">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
               <div class="field">
                 <label for="orgFilter">Organização</label>
                 <select id="orgFilter">
@@ -65,7 +82,7 @@
                 </select>
               </div>
               <div class="toolbar-spacer"></div>
-              <span style="font-size:12px;"><span class="legend-dot" style="background:var(--brand-blue);"></span>Programado <span class="legend-dot" style="background:var(--success);margin-left:14px;"></span>Concluído</span>
+              <span class="text-faint" style="font-size:12px;">Clique em um dia para ver os detalhes</span>
             </div>
           </section>
 
@@ -73,19 +90,27 @@
             <div class="cal-grid" id="weekdaysRow"></div>
             <div class="cal-grid" id="calendarGrid"></div>
           </section>
-
-          <section class="page-section" id="dayDetailSection" style="display:none;">
-            <div class="section-head">
-              <h2 id="dayDetailTitle">Campanhas do dia</h2>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th>Campanha</th><th>Trilha</th><th>Janela</th><th>Grupos</th><th>Status</th></tr></thead>
-                <tbody id="dayDetailBody"></tbody>
-              </table>
-            </div>
-          </section>
         </main>
+      </div>
+    </div>
+
+    <div class="overlay" id="dayDetailOverlay" hidden>
+      <div class="modal" style="width:min(760px,100%);">
+        <div class="modal-header">
+          <h3 id="dayDetailTitle">Campanhas do dia</h3>
+          <button class="icon-btn-close" id="closeDayDetail" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="table-wrap" style="border:0;">
+            <table>
+              <thead><tr><th>Campanha</th><th>Trilha</th><th>Janela</th><th>Grupos</th><th>Status</th></tr></thead>
+              <tbody id="dayDetailBody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="closeDayDetail2" type="button">Fechar</button>
+        </div>
       </div>
     </div>
 
@@ -102,7 +127,6 @@
 
       let viewYear = 2026;
       let viewMonth = 6; // 0-indexed: 6 = Julho
-      let selectedDate = TODAY;
 
       function syncTopbarHeight() {
         const topbar = document.querySelector(".topbar");
@@ -118,6 +142,11 @@
           '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.id}">${o.nome}</option>`).join("");
       }
 
+      function populateLevelFilter() {
+        document.getElementById("levelFilter").innerHTML =
+          '<option value="todos">Todos</option>' + MOCK.perfis.map((p) => `<option value="${p}">${p}</option>`).join("");
+      }
+
       function campaignMatchesOrg(campaign, orgId) {
         if (orgId === "todas") return true;
         return MOCK.groups.some((g) => g.trilha === campaign.trilha && g.organizationId === orgId);
@@ -125,7 +154,16 @@
 
       function campaignsForDate(dateStr) {
         const orgId = document.getElementById("orgFilter").value;
-        return MOCK.campaigns.filter((c) => c.dataEnvio === dateStr && campaignMatchesOrg(c, orgId));
+        const level = document.getElementById("levelFilter").value;
+        const q = document.getElementById("nameFilter").value.trim().toLowerCase();
+
+        return MOCK.campaigns.filter((c) => {
+          if (c.dataEnvio !== dateStr) return false;
+          if (!campaignMatchesOrg(c, orgId)) return false;
+          if (level !== "todos" && perfilForTrilha(c.trilha) !== level) return false;
+          if (q && !c.nome.toLowerCase().includes(q)) return false;
+          return true;
+        });
       }
 
       function renderWeekdaysRow() {
@@ -160,42 +198,25 @@
             if (cell.outside) {
               return `<div class="cal-cell outside"><span class="cal-daynum">${cell.day}</span></div>`;
             }
-            const campaigns = campaignsForDate(cell.dateStr);
-            const visible = campaigns.slice(0, 3);
-            const rest = campaigns.length - visible.length;
+            const count = campaignsForDate(cell.dateStr).length;
             return `
-              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}" data-date="${cell.dateStr}">
+              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}${count ? " has-items" : ""}" data-date="${cell.dateStr}">
                 <span class="cal-daynum">${cell.day}</span>
-                ${visible
-                  .map(
-                    (c) =>
-                      `<span class="cal-chip ${c.status}" data-event-date="${cell.dateStr}" title="${perfilForTrilha(c.trilha)} - ${trilhaShortName(c.trilha)}">${trilhaShortName(c.trilha)}</span>`
-                  )
-                  .join("")}
-                ${rest > 0 ? `<span class="cal-more" data-event-date="${cell.dateStr}">+${rest} mais</span>` : ""}
+                <div class="cal-cell-body">
+                  ${count ? `<span class="cal-count-pill"><span class="dot"></span>${count} programação${count > 1 ? "ões" : ""}</span>` : ""}
+                </div>
               </div>`;
           })
           .join("");
 
-        document.querySelectorAll("[data-date], [data-event-date]").forEach((el) => {
-          const date = el.dataset.date || el.dataset.eventDate;
-          el.addEventListener("click", () => {
-            selectedDate = date;
-            renderDayDetail();
-          });
+        document.querySelectorAll(".cal-cell.has-items").forEach((el) => {
+          el.addEventListener("click", () => openDayDetail(el.dataset.date));
         });
       }
 
-      function renderDayDetail() {
-        const section = document.getElementById("dayDetailSection");
-        const campaigns = campaignsForDate(selectedDate);
-        section.style.display = "flex";
-        document.getElementById("dayDetailTitle").textContent = `Campanhas de ${selectedDate}`;
-
-        if (!campaigns.length) {
-          document.getElementById("dayDetailBody").innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Nenhuma campanha programada neste dia</strong></div></td></tr>`;
-          return;
-        }
+      function openDayDetail(dateStr) {
+        const campaigns = campaignsForDate(dateStr);
+        document.getElementById("dayDetailTitle").textContent = `Campanhas de ${dateStr}`;
 
         document.getElementById("dayDetailBody").innerHTML = campaigns
           .map(
@@ -209,7 +230,18 @@
             </tr>`
           )
           .join("");
+
+        document.getElementById("dayDetailOverlay").hidden = false;
       }
+
+      function closeDayDetail() {
+        document.getElementById("dayDetailOverlay").hidden = true;
+      }
+      document.getElementById("closeDayDetail").addEventListener("click", closeDayDetail);
+      document.getElementById("closeDayDetail2").addEventListener("click", closeDayDetail);
+      document.getElementById("dayDetailOverlay").addEventListener("click", (e) => {
+        if (e.target.id === "dayDetailOverlay") closeDayDetail();
+      });
 
       document.getElementById("prevMonth").addEventListener("click", () => {
         viewMonth -= 1;
@@ -221,12 +253,14 @@
         if (viewMonth > 11) { viewMonth = 0; viewYear += 1; }
         renderCalendar();
       });
-      document.getElementById("orgFilter").addEventListener("change", () => { renderCalendar(); renderDayDetail(); });
+      document.getElementById("orgFilter").addEventListener("change", renderCalendar);
+      document.getElementById("levelFilter").addEventListener("change", renderCalendar);
+      document.getElementById("nameFilter").addEventListener("input", renderCalendar);
 
       populateOrgFilter();
+      populateLevelFilter();
       renderWeekdaysRow();
       renderCalendar();
-      renderDayDetail();
     </script>
   </body>
 </html>
