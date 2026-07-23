@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Envio automatizado · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .ico { width: 14px; height: 14px; vertical-align: -2px; display: inline-block; }
+
+      .callout.callout-danger { background: var(--danger-bg); color: #7a1626; border-color: rgba(192, 41, 63, 0.25); }
+
+      /* Tables embedded inside a card/panel: no min-width floor, no duplicated border. */
+      .table-compact { min-width: 0; }
+      .table-flat { border: 0; border-radius: 0; }
+      .table-fixed { table-layout: fixed; width: 100%; }
+
+      .dispatch-config-body { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end; }
+      .dispatch-config-body .field { margin-bottom: 0; }
+      .dispatch-config-body .field-date { width: 160px; }
+      .dispatch-config-body .field-periods { flex: 1; min-width: 260px; }
+      .dispatch-config-body .field-delay { width: 200px; }
+      .dispatch-config-body .field-hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+
+      .period-add-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+      .period-add-row input[type="time"] { width: 92px; }
+
+      #stepConfig, #stepCaptions { display: flex; flex-direction: column; gap: 20px; }
+
+      .dispatch-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+      @media (max-width: 1080px) {
+        .dispatch-layout { grid-template-columns: 1fr; }
+      }
+
+      .badge-wrap { white-space: normal; text-align: left; min-width: 0; max-width: 100%; line-height: 1.3; }
+      .row-clickable { cursor: pointer; }
+      .row-clickable.active td { background: rgba(78, 121, 255, 0.07); }
+      .row-clickable.active td:first-child { box-shadow: inset 3px 0 0 0 var(--brand-blue); }
+      .row-blocked td { background: var(--danger-bg); }
+      .row-blocked.active td { background: var(--danger-bg); }
+      .row-blocked.active td:first-child { box-shadow: inset 3px 0 0 0 var(--danger); }
+      .block-flag { color: var(--danger); display: inline-flex; vertical-align: -2px; margin-left: 4px; cursor: help; }
+      .group-name-cell { max-width: 0; }
+      .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .chevron-cell { width: 20px; color: var(--text-faint); text-align: right; }
+
+      .trail-history-toggle { font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+      .trail-history-toggle:hover { color: var(--primary); }
+      details.trail-history[open] .trail-history-toggle .ico { transform: rotate(90deg); }
+
+      .trilha-select-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+      .video-row-next td { background: var(--success-bg); }
+      .video-row-next td.strong { color: #0f6b56; }
+
+      .stepper { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px; }
+      .step { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+      .step .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: 11.5px; flex: none; }
+      .step.done .step-num { background: var(--success); color: #fff; }
+      .step.active { color: var(--text); }
+      .step.active .step-num { background: var(--brand-blue); color: #fff; }
+      .step-sep { flex: 1; height: 2px; background: var(--line); min-width: 24px; }
+
+      .breadcrumb { font-size: 12px; color: var(--text-faint); }
+
+      .stat-ring { position: relative; width: 58px; height: 58px; flex: none; }
+      .stat-ring .ring-bg { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--brand-blue) calc(var(--pct) * 1%), var(--surface-sunken) 0); }
+      .stat-ring .ring-hole { position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12.5px; color: var(--text); }
+      .kpi-inline-row { display: flex; align-items: center; gap: 22px; flex: none; }
+      .kpi-inline-row .kpi-item { text-align: center; }
+      .kpi-inline-row .stat-label { display: block; font-size: 11px; }
+      .kpi-inline-row .stat-value { font-size: 20px; }
+      .kpi-inline-row .kpi-item-ring { text-align: center; font-size: 10.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+      .kpi-inline-row .kpi-item-ring .stat-ring { margin: 0 auto 4px; }
+    </style>
+  </head>
+  <body data-page="envio-automatizado">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Envio automatizado</h1>
+            <p>Programe e gerencie os envios de vídeos para os grupos.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <!-- ETAPA 1: seleção de grupos e trilhas -->
+          <div id="stepConfig">
+            <section class="page-section">
+              <div class="card">
+                <div class="card-body dispatch-config-body">
+                  <div class="field field-date">
+                    <label for="dispatchDate">Data do disparo</label>
+                    <input id="dispatchDate" type="date">
+                    <p class="field-hint">Será enviado para os grupos abaixo.</p>
+                  </div>
+
+                  <div class="field field-periods">
+                    <label>Períodos de envio</label>
+                    <div class="chip-list" id="periodChips"></div>
+                    <div class="period-add-row">
+                      <input type="time" id="periodStart" value="07:00">
+                      <span class="text-faint">até</span>
+                      <input type="time" id="periodEnd" value="12:00">
+                      <button class="btn btn-secondary btn-sm" id="addPeriodButton" type="button">+ Adicionar</button>
+                    </div>
+                    <p class="field-hint">Pode selecionar mais de um período.</p>
+                  </div>
+
+                  <div class="field field-delay">
+                    <label>Delay randômico (min)</label>
+                    <div style="display:flex;gap:10px;">
+                      <input id="delayMin" type="number" min="1" value="15" title="Mínimo">
+                      <input id="delayMax" type="number" min="1" value="45" title="Máximo">
+                    </div>
+                    <p class="field-hint">Mínimo e máximo entre envios.</p>
+                  </div>
+
+                  <button class="btn" id="dispatchButton" type="button" style="height:38px;">Disparar campanha</button>
+                </div>
+              </div>
+              <div class="callout callout-warning" id="validationCallout" style="display:none;"></div>
+            </section>
+
+            <section class="page-section">
+              <div class="dispatch-layout">
+                <div class="card">
+                  <div class="card-header">
+                    <h3>Grupos selecionados</h3>
+                    <span class="badge badge-neutral" id="groupCountBadge"></span>
+                  </div>
+                  <div class="table-wrap table-flat">
+                    <table class="table-compact table-fixed">
+                      <colgroup>
+                        <col style="width:34%">
+                        <col style="width:26%">
+                        <col style="width:32%">
+                        <col style="width:8%">
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>Grupo</th>
+                          <th>Perfil</th>
+                          <th>Trilha selecionada</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody id="groupList"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="card" id="detailCard"></div>
+              </div>
+            </section>
+          </div>
+
+          <!-- ETAPA 2: geração de legendas -->
+          <div id="stepCaptions" style="display:none;">
+            <section class="page-section">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <p class="breadcrumb">Automação / Disparar campanha / Geração de legendas</p>
+                <button class="btn btn-secondary btn-sm" id="backToConfigButton" type="button">← Voltar para grupos</button>
+              </div>
+              <div class="section-head">
+                <div>
+                  <h2>Acompanhamento de Geração de Legendas</h2>
+                  <p class="text-faint" style="font-size:12.5px;margin-top:4px;">Todas as legendas estão sendo geradas antes do envio, para sua revisão.</p>
+                </div>
+                <div class="kpi-inline-row">
+                  <div class="kpi-item">
+                    <span class="stat-label">Vídeos totais</span>
+                    <span class="stat-value" id="statTotal">0</span>
+                  </div>
+                  <div class="kpi-item">
+                    <span class="stat-label">Legendas geradas</span>
+                    <span class="stat-value" id="statGenerated" style="color:var(--success);">0</span>
+                  </div>
+                  <div class="kpi-item">
+                    <span class="stat-label">Pendentes</span>
+                    <span class="stat-value" id="statPending" style="color:var(--warning);">0</span>
+                  </div>
+                  <div class="kpi-item-ring">
+                    <div class="stat-ring" id="progressRing" style="--pct:0;">
+                      <div class="ring-bg"></div>
+                      <div class="ring-hole"><span id="statPct">0%</span></div>
+                    </div>
+                    Progresso
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="page-section">
+              <div class="stepper">
+                <div class="step done"><span class="step-num">✓</span> Seleção de grupos e trilhas</div>
+                <div class="step-sep"></div>
+                <div class="step active" id="stepLegendas"><span class="step-num">2</span> Geração de legendas</div>
+                <div class="step-sep"></div>
+                <div class="step" id="stepEnvio"><span class="step-num">3</span> Envio dos vídeos</div>
+              </div>
+              <div class="callout" id="captionInfoCallout">
+                Todas as legendas estão sendo geradas antes do envio. Você pode revisar e editar antes que os vídeos sejam enviados aos grupos.
+              </div>
+            </section>
+
+            <section class="page-section">
+              <div class="section-head">
+                <h2>Revisão de legendas <span class="badge badge-neutral" id="captionCountBadge"></span></h2>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                  <div class="segmented" id="captionFilterTabs">
+                    <button class="active" data-filter="todos">Todos</button>
+                    <button data-filter="gerado">Gerado</button>
+                    <button data-filter="pendente">Pendente</button>
+                  </div>
+                  <input type="search" id="captionSearch" placeholder="Buscar vídeo ou grupo..." style="width:220px;">
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Grupo</th>
+                      <th>Vídeo</th>
+                      <th>Legenda gerada</th>
+                      <th>Status</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="captionsBody"></tbody>
+                </table>
+              </div>
+              <div class="callout" id="sendWarningCallout" style="display:none;margin-top:12px;"></div>
+              <div class="callout callout-success" id="sendSuccessCallout" style="display:none;margin-top:12px;background:var(--success-bg);color:#0f6b56;border-color:rgba(29,148,121,0.25);"></div>
+              <div class="modal-footer" style="border:0;padding:16px 0 0;">
+                <span class="text-faint" style="margin-right:auto;font-size:12px;">Depois de revisar todas as legendas, clique no botão abaixo para iniciar o envio dos vídeos para os grupos.</span>
+                <button class="btn" id="startSendButton" type="button">Iniciar envio dos vídeos</button>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <div class="overlay" id="captionOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="captionModalTitle">Legenda</h3>
+          <button class="icon-btn-close" id="closeCaptionModal" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted" id="captionModalMeta"></p>
+          <div class="field">
+            <label for="captionModalText">Legenda</label>
+            <textarea id="captionModalText" rows="5"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelCaptionModal" type="button">Fechar</button>
+          <button class="btn" id="saveCaptionModal" type="button">Salvar legenda</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      const ICONS = {
+        chevron: '<path d="M9 6l6 6-6 6" />',
+        pencil: '<path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />',
+        refresh: '<path d="M20 11A8 8 0 1 0 18.5 15.5" /><path d="M20 5v6h-6" />',
+        warning: '<path d="M10.3 3.9 1.9 18a1 1 0 0 0 .9 1.5h18.4a1 1 0 0 0 .9-1.5L13.7 3.9a1 1 0 0 0-1.7 0Z" /><path d="M12 9v4" /><path d="M12 16.5h.01" />',
+      };
+      function icon(name) {
+        return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
+      }
+
+      const SEGMENT_BADGE = { "Pré-Infância": "badge-info", "Infância": "badge-warning", "Adolescência/Maturidade": "badge-success" };
+
+      let selectedGroupId = null;
+      let editingTrilhaGroupId = null;
+      let periods = [
+        { inicio: "07:00", fim: "12:00" },
+        { inicio: "13:00", fim: "17:00" },
+      ];
+      let dispatchGroups = [];
+      let captionItems = [];
+      let captionFilter = "todos";
+
+      function wrapSegmento(seg) {
+        return seg ? seg.replace("/", "/​") : seg;
+      }
+
+      function orgName(id) {
+        const org = MOCK.organizations.find((o) => o.id === id);
+        return org ? org.nome : "—";
+      }
+
+      function trailsForGroup(group) {
+        const current = group.trilha ? MOCK.trails.find((t) => t.nome === group.trilha) : null;
+        if (!current) return MOCK.trails;
+        return MOCK.trails.filter((t) => t.perfil === current.perfil);
+      }
+
+      function eligibleGroups() {
+        return MOCK.groups.filter((g) => g.classificado && g.enviaVideo);
+      }
+
+      function eligibleVideosOf(trailName) {
+        const trail = MOCK.trails.find((t) => t.nome === trailName);
+        if (!trail) return [];
+        return trail.subtemas.flatMap((s) => s.videos.filter((v) => v.aprovacaoStatus === "aprovado").map((v) => ({ ...v, subtemaNome: s.nome })));
+      }
+
+      function deliveriesOf(groupId, trailName) {
+        return MOCK.groupVideoDeliveries.filter((d) => d.groupId === groupId && d.trilha === trailName);
+      }
+
+      function trailStatusForGroup(groupId, trailName) {
+        const videos = eligibleVideosOf(trailName);
+        const delivered = deliveriesOf(groupId, trailName);
+        const deliveredMap = new Map(delivered.map((d) => [d.videoId, d.enviadoEm]));
+        let nextAssigned = false;
+        const rows = videos.map((v) => {
+          if (deliveredMap.has(v.id)) return { ...v, status: "enviado", enviadoEm: deliveredMap.get(v.id) };
+          if (!nextAssigned) {
+            nextAssigned = true;
+            return { ...v, status: "proximo", enviadoEm: null };
+          }
+          return { ...v, status: "pendente", enviadoEm: null };
+        });
+        return {
+          rows,
+          total: videos.length,
+          enviados: delivered.length,
+          nextVideo: rows.find((r) => r.status === "proximo") || null,
+          concluida: videos.length > 0 && delivered.length >= videos.length,
+        };
+      }
+
+      function dispatchBlockReason(g) {
+        if (!g.trilha) return "Nenhuma trilha selecionada para este grupo.";
+        const status = trailStatusForGroup(g.id, g.trilha);
+        if (status.total === 0) return `A trilha '${g.trilha}' ainda não tem vídeos aprovados disponíveis.`;
+        if (status.concluida) return `A trilha '${g.trilha}' já foi concluída para este grupo — escolha uma nova trilha.`;
+        return null;
+      }
+
+      function historyForGroup(groupId) {
+        const trilhas = [...new Set(MOCK.groupVideoDeliveries.filter((d) => d.groupId === groupId).map((d) => d.trilha))];
+        return trilhas
+          .map((trilha) => {
+            const status = trailStatusForGroup(groupId, trilha);
+            const dates = MOCK.groupVideoDeliveries
+              .filter((d) => d.groupId === groupId && d.trilha === trilha)
+              .map((d) => d.enviadoEm)
+              .sort();
+            return { trilha, enviados: status.enviados, total: status.total, concluida: status.concluida, ultimaData: dates[dates.length - 1] };
+          })
+          .sort((a, b) => (a.ultimaData < b.ultimaData ? 1 : -1));
+      }
+
+      // ---------- Etapa 1: renderização ----------
+
+      function renderPeriodChips() {
+        document.getElementById("periodChips").innerHTML = periods.length
+          ? periods
+              .map(
+                (p, i) => `
+              <span class="chip">${p.inicio} - ${p.fim}<span class="chip-remove" data-remove-period="${i}">✕</span></span>`
+              )
+              .join("")
+          : '<span class="text-faint" style="font-size:12px;">Nenhum período adicionado</span>';
+
+        document.querySelectorAll("[data-remove-period]").forEach((el) =>
+          el.addEventListener("click", () => {
+            periods.splice(Number(el.dataset.removePeriod), 1);
+            renderPeriodChips();
+          })
+        );
+      }
+
+      document.getElementById("addPeriodButton").addEventListener("click", () => {
+        const inicio = document.getElementById("periodStart").value;
+        const fim = document.getElementById("periodEnd").value;
+        if (!inicio || !fim || inicio >= fim) return;
+        periods.push({ inicio, fim });
+        renderPeriodChips();
+      });
+
+      function renderGroupList() {
+        const groups = eligibleGroups();
+        document.getElementById("groupCountBadge").textContent = `${groups.length} grupo(s)`;
+
+        if (!selectedGroupId && groups.length) selectedGroupId = groups[0].id;
+
+        document.getElementById("groupList").innerHTML = groups
+          .map((g) => {
+            const blockReason = dispatchBlockReason(g);
+            return `
+            <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}">
+              <td class="strong group-name-cell">
+                <div class="ellipsis" title="${g.nome}">${g.nome}${blockReason ? `<span class="block-flag" title="${blockReason}">${icon("warning")}</span>` : ""}</div>
+                <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${orgName(g.organizationId)}">${orgName(g.organizationId)}</div>
+              </td>
+              <td><span class="badge badge-wrap ${SEGMENT_BADGE[g.segmento] || "badge-neutral"}">${wrapSegmento(g.segmento) || "Sem perfil"}</span></td>
+              <td class="group-name-cell"><div class="ellipsis" title="${g.trilha || ""}">${g.trilha || '<span class="text-faint">Sem trilha</span>'}</div></td>
+              <td class="chevron-cell">${icon("chevron")}</td>
+            </tr>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-select-group]").forEach((el) =>
+          el.addEventListener("click", () => {
+            selectedGroupId = el.dataset.selectGroup;
+            editingTrilhaGroupId = null;
+            renderGroupList();
+            renderDetail();
+          })
+        );
+      }
+
+      function renderDetail() {
+        const detailCard = document.getElementById("detailCard");
+        const group = MOCK.groups.find((g) => g.id === selectedGroupId);
+        if (!group) {
+          detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Nenhum grupo selecionado</strong></div></div>`;
+          return;
+        }
+
+        const history = historyForGroup(group.id);
+        const status = group.trilha ? trailStatusForGroup(group.id, group.trilha) : null;
+        const editingThis = editingTrilhaGroupId === group.id;
+
+        const historyHtml = history.length
+          ? `
+            <details class="trail-history">
+              <summary class="trail-history-toggle">${icon("chevron")} Histórico de trilhas executadas neste grupo (${history.length})</summary>
+              <div class="table-wrap table-flat" style="margin-top:8px;">
+                <table class="table-compact">
+                  <thead><tr><th>Trilha</th><th>Progresso</th><th>Status</th><th>Última atividade</th></tr></thead>
+                  <tbody>
+                    ${history
+                      .map(
+                        (h) => `
+                      <tr>
+                        <td class="strong">${h.trilha}</td>
+                        <td>${h.enviados}/${h.total} vídeos</td>
+                        <td>${h.concluida ? '<span class="badge badge-success">Concluída</span>' : '<span class="badge badge-warning">Parcial</span>'}</td>
+                        <td class="mono">${h.ultimaData}</td>
+                      </tr>`
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+            </details>`
+          : `<p class="text-faint" style="font-size:12.5px;">Nenhuma trilha executada anteriormente neste grupo.</p>`;
+
+        const trilhaSelectHtml = editingThis
+          ? `
+            <div class="trilha-select-row">
+              <select id="trilhaChangeSelect" style="max-width:260px;">
+                <option value="">Selecionar trilha</option>
+                ${trailsForGroup(group).map((t) => `<option value="${t.nome}"${t.nome === group.trilha ? " selected" : ""}>${t.nome}</option>`).join("")}
+              </select>
+              <button class="btn btn-sm" id="confirmTrilhaChange" type="button">Confirmar</button>
+              <button class="btn btn-ghost btn-sm" id="cancelTrilhaChange" type="button">Cancelar</button>
+            </div>`
+          : `
+            <div class="trilha-select-row">
+              <strong style="font-size:14px;">${group.trilha || "Nenhuma trilha selecionada"}</strong>
+              <button class="btn btn-secondary btn-sm" id="toggleTrilhaChange" type="button">${icon("refresh")} ${group.trilha ? "Alterar trilha" : "Selecionar trilha"}</button>
+            </div>`;
+
+        let progressHtml = "";
+        let videosTableHtml = "";
+
+        if (group.trilha && status) {
+          if (status.total === 0) {
+            progressHtml = `<div class="callout callout-warning" style="margin-top:12px;">Esta trilha ainda não tem vídeos aprovados disponíveis para envio.</div>`;
+          } else {
+            const pct = Math.round((status.enviados / status.total) * 100);
+            progressHtml = `
+              <div style="margin-top:12px;">
+                <div class="section-head" style="margin-bottom:6px;">
+                  <span class="text-muted" style="font-size:12.5px;font-weight:600;">Progresso da trilha</span>
+                  <span class="text-faint" style="font-size:12px;">${status.enviados}/${status.total} vídeos enviados</span>
+                </div>
+                <div class="progress"><span style="width:${pct}%"></span></div>
+              </div>`;
+
+            videosTableHtml = `
+              <div class="table-wrap table-flat" style="margin-top:14px;">
+                <table class="table-compact">
+                  <thead><tr><th>#</th><th>Vídeo</th><th>Status</th><th>Enviado em</th></tr></thead>
+                  <tbody>
+                    ${status.rows
+                      .map(
+                        (v, i) => `
+                      <tr class="${v.status === "proximo" ? "video-row-next" : ""}">
+                        <td>${i + 1}</td>
+                        <td class="${v.status === "proximo" ? "strong" : ""}">${v.subtemaNome} — ${v.arquivo}</td>
+                        <td>${
+                          v.status === "enviado"
+                            ? '<span class="badge badge-success">Enviado</span>'
+                            : v.status === "proximo"
+                            ? '<span class="badge badge-success">Próximo a enviar</span>'
+                            : '<span class="badge badge-neutral">Pendente</span>'
+                        }</td>
+                        <td class="mono">${v.enviadoEm || "—"}</td>
+                      </tr>`
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>`;
+
+            if (status.concluida) {
+              progressHtml += `<div class="callout callout-danger" style="margin-top:12px;">Esta trilha já foi concluída para este grupo. Escolha uma nova trilha para continuar os envios.</div>`;
+            }
+          }
+        }
+
+        detailCard.innerHTML = `
+          <div class="card-header">
+            <h3>${group.nome} <span class="badge ${SEGMENT_BADGE[group.segmento] || "badge-neutral"}" style="margin-left:8px;">${group.segmento || "Sem perfil"}</span></h3>
+            <span class="badge badge-info">Envia vídeo ✓</span>
+          </div>
+          <div class="card-body">
+            ${historyHtml}
+            <div class="divider" style="margin:14px 0;"></div>
+            <span class="text-muted" style="font-size:12.5px;font-weight:600;display:block;margin-bottom:8px;">Trilha selecionada</span>
+            ${trilhaSelectHtml}
+            ${progressHtml}
+            ${videosTableHtml}
+          </div>`;
+
+        document.querySelector("details.trail-history")?.addEventListener("toggle", () => {});
+
+        if (editingThis) {
+          document.getElementById("confirmTrilhaChange").addEventListener("click", () => {
+            group.trilha = document.getElementById("trilhaChangeSelect").value || null;
+            editingTrilhaGroupId = null;
+            renderGroupList();
+            renderDetail();
+            // TODO: PATCH /groups/:id { trilha_override: group.trilha }
+          });
+          document.getElementById("cancelTrilhaChange").addEventListener("click", () => {
+            editingTrilhaGroupId = null;
+            renderDetail();
+          });
+        } else {
+          document.getElementById("toggleTrilhaChange").addEventListener("click", () => {
+            editingTrilhaGroupId = group.id;
+            renderDetail();
+          });
+        }
+      }
+
+      function validateDispatch() {
+        const errors = [];
+        if (!document.getElementById("dispatchDate").value) errors.push("Selecione a data do disparo.");
+        if (!periods.length) errors.push("Adicione ao menos um período de envio.");
+
+        eligibleGroups().forEach((g) => {
+          const reason = dispatchBlockReason(g);
+          if (reason) errors.push(`${g.nome}: ${reason}`);
+        });
+        return errors;
+      }
+
+      document.getElementById("dispatchButton").addEventListener("click", () => {
+        const errors = validateDispatch();
+        const callout = document.getElementById("validationCallout");
+        if (errors.length) {
+          callout.style.display = "flex";
+          callout.innerHTML = `<div><strong>Não é possível disparar a campanha ainda:</strong><ul style="margin:6px 0 0 18px;padding:0;">${errors.map((e) => `<li>${e}</li>`).join("")}</ul></div>`;
+          return;
+        }
+        callout.style.display = "none";
+
+        dispatchGroups = eligibleGroups().map((g) => ({ group: g, video: trailStatusForGroup(g.id, g.trilha).nextVideo }));
+        buildCaptionItems();
+        goToStep(2);
+        // TODO: POST /campaigns/dispatch { data, periodos, delay_min_min, delay_max_min, group_ids: [...] }
+      });
+
+      // ---------- Etapa 2: geração de legendas ----------
+
+      const CAPTION_TEMPLATES = [
+        (v) => `Vamos juntos nessa jornada! Conteúdo prático de ${v.subtemaNome.toLowerCase()} para o seu grupo evoluir 🚀`,
+        (v) => `${v.subtemaNome}: o próximo passo para o seu negócio crescer. Vamos nessa?`,
+        (v) => `Hoje é dia de ${v.subtemaNome.toLowerCase()}! Conteúdo direto ao ponto para aplicar agora mesmo.`,
+        (v) => `Prepare-se: chegou a pílula sobre ${v.subtemaNome.toLowerCase()}. Assista e coloque em prática ainda hoje.`,
+      ];
+
+      function generateCaption(item, index) {
+        const template = CAPTION_TEMPLATES[index % CAPTION_TEMPLATES.length];
+        return template(item.video);
+      }
+
+      function buildCaptionItems() {
+        captionItems = dispatchGroups
+          .filter((d) => d.video)
+          .map((d, i) => ({
+            id: `cap-${i}`,
+            groupNome: d.group.nome,
+            trilha: d.group.trilha,
+            video: d.video,
+            legenda: null,
+            status: "pendente",
+          }));
+
+        captionItems.forEach((item, i) => {
+          const isLastAndMultiple = captionItems.length > 1 && i === captionItems.length - 1;
+          if (!isLastAndMultiple) {
+            item.legenda = generateCaption(item, i);
+            item.status = "gerado";
+          }
+        });
+
+        if (captionItems.length > 1) {
+          setTimeout(() => {
+            const last = captionItems[captionItems.length - 1];
+            last.legenda = generateCaption(last, captionItems.length - 1);
+            last.status = "gerado";
+            renderCaptions();
+            renderCaptionStats();
+          }, 1800);
+        }
+
+        captionFilter = "todos";
+        document.querySelectorAll("#captionFilterTabs button").forEach((b) => b.classList.toggle("active", b.dataset.filter === "todos"));
+        document.getElementById("captionSearch").value = "";
+        document.getElementById("sendWarningCallout").style.display = "none";
+        document.getElementById("sendSuccessCallout").style.display = "none";
+        document.getElementById("stepLegendas").className = "step active";
+        document.getElementById("stepEnvio").className = "step";
+      }
+
+      function renderCaptionStats() {
+        const total = captionItems.length;
+        const gerado = captionItems.filter((i) => i.status === "gerado").length;
+        const pendentes = total - gerado;
+        const pct = total ? Math.round((gerado / total) * 100) : 0;
+
+        document.getElementById("statTotal").textContent = total;
+        document.getElementById("statGenerated").textContent = gerado;
+        document.getElementById("statPending").textContent = pendentes;
+        document.getElementById("statPct").textContent = `${pct}%`;
+        document.getElementById("progressRing").style.setProperty("--pct", pct);
+      }
+
+      function matchesCaptionFilters(item) {
+        const q = document.getElementById("captionSearch").value.trim().toLowerCase();
+        if (captionFilter !== "todos" && item.status !== captionFilter) return false;
+        if (q && !(item.groupNome.toLowerCase().includes(q) || item.video.arquivo.toLowerCase().includes(q) || item.video.subtemaNome.toLowerCase().includes(q))) return false;
+        return true;
+      }
+
+      function renderCaptions() {
+        const filtered = captionItems.filter(matchesCaptionFilters);
+        document.getElementById("captionCountBadge").textContent = `${captionItems.length} vídeo(s)`;
+
+        if (!filtered.length) {
+          document.getElementById("captionsBody").innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Nenhum vídeo encontrado</strong><span>Ajuste os filtros ou a busca.</span></div></td></tr>`;
+          return;
+        }
+
+        document.getElementById("captionsBody").innerHTML = filtered
+          .map((item) => {
+            const legendaCell =
+              item.status === "gerado"
+                ? `${item.legenda}<br><span class="text-faint" style="font-size:11px;">${item.legenda.length} caracteres</span>`
+                : `<span class="text-faint" style="font-style:italic;">Aguardando geração da legenda...</span>`;
+            return `
+            <tr>
+              <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size:11.5px;">${item.trilha}</span></td>
+              <td>${item.video.subtemaNome}<br><span class="mono text-faint" style="font-size:11.5px;">${item.video.arquivo}</span></td>
+              <td style="max-width:280px;">${legendaCell}</td>
+              <td>${item.status === "gerado" ? '<span class="badge badge-success">Gerado</span>' : '<span class="badge badge-warning">Pendente</span>'}</td>
+              <td>${
+                item.status === "gerado"
+                  ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>`
+                  : '<span class="text-faint">—</span>'
+              }</td>
+            </tr>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openCaptionModal(btn.dataset.edit)));
+      }
+
+      document.getElementById("captionFilterTabs").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-filter]");
+        if (!btn) return;
+        document.querySelectorAll("#captionFilterTabs button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        captionFilter = btn.dataset.filter;
+        renderCaptions();
+      });
+      document.getElementById("captionSearch").addEventListener("input", renderCaptions);
+
+      let editingCaptionId = null;
+      function openCaptionModal(itemId) {
+        const item = captionItems.find((i) => i.id === itemId);
+        editingCaptionId = itemId;
+        document.getElementById("captionModalTitle").textContent = "Editar legenda";
+        document.getElementById("captionModalMeta").textContent = `${item.groupNome} · ${item.video.subtemaNome} — ${item.video.arquivo}`;
+        document.getElementById("captionModalText").value = item.legenda || "";
+        document.getElementById("captionOverlay").hidden = false;
+      }
+      function closeCaptionModal() {
+        document.getElementById("captionOverlay").hidden = true;
+        editingCaptionId = null;
+      }
+      document.getElementById("closeCaptionModal").addEventListener("click", closeCaptionModal);
+      document.getElementById("cancelCaptionModal").addEventListener("click", closeCaptionModal);
+      document.getElementById("saveCaptionModal").addEventListener("click", () => {
+        const item = captionItems.find((i) => i.id === editingCaptionId);
+        item.legenda = document.getElementById("captionModalText").value;
+        item.status = "gerado";
+        closeCaptionModal();
+        renderCaptions();
+        renderCaptionStats();
+        // TODO: PATCH /video-catalog/videos/:id { legenda }
+      });
+
+      document.getElementById("startSendButton").addEventListener("click", () => {
+        const pendentes = captionItems.filter((i) => i.status !== "gerado").length;
+        const warningCallout = document.getElementById("sendWarningCallout");
+        if (pendentes > 0) {
+          warningCallout.style.display = "flex";
+          warningCallout.className = "callout callout-warning";
+          warningCallout.textContent = `Ainda há ${pendentes} legenda(s) pendente(s). Aguarde a geração ou edite manualmente antes de iniciar o envio.`;
+          return;
+        }
+        warningCallout.style.display = "none";
+        applyDispatch();
+      });
+
+      function randomTimeInPeriods() {
+        if (!periods.length) return null;
+        const p = periods[Math.floor(Math.random() * periods.length)];
+        return p.inicio;
+      }
+
+      function applyDispatch() {
+        const dataEnvio = document.getElementById("dispatchDate").value;
+        dispatchGroups.forEach(({ group, video }) => {
+          if (!video) return;
+          MOCK.groupVideoDeliveries.push({ groupId: group.id, trilha: group.trilha, videoId: video.id, enviadoEm: dataEnvio });
+          group.horarioProgramado = randomTimeInPeriods();
+        });
+
+        document.getElementById("stepLegendas").className = "step done";
+        document.getElementById("stepLegendas").querySelector(".step-num").textContent = "✓";
+        document.getElementById("stepEnvio").className = "step active";
+
+        const successCallout = document.getElementById("sendSuccessCallout");
+        successCallout.style.display = "flex";
+        successCallout.innerHTML = `Envio iniciado com sucesso! <strong>${captionItems.length}</strong> vídeo(s) programado(s) para ${dataEnvio} nos períodos configurados. Acompanhe em <a href="relatorios.html">Relatório operacional</a>.`;
+        document.getElementById("startSendButton").disabled = true;
+        // TODO: POST /dispatch/execute { campaign batch já validado } — worker assíncrono cuida do jitter/randomização
+      }
+
+      document.getElementById("backToConfigButton").addEventListener("click", () => goToStep(1));
+
+      function goToStep(step) {
+        document.getElementById("stepConfig").style.display = step === 1 ? "block" : "none";
+        document.getElementById("stepCaptions").style.display = step === 2 ? "block" : "none";
+        if (step === 1) {
+          renderGroupList();
+          renderDetail();
+        } else {
+          document.getElementById("startSendButton").disabled = false;
+          renderCaptionStats();
+          renderCaptions();
+        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      renderPeriodChips();
+      renderGroupList();
+      renderDetail();
+    </script>
+  </body>
+</html>

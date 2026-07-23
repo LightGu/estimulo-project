@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auditoria · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+  </head>
+  <body data-page="auditoria">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Auditoria</h1>
+            <p>Histórico de quem criou, editou, aprovou, pausou ou cancelou o quê, e quando.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="toolbar">
+              <div class="field" style="min-width:200px;">
+                <label for="userFilter">Usuário</label>
+                <select id="userFilter">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:200px;">
+                <label for="entityFilter">Entidade</label>
+                <select id="entityFilter">
+                  <option value="todas">Todas</option>
+                </select>
+              </div>
+              <div class="field" style="min-width:220px;">
+                <label for="searchFilter">Pesquisar</label>
+                <input id="searchFilter" type="search" placeholder="Nome da entidade ou detalhe...">
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data/hora</th>
+                    <th>Usuário</th>
+                    <th>Ação</th>
+                    <th>Entidade</th>
+                    <th>Nome</th>
+                    <th>Detalhes</th>
+                  </tr>
+                </thead>
+                <tbody id="auditBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      function populateFilters() {
+        const users = Array.from(new Set(MOCK.auditLog.map((a) => a.usuario))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+        document.getElementById("userFilter").innerHTML =
+          '<option value="todos">Todos</option>' + users.map((u) => `<option value="${u}">${u}</option>`).join("");
+
+        const entities = Array.from(new Set(MOCK.auditLog.map((a) => a.entidade))).sort((a, b) => a.localeCompare(b, "pt-BR"));
+        document.getElementById("entityFilter").innerHTML =
+          '<option value="todas">Todas</option>' + entities.map((e) => `<option value="${e}">${e}</option>`).join("");
+      }
+
+      function matchesFilters(entry) {
+        const user = document.getElementById("userFilter").value;
+        const entity = document.getElementById("entityFilter").value;
+        const q = document.getElementById("searchFilter").value.trim().toLowerCase();
+
+        if (user !== "todos" && entry.usuario !== user) return false;
+        if (entity !== "todas" && entry.entidade !== entity) return false;
+        if (q && !entry.entidadeNome.toLowerCase().includes(q) && !entry.detalhes.toLowerCase().includes(q)) return false;
+        return true;
+      }
+
+      function renderAudit() {
+        const rows = [...MOCK.auditLog].filter(matchesFilters).sort((a, b) => (a.dataHora < b.dataHora ? 1 : -1));
+
+        if (!rows.length) {
+          document.getElementById("auditBody").innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>Nenhum registro encontrado</strong></div></td></tr>`;
+          return;
+        }
+
+        document.getElementById("auditBody").innerHTML = rows
+          .map(
+            (a) => `
+            <tr>
+              <td class="mono">${a.dataHora}</td>
+              <td class="strong">${a.usuario}</td>
+              <td>${a.acao}</td>
+              <td><span class="badge badge-neutral">${a.entidade}</span></td>
+              <td>${a.entidadeNome}</td>
+              <td class="text-muted">${a.detalhes}</td>
+            </tr>`
+          )
+          .join("");
+      }
+
+      document.getElementById("userFilter").addEventListener("change", renderAudit);
+      document.getElementById("entityFilter").addEventListener("change", renderAudit);
+      document.getElementById("searchFilter").addEventListener("input", renderAudit);
+
+      populateFilters();
+      renderAudit();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Organizações · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .org-item { border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
+      .org-item-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px; cursor:pointer; }
+      .org-item-head:hover { background: var(--surface-strong); }
+      .org-item-body { display:none; border-top:1px solid var(--line); }
+      .org-item.open .org-item-body { display:block; }
+      .org-item.open .chev { transform: rotate(90deg); }
+      .chev { transition: transform 0.15s ease; color: var(--text-faint); }
+      .org-meta { display:flex; gap:18px; align-items:center; }
+    </style>
+  </head>
+  <body data-page="organizacoes">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Organizações</h1>
+            <p>Consulte as organizações cadastradas e os grupos dentro de cada uma.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="toolbar">
+              <div class="field" style="min-width:260px;">
+                <label for="orgSearch">Pesquisar organização</label>
+                <input id="orgSearch" type="search" placeholder="Ex.: Zona Leste">
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section" id="orgList"></section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      function groupsForOrg(orgId) {
+        return MOCK.groups.filter((g) => g.organizationId === orgId);
+      }
+
+      function render() {
+        const q = document.getElementById("orgSearch").value.trim().toLowerCase();
+        const orgs = MOCK.organizations.filter((o) => o.nome.toLowerCase().includes(q));
+
+        if (!orgs.length) {
+          document.getElementById("orgList").innerHTML = '<div class="empty-state"><strong>Nenhuma organização encontrada</strong></div>';
+          return;
+        }
+
+        document.getElementById("orgList").innerHTML = orgs
+          .map((org, index) => {
+            const groups = groupsForOrg(org.id);
+            const classificados = groups.filter((g) => g.classificado).length;
+
+            return `
+              <div class="org-item${index === 0 ? " open" : ""}" data-org="${org.id}">
+                <div class="org-item-head" data-toggle="${org.id}">
+                  <div>
+                    <strong>${org.nome}</strong>
+                    <div class="text-faint" style="font-size:12.5px;margin-top:2px;">${groups.length} grupo(s) sincronizado(s)</div>
+                  </div>
+                  <div class="org-meta">
+                    <span class="badge badge-success">${classificados} classificado(s)</span>
+                    <span class="badge badge-warning">${groups.length - classificados} pendente(s)</span>
+                    <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+                  </div>
+                </div>
+                <div class="org-item-body">
+                  ${
+                    groups.length
+                      ? `<div class="table-wrap" style="border:0;border-radius:0;">
+                          <table>
+                            <thead><tr><th>Grupo</th><th>Perfil</th><th>Envia vídeo</th><th>Trilha</th></tr></thead>
+                            <tbody>
+                              ${groups
+                                .map(
+                                  (g) => `
+                                <tr>
+                                  <td class="strong">${g.nome}</td>
+                                  <td>${g.segmento || '<span class="text-faint">—</span>'}</td>
+                                  <td>${g.enviaVideo ? '<span class="badge badge-info">Habilitado</span>' : '<span class="badge badge-danger">Não envia</span>'}</td>
+                                  <td>${g.trilha || '<span class="text-faint">Sem trilha</span>'}</td>
+                                </tr>`
+                                )
+                                .join("")}
+                            </tbody>
+                          </table>
+                        </div>`
+                      : '<div class="empty-state">Nenhum grupo sincronizado para esta organização ainda.</div>'
+                  }
+                  <div style="padding:12px 20px;"><a class="btn btn-ghost btn-sm" href="grupos.html">Gerenciar grupos desta organização →</a></div>
+                </div>
+              </div>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-toggle]").forEach((head) => {
+          head.addEventListener("click", () => {
+            head.closest(".org-item").classList.toggle("open");
+          });
+        });
+      }
+
+      document.getElementById("orgSearch").addEventListener("input", render);
+      render();
+    </script>
+  </body>
+</html>
