@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Campanhas · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      tr.campaign-row.editable { cursor: pointer; }
+      tr.campaign-row.editable:hover { background: var(--surface-strong); }
+    </style>
+  </head>
+  <body data-page="campanhas">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Campanhas</h1>
+            <p>Criação e acompanhamento de campanhas de envio.</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn" id="newCampaignButton" type="button">+ Nova campanha</button>
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="section-head"><h2>Campanhas cadastradas</h2></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Campanha</th>
+                    <th>Trilha</th>
+                    <th>Status</th>
+                    <th>Data de disparo</th>
+                  </tr>
+                </thead>
+                <tbody id="campaignsBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="overlay" id="campaignOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="formTitle">Nova campanha</h3>
+          <button class="icon-btn-close" id="closeCampaignModal" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field-row" style="grid-template-columns:2fr 1fr;">
+            <div class="field">
+              <label for="campNome">Nome da campanha</label>
+              <input id="campNome" type="text" placeholder="Ex.: Eufrásio - Gestão Financeira - Agosto">
+            </div>
+            <div class="field">
+              <label for="campTrilha">Trilha</label>
+              <select id="campTrilha"></select>
+            </div>
+          </div>
+
+          <div class="callout" id="autoAssocCallout">
+            A campanha associa automaticamente <strong id="autoAssocCount">0</strong> grupo(s) com a trilha selecionada e seleciona,
+            para cada um, o próximo vídeo aprovado ainda não enviado.
+          </div>
+
+          <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;margin-top:14px;">
+            <div class="field">
+              <label for="campData">Data do disparo</label>
+              <input id="campData" type="date">
+            </div>
+            <div class="field">
+              <label for="campJanelaInicio">Janela — início</label>
+              <input id="campJanelaInicio" type="time" value="08:00">
+            </div>
+            <div class="field">
+              <label for="campJanelaFim">Janela — fim</label>
+              <input id="campJanelaFim" type="time" value="18:00">
+            </div>
+          </div>
+
+          <div class="field-row" style="grid-template-columns:1fr 1fr;">
+            <div class="field">
+              <label for="campIntervaloMin">Intervalo mínimo entre envios, min</label>
+              <input id="campIntervaloMin" type="number" min="1" value="4">
+            </div>
+            <div class="field">
+              <label for="campIntervaloMax">Intervalo máximo entre envios, min</label>
+              <input id="campIntervaloMax" type="number" min="1" value="12">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelCampaignModal" type="button">Cancelar</button>
+          <button class="btn" id="saveCampaignButton" type="button">Criar campanha</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/helpers.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      let editingCampaignId = null;
+
+      function trailGroupCount(trailName) {
+        return MOCK.groups.filter((g) => g.trilha === trailName && g.enviaVideo).length;
+      }
+
+      function populateTrailSelect() {
+        const select = document.getElementById("campTrilha");
+        select.innerHTML = MOCK.trails.map((t) => `<option value="${t.nome}">${t.nome}</option>`).join("");
+        updateAutoAssocCount();
+      }
+
+      function updateAutoAssocCount() {
+        const trilha = document.getElementById("campTrilha").value;
+        document.getElementById("autoAssocCount").textContent = trailGroupCount(trilha);
+      }
+
+      function renderCampaigns() {
+        document.getElementById("campaignsBody").innerHTML = MOCK.campaigns
+          .map((c) => {
+            const editable = c.status !== "concluida";
+            return `
+              <tr class="campaign-row${editable ? " editable" : ""}" ${editable ? `data-edit="${c.id}"` : ""}>
+                <td class="strong">${c.nome}</td>
+                <td>${trilhaShortName(c.trilha)}</td>
+                <td><span class="badge ${campaignStatusBadgeClass(c.status)}">${campaignStatusLabel(c.status)}</span></td>
+                <td class="mono">${c.dataEnvio || "—"}</td>
+              </tr>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-edit]").forEach((row) => row.addEventListener("click", () => startEditCampaign(row.dataset.edit)));
+      }
+
+      const campaignOverlay = document.getElementById("campaignOverlay");
+
+      function openCampaignModal() {
+        campaignOverlay.hidden = false;
+      }
+
+      function closeCampaignModal() {
+        campaignOverlay.hidden = true;
+      }
+
+      function resetCampaignForm() {
+        editingCampaignId = null;
+        document.getElementById("formTitle").textContent = "Nova campanha";
+        document.getElementById("saveCampaignButton").textContent = "Criar campanha";
+        document.getElementById("campNome").value = "";
+        document.getElementById("campData").value = "";
+        document.getElementById("campJanelaInicio").value = "08:00";
+        document.getElementById("campJanelaFim").value = "18:00";
+        document.getElementById("campIntervaloMin").value = 4;
+        document.getElementById("campIntervaloMax").value = 12;
+        populateTrailSelect();
+      }
+
+      document.getElementById("newCampaignButton").addEventListener("click", () => {
+        resetCampaignForm();
+        openCampaignModal();
+      });
+
+      function startEditCampaign(campaignId) {
+        const c = MOCK.campaigns.find((camp) => camp.id === campaignId);
+        editingCampaignId = campaignId;
+
+        document.getElementById("formTitle").textContent = `Editando · ${c.nome}`;
+        document.getElementById("campNome").value = c.nome;
+        populateTrailSelect();
+        document.getElementById("campTrilha").value = c.trilha;
+        document.getElementById("campData").value = c.dataEnvio || "";
+        document.getElementById("campJanelaInicio").value = c.janelaInicio;
+        document.getElementById("campJanelaFim").value = c.janelaFim;
+        document.getElementById("campIntervaloMin").value = c.intervaloMinMin;
+        document.getElementById("campIntervaloMax").value = c.intervaloMaxMin;
+        updateAutoAssocCount();
+
+        document.getElementById("saveCampaignButton").textContent = "Salvar alterações";
+        openCampaignModal();
+      }
+
+      document.getElementById("closeCampaignModal").addEventListener("click", closeCampaignModal);
+      document.getElementById("cancelCampaignModal").addEventListener("click", closeCampaignModal);
+      campaignOverlay.addEventListener("click", (e) => {
+        if (e.target === campaignOverlay) closeCampaignModal();
+      });
+
+      document.getElementById("campTrilha").addEventListener("change", updateAutoAssocCount);
+
+      document.getElementById("saveCampaignButton").addEventListener("click", () => {
+        const nome = document.getElementById("campNome").value.trim();
+        const trilha = document.getElementById("campTrilha").value;
+        const data = document.getElementById("campData").value;
+        const janelaInicio = document.getElementById("campJanelaInicio").value;
+        const janelaFim = document.getElementById("campJanelaFim").value;
+        const intervaloMinMin = Number(document.getElementById("campIntervaloMin").value);
+        const intervaloMaxMin = Number(document.getElementById("campIntervaloMax").value);
+        if (!nome || !data) return;
+
+        const total = trailGroupCount(trilha);
+        const gruposPausados = MOCK.groups.filter((g) => g.trilha === trilha && g.filaStatus === "fim_de_fila").length;
+
+        if (editingCampaignId) {
+          const c = MOCK.campaigns.find((camp) => camp.id === editingCampaignId);
+          Object.assign(c, { nome, trilha, gruposTotal: total, gruposPausados, dataEnvio: data, janelaInicio, janelaFim, intervaloMinMin, intervaloMaxMin });
+          // TODO: PATCH /campaigns/:id { ... } (somente permitido antes do processamento começar)
+        } else {
+          MOCK.campaigns.unshift({
+            id: `camp-${Date.now()}`,
+            nome,
+            trilha,
+            status: "agendada",
+            gruposTotal: total,
+            gruposEnviados: 0,
+            gruposCancelados: 0,
+            gruposPausados,
+            dataEnvio: data,
+            janelaInicio,
+            janelaFim,
+            intervaloMinMin,
+            intervaloMaxMin,
+          });
+          // TODO: POST /campaigns { nome, trilha, group_ids: [...todos os grupos da trilha], execution_at, janela, intervalo }
+        }
+
+        closeCampaignModal();
+        renderCampaigns();
+      });
+
+      renderCampaigns();
+    </script>
+  </body>
+</html>
