@@ -1,0 +1,60 @@
+:root {
+  color-scheme: light;
+
+  /* Brand palette — Estímulo Brand Guidelines, São Paulo 2021 */
+  --brand-pink: #ff66ff;
+  --brand-purple: #ba1bbf;
+  --brand-blue: #4e79ff;
+  --brand-blue-deep: #0023da;
+  --brand-navy: #00008d;
+  --brand-green: #57d988;
+  --brand-teal: #1d9479;
+  --brand-cyan: #4bd3f4;
+  --brand-sky: #0098fc;
+
+  /* Surfaces */
+  --bg: #f4f5fa;
+  --surface: #ffffff;
+  --surface-strong: #eef0fb;
+  --surface-sunken: #eaecf6;
+  --line: #dfe2f0;
+  --line-strong: #c7cce3;
+
+  /* Text */
+  --text: #171b2e;
+  --text-muted: #5c6280;
+  --text-faint: #8b90ab;
+  --text-on-brand: #ffffff;
+
+  /* Semantic actions */
+  --primary: var(--brand-blue);
+  --primary-dark: var(--brand-blue-deep);
+  --accent: var(--brand-purple);
+
+  /* Status semantics: enviado verde, processando amarelo, erro vermelho */
+  --success: #1d9479;
+  --success-bg: #e2f7ee;
+  --warning: #b7791f;
+  --warning-bg: #fdf3dc;
+  --danger: #c0293f;
+  --danger-bg: #fbe6ea;
+  --info: var(--brand-sky);
+  --info-bg: #e3f3fe;
+  --neutral-bg: #eef0fb;
+
+  /* Sidebar */
+  --sidebar-bg: #0b0a3d;
+  --sidebar-bg-strong: #131058;
+  --sidebar-text: #c6c9ec;
+  --sidebar-text-active: #ffffff;
+
+  /* Shape & elevation */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(17, 20, 45, 0.06);
+  --shadow-md: 0 4px 16px rgba(17, 20, 45, 0.08);
+  --shadow-lg: 0 12px 32px rgba(17, 20, 45, 0.14);
+
+  --font-sans: "Poppins", "Segoe UI", Arial, Helvetica, sans-serif;
+}
