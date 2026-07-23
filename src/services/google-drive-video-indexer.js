@@ -252,6 +252,7 @@ async function indexGoogleDriveVideos(params) {
     drive,
     rootFolderId,
     rootFolderName = "root",
+    transcribeVideo,
     upsertVideo,
     logger = console,
     maxDepth = 50,
@@ -272,6 +273,41 @@ async function indexGoogleDriveVideos(params) {
   const errors = [];
   const visitedFolderIds = new Set();
   let processedCount = 0;
+
+  function startTranscriptionForNewVideo(upsertResult, mappedVideo) {
+    if (!transcribeVideo || !upsertResult || upsertResult.created !== true) {
+      return;
+    }
+
+    const videoCatalogRecord = upsertResult.video || upsertResult.record || mappedVideo;
+    const transcriptionPromise = Promise.resolve()
+      .then(() => transcribeVideo(videoCatalogRecord))
+      .then(() => {
+        logger.info &&
+          logger.info(
+            JSON.stringify({
+              event: "google_drive_video_index.transcription_completed",
+              video_id: videoCatalogRecord && videoCatalogRecord.id,
+              drive_file_id: videoCatalogRecord && videoCatalogRecord.drive_file_id,
+            })
+          );
+      })
+      .catch((error) => {
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "google_drive_video_index.transcription_failed",
+              video_id: videoCatalogRecord && videoCatalogRecord.id,
+              drive_file_id: videoCatalogRecord && videoCatalogRecord.drive_file_id,
+              error_message: error.message,
+            })
+          );
+      });
+
+    if (typeof transcriptionPromise.unref === "function") {
+      transcriptionPromise.unref();
+    }
+  }
 
   async function walk(folderId, pathSegments, depth) {
     if (depth > maxDepth) {
@@ -344,7 +380,8 @@ async function indexGoogleDriveVideos(params) {
         }
 
         if (upsertVideo) {
-          await upsertVideo(mapped.video);
+          const upsertResult = await upsertVideo(mapped.video);
+          startTranscriptionForNewVideo(upsertResult, mapped.video);
         }
 
         videos.push(mapped.video);

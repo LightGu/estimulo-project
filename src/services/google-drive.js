@@ -4,6 +4,10 @@ const process = require("node:process");
 
 require("dotenv").config({ quiet: true });
 
+const { clearLoopbackDiscardProxyEnv } = require("../config/network");
+
+clearLoopbackDiscardProxyEnv();
+
 const { google } = require("googleapis");
 
 const GOOGLE_DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";

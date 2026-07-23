@@ -295,18 +295,22 @@ Cada job contem pelo menos:
 - `group_id`: identificador do grupo de destino.
 - `campaign_id`: campanha associada ao envio.
 - `link_video`, `video_id` ou `drive_file_id`: referencia do video que sera enviado.
-- `legenda`: texto usado como legenda/mensagem.
+- `legenda`: texto inicial usado como fallback quando nao houver legenda
+  selecionada ou gerada pelo pipeline do worker.
 - `scheduled_at`: data/hora planejada para envio em ISO 8601.
 - `status`: status inicial do processamento, por padrao `pending`.
 - `dispatch_order`, `jitter_delay_ms` e `cumulative_delay_ms`: metadados
   preenchidos quando o job foi criado por `addJitteredDispatchJobs()`.
 
-Quando o job recebe `video_id` ou `video_catalog`, o worker baixa o arquivo do
-Google Drive apenas no momento do disparo. O servico
+Quando o job recebe `video_id` ou `video_catalog`, o worker inicia em paralelo o
+download do arquivo do Google Drive e a obtencao da legenda. O servico
 `downloadFromDrive()` usa o `drive_file_id` do registro `video_catalog`, chama
 `drive.files.get({ fileId, alt: "media" })` e retorna os bytes junto com nome e
-tipo MIME para o dispatcher montar o payload de envio. Se o download falhar, vier
-vazio ou nao representar um video, o envio nao e chamado. Apos a chamada ao
+tipo MIME para o dispatcher montar o payload de envio. Em paralelo, o pipeline de
+legendas seleciona uma legenda ainda nao usada no dia ou gera uma nova via IA,
+seguida de revisao factual quando houver `video_id`. Se o download falhar, vier
+vazio, nao representar um video, ou a legenda nao passar pela selecao/geracao e
+revisao exigidas, o envio para a Evolution API nao e chamado. Apos a chamada ao
 provedor, as referencias temporarias aos bytes/base64 sao liberadas. O envio por
 `link_video` continua disponivel para testes manuais e fluxos antigos.
 
