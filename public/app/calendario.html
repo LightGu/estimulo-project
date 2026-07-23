@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Calendário editorial · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      body[data-page="calendario"] .page {
+        max-width: none;
+        height: calc(100vh - var(--topbar-h, 73px));
+        overflow-y: auto;
+      }
+      .cal-fill { flex: 1 1 auto; min-height: 320px; display: flex; flex-direction: column; gap: 8px; }
+      .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+      #calendarGrid { flex: 1 1 auto; grid-auto-rows: 1fr; }
+      .cal-weekday { text-align:center; font-size:11.5px; font-weight:700; color:var(--text-faint); text-transform:uppercase; padding-bottom:4px; }
+      .cal-cell { min-height:70px; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; background:var(--surface); display:flex; flex-direction:column; gap:4px; overflow:hidden; }
+      .cal-cell.outside { opacity:0.35; }
+      .cal-cell.today { border-color: var(--brand-blue); box-shadow: 0 0 0 2px rgba(78,121,255,0.15); }
+      .cal-daynum { font-size:12px; font-weight:700; color:var(--text-muted); }
+      .cal-chip { font-size:10.5px; padding:3px 6px; border-radius:5px; font-weight:600; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; background: rgba(78,121,255,0.15); color: var(--brand-blue); }
+      .cal-chip.concluida { background: rgba(29,148,121,0.15); color: var(--success); }
+      .cal-more { font-size:10.5px; color:var(--text-faint); cursor:pointer; }
+      .cal-nav { display:flex; align-items:center; gap:10px; }
+      .cal-nav button { border:1px solid var(--line); background:var(--surface); border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:14px; }
+      .cal-nav button:hover { background: var(--surface-strong); }
+      .legend-dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; }
+    </style>
+  </head>
+  <body data-page="calendario">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Calendário editorial</h1>
+            <p>Programação dos disparos de campanhas.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="toolbar">
+              <div class="cal-nav">
+                <button id="prevMonth" type="button">‹</button>
+                <strong id="monthLabel" style="min-width:170px;text-align:center;"></strong>
+                <button id="nextMonth" type="button">›</button>
+              </div>
+              <div class="field">
+                <label for="orgFilter">Organização</label>
+                <select id="orgFilter">
+                  <option value="todas">Todas</option>
+                </select>
+              </div>
+              <div class="toolbar-spacer"></div>
+              <span style="font-size:12px;"><span class="legend-dot" style="background:var(--brand-blue);"></span>Programado <span class="legend-dot" style="background:var(--success);margin-left:14px;"></span>Concluído</span>
+            </div>
+          </section>
+
+          <section class="page-section cal-fill">
+            <div class="cal-grid" id="weekdaysRow"></div>
+            <div class="cal-grid" id="calendarGrid"></div>
+          </section>
+
+          <section class="page-section" id="dayDetailSection" style="display:none;">
+            <div class="section-head">
+              <h2 id="dayDetailTitle">Campanhas do dia</h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Campanha</th><th>Trilha</th><th>Janela</th><th>Grupos</th><th>Status</th></tr></thead>
+                <tbody id="dayDetailBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/helpers.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+      const MONTH_NAMES = [
+        "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+        "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+      ];
+      const TODAY = "2026-07-22";
+
+      let viewYear = 2026;
+      let viewMonth = 6; // 0-indexed: 6 = Julho
+      let selectedDate = TODAY;
+
+      function syncTopbarHeight() {
+        const topbar = document.querySelector(".topbar");
+        if (topbar) document.documentElement.style.setProperty("--topbar-h", `${topbar.offsetHeight}px`);
+      }
+      window.addEventListener("resize", syncTopbarHeight);
+      window.addEventListener("load", syncTopbarHeight);
+      if (document.fonts && document.fonts.ready) document.fonts.ready.then(syncTopbarHeight);
+      syncTopbarHeight();
+
+      function populateOrgFilter() {
+        document.getElementById("orgFilter").innerHTML =
+          '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.id}">${o.nome}</option>`).join("");
+      }
+
+      function campaignMatchesOrg(campaign, orgId) {
+        if (orgId === "todas") return true;
+        return MOCK.groups.some((g) => g.trilha === campaign.trilha && g.organizationId === orgId);
+      }
+
+      function campaignsForDate(dateStr) {
+        const orgId = document.getElementById("orgFilter").value;
+        return MOCK.campaigns.filter((c) => c.dataEnvio === dateStr && campaignMatchesOrg(c, orgId));
+      }
+
+      function renderWeekdaysRow() {
+        document.getElementById("weekdaysRow").innerHTML = WEEKDAYS.map((w) => `<div class="cal-weekday">${w}</div>`).join("");
+      }
+
+      function pad(n) {
+        return String(n).padStart(2, "0");
+      }
+
+      function renderCalendar() {
+        document.getElementById("monthLabel").textContent = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
+
+        const firstOfMonth = new Date(viewYear, viewMonth, 1);
+        const startWeekday = firstOfMonth.getDay();
+        const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+        const daysInPrevMonth = new Date(viewYear, viewMonth, 0).getDate();
+
+        const cells = [];
+        for (let i = 0; i < startWeekday; i++) {
+          cells.push({ day: daysInPrevMonth - startWeekday + 1 + i, outside: true, dateStr: null });
+        }
+        for (let d = 1; d <= daysInMonth; d++) {
+          cells.push({ day: d, outside: false, dateStr: `${viewYear}-${pad(viewMonth + 1)}-${pad(d)}` });
+        }
+        while (cells.length % 7 !== 0) {
+          cells.push({ day: cells.length - (startWeekday + daysInMonth) + 1, outside: true, dateStr: null });
+        }
+
+        document.getElementById("calendarGrid").innerHTML = cells
+          .map((cell) => {
+            if (cell.outside) {
+              return `<div class="cal-cell outside"><span class="cal-daynum">${cell.day}</span></div>`;
+            }
+            const campaigns = campaignsForDate(cell.dateStr);
+            const visible = campaigns.slice(0, 3);
+            const rest = campaigns.length - visible.length;
+            return `
+              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}" data-date="${cell.dateStr}">
+                <span class="cal-daynum">${cell.day}</span>
+                ${visible
+                  .map(
+                    (c) =>
+                      `<span class="cal-chip ${c.status}" data-event-date="${cell.dateStr}" title="${perfilForTrilha(c.trilha)} - ${trilhaShortName(c.trilha)}">${trilhaShortName(c.trilha)}</span>`
+                  )
+                  .join("")}
+                ${rest > 0 ? `<span class="cal-more" data-event-date="${cell.dateStr}">+${rest} mais</span>` : ""}
+              </div>`;
+          })
+          .join("");
+
+        document.querySelectorAll("[data-date], [data-event-date]").forEach((el) => {
+          const date = el.dataset.date || el.dataset.eventDate;
+          el.addEventListener("click", () => {
+            selectedDate = date;
+            renderDayDetail();
+          });
+        });
+      }
+
+      function renderDayDetail() {
+        const section = document.getElementById("dayDetailSection");
+        const campaigns = campaignsForDate(selectedDate);
+        section.style.display = "flex";
+        document.getElementById("dayDetailTitle").textContent = `Campanhas de ${selectedDate}`;
+
+        if (!campaigns.length) {
+          document.getElementById("dayDetailBody").innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Nenhuma campanha programada neste dia</strong></div></td></tr>`;
+          return;
+        }
+
+        document.getElementById("dayDetailBody").innerHTML = campaigns
+          .map(
+            (c) => `
+            <tr>
+              <td class="strong">${c.nome}</td>
+              <td>${trilhaShortName(c.trilha)}</td>
+              <td class="mono">${c.janelaInicio}–${c.janelaFim}</td>
+              <td>${c.gruposTotal}</td>
+              <td><span class="badge ${campaignStatusBadgeClass(c.status)}">${campaignStatusLabel(c.status)}</span></td>
+            </tr>`
+          )
+          .join("");
+      }
+
+      document.getElementById("prevMonth").addEventListener("click", () => {
+        viewMonth -= 1;
+        if (viewMonth < 0) { viewMonth = 11; viewYear -= 1; }
+        renderCalendar();
+      });
+      document.getElementById("nextMonth").addEventListener("click", () => {
+        viewMonth += 1;
+        if (viewMonth > 11) { viewMonth = 0; viewYear += 1; }
+        renderCalendar();
+      });
+      document.getElementById("orgFilter").addEventListener("change", () => { renderCalendar(); renderDayDetail(); });
+
+      populateOrgFilter();
+      renderWeekdaysRow();
+      renderCalendar();
+      renderDayDetail();
+    </script>
+  </body>
+</html>

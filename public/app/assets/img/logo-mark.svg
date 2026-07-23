@@ -1,0 +1,10 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Estímulo">
+  <path d="M 38 100 A 62 62 0 0 1 100 38" fill="none" stroke="#FF66FF" stroke-width="32" stroke-linecap="round"/>
+  <path d="M 100 38 A 62 62 0 0 1 158.26 78.8" fill="none" stroke="#00008D" stroke-width="32" stroke-linecap="round"/>
+  <path d="M 38 100 A 62 62 0 0 0 143.84 143.84" fill="none" stroke="#4BD3F4" stroke-width="32" stroke-linecap="round"/>
+  <line x1="38" y1="100" x2="130" y2="100" stroke="#57D988" stroke-width="32" stroke-linecap="round"/>
+  <circle cx="38" cy="100" r="16" fill="#BA1BBF"/>
+  <circle cx="100" cy="38" r="16" fill="#00008D"/>
+  <circle cx="143.84" cy="143.84" r="16" fill="#0098FC"/>
+  <circle cx="130" cy="100" r="16" fill="#1D9479"/>
+</svg>

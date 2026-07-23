@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Relatório operacional · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+  </head>
+  <body data-page="relatorios">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Relatório operacional</h1>
+            <p>Conteúdos enviados, filtráveis por período, organização, grupo, campanha e trilha.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="toolbar">
+              <div class="field">
+                <label for="dataInicio">De</label>
+                <input id="dataInicio" type="date">
+              </div>
+              <div class="field">
+                <label for="dataFim">Até</label>
+                <input id="dataFim" type="date">
+              </div>
+              <div class="field" style="min-width:200px;">
+                <label for="orgFilter">Organização</label>
+                <select id="orgFilter"><option value="todas">Todas</option></select>
+              </div>
+              <div class="field" style="min-width:200px;">
+                <label for="campanhaFilter">Campanha</label>
+                <select id="campanhaFilter"><option value="todas">Todas</option></select>
+              </div>
+              <div class="field" style="min-width:200px;">
+                <label for="trilhaFilter">Trilha</label>
+                <select id="trilhaFilter"><option value="todas">Todas</option></select>
+              </div>
+              <div class="field" style="min-width:160px;">
+                <label for="statusFilter">Status</label>
+                <select id="statusFilter">
+                  <option value="todos">Todos</option>
+                  <option value="enviado">Enviado</option>
+                  <option value="processando">Processando</option>
+                  <option value="erro">Erro</option>
+                </select>
+              </div>
+              <div class="toolbar-spacer"></div>
+              <button class="btn btn-secondary" id="clearFiltersButton" type="button">Limpar filtros</button>
+              <button class="btn" id="exportCsvButton" type="button">Exportar CSV</button>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="grid grid-cols-4" id="summaryCards"></div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Conteúdos enviados <span class="badge badge-neutral" id="resultCount"></span></h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Organização</th>
+                    <th>Grupo</th>
+                    <th>Campanha</th>
+                    <th>Conteúdo</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="reportBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      const STATUS_BADGE = { enviado: "badge-success", processando: "badge-warning", erro: "badge-danger" };
+
+      function populateFilters() {
+        document.getElementById("orgFilter").innerHTML =
+          '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.nome}">${o.nome}</option>`).join("");
+
+        const campanhas = Array.from(new Set(MOCK.reportRows.map((r) => r.campanha)));
+        document.getElementById("campanhaFilter").innerHTML =
+          '<option value="todas">Todas</option>' + campanhas.map((c) => `<option value="${c}">${c}</option>`).join("");
+
+        const trilhas = Array.from(new Set(MOCK.reportRows.map((r) => r.trilha)));
+        document.getElementById("trilhaFilter").innerHTML =
+          '<option value="todas">Todas</option>' + trilhas.map((t) => `<option value="${t}">${t}</option>`).join("");
+      }
+
+      function matchesFilters(row) {
+        const dataInicio = document.getElementById("dataInicio").value;
+        const dataFim = document.getElementById("dataFim").value;
+        const org = document.getElementById("orgFilter").value;
+        const campanha = document.getElementById("campanhaFilter").value;
+        const trilha = document.getElementById("trilhaFilter").value;
+        const status = document.getElementById("statusFilter").value;
+
+        if (dataInicio && row.data < dataInicio) return false;
+        if (dataFim && row.data > dataFim) return false;
+        if (org !== "todas" && row.organizacao !== org) return false;
+        if (campanha !== "todas" && row.campanha !== campanha) return false;
+        if (trilha !== "todas" && row.trilha !== trilha) return false;
+        if (status !== "todos" && row.status !== status) return false;
+        return true;
+      }
+
+      function getFilteredRows() {
+        return MOCK.reportRows.filter(matchesFilters);
+      }
+
+      function renderSummary(rows) {
+        const counts = { enviado: 0, processando: 0, erro: 0 };
+        rows.forEach((r) => counts[r.status]++);
+        const cards = [
+          { label: "Total no período", value: rows.length, bar: "var(--brand-blue)" },
+          { label: "Enviados", value: counts.enviado, bar: "var(--success)" },
+          { label: "Processando", value: counts.processando, bar: "var(--warning)" },
+          { label: "Erros", value: counts.erro, bar: "var(--danger)" },
+        ];
+        document.getElementById("summaryCards").innerHTML = cards
+          .map(
+            (c) => `
+            <div class="card stat-card" style="--accent-bar:${c.bar}">
+              <span class="stat-label">${c.label}</span>
+              <span class="stat-value">${c.value}</span>
+            </div>`
+          )
+          .join("");
+      }
+
+      function renderTable(rows) {
+        document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
+        if (!rows.length) {
+          document.getElementById("reportBody").innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
+          return;
+        }
+        document.getElementById("reportBody").innerHTML = rows
+          .map(
+            (r) => `
+            <tr>
+              <td class="mono">${r.data}</td>
+              <td>${r.organizacao}</td>
+              <td class="strong">${r.grupo}</td>
+              <td>${r.campanha}</td>
+              <td>${r.conteudo}</td>
+              <td><span class="badge ${STATUS_BADGE[r.status]}" title="${r.motivo || ""}">${r.status}</span></td>
+            </tr>`
+          )
+          .join("");
+      }
+
+      function renderAll() {
+        const rows = getFilteredRows();
+        renderSummary(rows);
+        renderTable(rows);
+      }
+
+      ["dataInicio", "dataFim", "orgFilter", "campanhaFilter", "trilhaFilter", "statusFilter"].forEach((id) =>
+        document.getElementById(id).addEventListener("input", renderAll)
+      );
+
+      document.getElementById("clearFiltersButton").addEventListener("click", () => {
+        document.getElementById("dataInicio").value = "";
+        document.getElementById("dataFim").value = "";
+        document.getElementById("orgFilter").value = "todas";
+        document.getElementById("campanhaFilter").value = "todas";
+        document.getElementById("trilhaFilter").value = "todas";
+        document.getElementById("statusFilter").value = "todos";
+        renderAll();
+      });
+
+      function toCsvValue(value) {
+        const str = String(value ?? "");
+        return /[",\n;]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+      }
+
+      document.getElementById("exportCsvButton").addEventListener("click", () => {
+        const rows = getFilteredRows();
+        const headers = ["Data", "Organização", "Grupo", "Campanha", "Trilha", "Conteúdo", "Status"];
+        const lines = [headers.join(";")].concat(
+          rows.map((r) => [r.data, r.organizacao, r.grupo, r.campanha, r.trilha, r.conteudo, r.status].map(toCsvValue).join(";"))
+        );
+        const csv = "﻿" + lines.join("\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `relatorio-estimulo-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
+
+      populateFilters();
+      renderAll();
+    </script>
+  </body>
+</html>

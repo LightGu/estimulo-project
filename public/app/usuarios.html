@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Usuários e permissões · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .role-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap:12px; }
+      .checkbox-list { display:flex; flex-direction:column; gap:2px; max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; }
+      .checkbox-list label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
+      .checkbox-list label:hover { background: var(--surface-strong); }
+    </style>
+  </head>
+  <body data-page="usuarios">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Usuários e permissões</h1>
+            <p>Controle quem acessa a plataforma e o que cada papel pode fazer.</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn" id="newUserButton" type="button">+ Novo usuário</button>
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="section-head"><h2>Papéis disponíveis</h2></div>
+            <div class="role-grid" id="roleGrid"></div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head"><h2>Usuários cadastrados</h2></div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>E-mail</th>
+                    <th>Papel</th>
+                    <th>Organizações visíveis</th>
+                    <th>Status</th>
+                    <th>Último acesso</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="usersBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="overlay" id="userOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="userModalTitle">Novo usuário</h3>
+          <button class="icon-btn-close" id="closeUserModal" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field-row" style="grid-template-columns:1fr 1fr;">
+            <div class="field">
+              <label for="userNome">Nome</label>
+              <input id="userNome" type="text" placeholder="Nome completo">
+            </div>
+            <div class="field">
+              <label for="userEmail">E-mail</label>
+              <input id="userEmail" type="email" placeholder="nome@estimulo.org">
+            </div>
+          </div>
+          <div class="field">
+            <label for="userPapel">Papel</label>
+            <select id="userPapel"></select>
+          </div>
+          <div class="field" style="display:flex;align-items:center;gap:12px;">
+            <label class="switch" style="margin:0;"><input type="checkbox" id="userTodasOrgs" checked><span class="track"></span></label>
+            <strong style="font-size:13px;">Visualizar todas as organizações</strong>
+          </div>
+          <div class="field" id="userOrgsField" style="display:none;">
+            <label>Organizações visíveis</label>
+            <div class="checkbox-list" id="userOrgsCheckboxes"></div>
+          </div>
+          <div class="field" style="display:flex;align-items:center;gap:12px;">
+            <label class="switch" style="margin:0;"><input type="checkbox" id="userAtivo" checked><span class="track"></span></label>
+            <strong style="font-size:13px;">Usuário ativo</strong>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelUserModal" type="button">Cancelar</button>
+          <button class="btn" id="saveUserButton" type="button">Salvar usuário</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      function renderRoles() {
+        document.getElementById("roleGrid").innerHTML = MOCK.roles
+          .map(
+            (r) => `
+            <div class="card card-pad">
+              <strong style="font-size:13px;">${r.nome}</strong>
+              <p class="text-faint" style="font-size:12px;margin-top:6px;">${r.descricao}</p>
+            </div>`
+          )
+          .join("");
+      }
+
+      function orgsLabel(user) {
+        if (user.organizacoesVisiveis.includes("todas")) return "Todas";
+        return user.organizacoesVisiveis.map((id) => MOCK.organizations.find((o) => o.id === id)?.nome).filter(Boolean).join(", ");
+      }
+
+      function renderUsers() {
+        document.getElementById("usersBody").innerHTML = MOCK.users
+          .map(
+            (u) => `
+            <tr>
+              <td class="strong">${u.nome}</td>
+              <td class="mono">${u.email}</td>
+              <td><span class="badge badge-info">${u.papel}</span></td>
+              <td>${orgsLabel(u)}</td>
+              <td>${u.ativo ? '<span class="badge badge-success">Ativo</span>' : '<span class="badge badge-neutral">Inativo</span>'}</td>
+              <td class="mono">${u.ultimoAcesso}</td>
+              <td><button class="btn btn-secondary btn-sm" data-toggle-active="${u.id}">${u.ativo ? "Desativar" : "Ativar"}</button></td>
+            </tr>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-toggle-active]").forEach((btn) =>
+          btn.addEventListener("click", () => {
+            const user = MOCK.users.find((u) => u.id === btn.dataset.toggleActive);
+            user.ativo = !user.ativo;
+            renderUsers();
+            // TODO: PATCH /users/:id { ativo }
+          })
+        );
+      }
+
+      function populateOrgCheckboxes() {
+        document.getElementById("userOrgsCheckboxes").innerHTML = MOCK.organizations
+          .map((o) => `<label><input type="checkbox" value="${o.id}" class="org-check"> ${o.nome}</label>`)
+          .join("");
+      }
+
+      const userOverlay = document.getElementById("userOverlay");
+      document.getElementById("newUserButton").addEventListener("click", () => {
+        document.getElementById("userNome").value = "";
+        document.getElementById("userEmail").value = "";
+        document.getElementById("userPapel").innerHTML = MOCK.roles.map((r) => `<option>${r.nome}</option>`).join("");
+        document.getElementById("userTodasOrgs").checked = true;
+        document.getElementById("userOrgsField").style.display = "none";
+        document.getElementById("userAtivo").checked = true;
+        populateOrgCheckboxes();
+        userOverlay.hidden = false;
+      });
+
+      document.getElementById("userTodasOrgs").addEventListener("change", (e) => {
+        document.getElementById("userOrgsField").style.display = e.target.checked ? "none" : "block";
+      });
+
+      document.getElementById("closeUserModal").addEventListener("click", () => (userOverlay.hidden = true));
+      document.getElementById("cancelUserModal").addEventListener("click", () => (userOverlay.hidden = true));
+
+      document.getElementById("saveUserButton").addEventListener("click", () => {
+        const nome = document.getElementById("userNome").value.trim();
+        const email = document.getElementById("userEmail").value.trim();
+        const papel = document.getElementById("userPapel").value;
+        const todasOrgs = document.getElementById("userTodasOrgs").checked;
+        const ativo = document.getElementById("userAtivo").checked;
+        const orgsVisiveis = todasOrgs
+          ? ["todas"]
+          : Array.from(document.querySelectorAll(".org-check:checked")).map((cb) => cb.value);
+        if (!nome || !email) return;
+
+        MOCK.users.unshift({
+          id: `user-${Date.now()}`,
+          nome,
+          email,
+          papel,
+          organizacoesVisiveis: orgsVisiveis,
+          ativo,
+          ultimoAcesso: "—",
+        });
+
+        userOverlay.hidden = true;
+        renderUsers();
+        // TODO: POST /users { nome, email, papel, organizacoes_visiveis, ativo }
+      });
+
+      renderRoles();
+      renderUsers();
+    </script>
+  </body>
+</html>

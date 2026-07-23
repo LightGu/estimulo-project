@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Grupos · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .fila-fim { color: var(--warning); }
+      .video-off-reason { display:block; margin-top:2px; font-size:11.5px; color:var(--text-faint); max-width:220px; }
+      .sync-panel { display:none; }
+      .sync-panel.open { display:flex; }
+    </style>
+  </head>
+  <body data-page="grupos">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Grupos do WhatsApp</h1>
+            <p>Classifique, habilite envios e defina trilhas por grupo.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="toolbar">
+              <div class="field" style="min-width:240px;">
+                <label for="searchInput">Pesquisar por nome</label>
+                <input id="searchInput" type="search" placeholder="Ex.: Zona Leste">
+              </div>
+              <div class="field">
+                <label for="statusFilter">Classificação</label>
+                <select id="statusFilter">
+                  <option value="todos">Todos</option>
+                  <option value="classificados">Classificados</option>
+                  <option value="nao-classificados">Não classificados</option>
+                </select>
+              </div>
+              <div class="toolbar-spacer"></div>
+              <button class="btn btn-secondary" id="syncButton" type="button">Sincronizar com Evolution API</button>
+            </div>
+
+            <div class="card sync-panel" id="syncPanel">
+              <div class="card-body" style="width:100%;">
+                <div id="syncStatus" class="text-muted">Sincronizando grupos com a Evolution API…</div>
+                <div id="newGroupsWrap" style="margin-top:14px;"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Grupos <span class="badge badge-neutral" id="resultCount"></span></h2>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Grupo</th>
+                    <th>Organização</th>
+                    <th>Perfil</th>
+                    <th>Classificação</th>
+                    <th>Envia vídeo</th>
+                    <th>Trilha</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody id="groupsBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <div class="overlay" id="editOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="editTitle">Editar grupo</h3>
+          <button class="icon-btn-close" id="closeModal" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label for="editOrg">Organização</label>
+            <select id="editOrg"></select>
+          </div>
+          <div class="field">
+            <label for="editSegmento">Perfil</label>
+            <select id="editSegmento">
+              <option value="">Sem perfil</option>
+            </select>
+          </div>
+
+          <div class="field" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+            <label class="switch"><input type="checkbox" id="editEnviaVideo"><span class="track"></span></label>
+            <div>
+              <strong style="font-size:13px;">Envia vídeo</strong>
+              <p class="text-faint" style="font-size:12px;">Desative para marcar como "não envia vídeo" (ex.: CS01, CS02, grupos de mulheres).</p>
+            </div>
+          </div>
+          <div class="field" id="motivoField">
+            <label for="editMotivo">Motivo de não enviar vídeo</label>
+            <input id="editMotivo" type="text" placeholder="Ex.: Grupo de mulheres — não recebe vídeos">
+          </div>
+
+          <div class="callout" id="filaCallout" style="display:none;">
+            Este grupo está pausado por <strong>fim de fila</strong>: não há vídeos posteriores não assistidos na trilha atual.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelEdit" type="button">Cancelar</button>
+          <button class="btn" id="saveEdit" type="button">Salvar alterações</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="assets/js/mock-data.js"></script>
+    <script src="assets/js/nav.js"></script>
+    <script>
+      let editingGroupId = null;
+
+      function orgName(id) {
+        const org = MOCK.organizations.find((o) => o.id === id);
+        return org ? org.nome : "—";
+      }
+
+      function classificationBadge(group) {
+        return group.classificado
+          ? '<span class="badge badge-success">Classificado</span>'
+          : '<span class="badge badge-warning">Não classificado</span>';
+      }
+
+      function enviaVideoBadge(group) {
+        if (!group.enviaVideo) {
+          return `<span class="badge badge-danger">Não envia vídeo</span><span class="video-off-reason">${group.naoEnviaVideoMotivo || "Desabilitado manualmente"}</span>`;
+        }
+        return '<span class="badge badge-info">Habilitado</span>';
+      }
+
+      function matchesFilters(group) {
+        const q = document.getElementById("searchInput").value.trim().toLowerCase();
+        const statusFilter = document.getElementById("statusFilter").value;
+
+        if (q && !group.nome.toLowerCase().includes(q)) return false;
+        if (statusFilter === "classificados" && !group.classificado) return false;
+        if (statusFilter === "nao-classificados" && group.classificado) return false;
+        return true;
+      }
+
+      function renderGroups() {
+        const filtered = MOCK.groups.filter(matchesFilters);
+        document.getElementById("resultCount").textContent = `${filtered.length} grupo(s)`;
+
+        if (!filtered.length) {
+          document.getElementById("groupsBody").innerHTML = `
+            <tr><td colspan="7"><div class="empty-state"><strong>Nenhum grupo encontrado</strong><span>Ajuste os filtros ou sincronize novamente com a Evolution API.</span></div></td></tr>`;
+          return;
+        }
+
+        document.getElementById("groupsBody").innerHTML = filtered
+          .map(
+            (g) => `
+            <tr>
+              <td class="strong">${g.nome}<br><span class="mono text-faint" style="font-weight:400;">${g.evolutionGroupId}</span></td>
+              <td>${orgName(g.organizationId)}</td>
+              <td>${g.segmento || '<span class="text-faint">—</span>'}</td>
+              <td>${classificationBadge(g)}</td>
+              <td>${enviaVideoBadge(g)}</td>
+              <td>${g.trilha || '<span class="text-faint">Sem trilha</span>'}</td>
+              <td><button class="btn btn-secondary btn-sm" data-edit="${g.id}">Editar</button></td>
+            </tr>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-edit]").forEach((btn) => {
+          btn.addEventListener("click", () => openEdit(btn.dataset.edit));
+        });
+      }
+
+      function populateSelect(select, options, placeholder) {
+        select.innerHTML = `<option value="">${placeholder}</option>` + options.map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
+      }
+
+      function openEdit(groupId) {
+        const group = MOCK.groups.find((g) => g.id === groupId);
+        if (!group) return;
+        editingGroupId = groupId;
+
+        document.getElementById("editTitle").textContent = `Editar · ${group.nome}`;
+        populateSelect(
+          document.getElementById("editOrg"),
+          MOCK.organizations.map((o) => ({ value: o.id, label: o.nome })),
+          "Selecionar organização"
+        );
+        document.getElementById("editOrg").value = group.organizationId || "";
+
+        populateSelect(
+          document.getElementById("editSegmento"),
+          MOCK.segments.map((s) => ({ value: s, label: s })),
+          "Sem perfil"
+        );
+        document.getElementById("editSegmento").value = group.segmento || "";
+
+        document.getElementById("editEnviaVideo").checked = group.enviaVideo;
+        document.getElementById("editMotivo").value = group.naoEnviaVideoMotivo || "";
+        document.getElementById("motivoField").style.display = group.enviaVideo ? "none" : "block";
+
+        document.getElementById("filaCallout").style.display = group.filaStatus === "fim_de_fila" ? "flex" : "none";
+
+        document.getElementById("editOverlay").hidden = false;
+      }
+
+      function closeEdit() {
+        document.getElementById("editOverlay").hidden = true;
+        editingGroupId = null;
+      }
+
+      document.getElementById("editEnviaVideo").addEventListener("change", (e) => {
+        document.getElementById("motivoField").style.display = e.target.checked ? "none" : "block";
+      });
+
+      document.getElementById("closeModal").addEventListener("click", closeEdit);
+      document.getElementById("cancelEdit").addEventListener("click", closeEdit);
+      document.getElementById("editOverlay").addEventListener("click", (e) => {
+        if (e.target.id === "editOverlay") closeEdit();
+      });
+
+      document.getElementById("saveEdit").addEventListener("click", () => {
+        const group = MOCK.groups.find((g) => g.id === editingGroupId);
+        if (!group) return;
+
+        group.organizationId = document.getElementById("editOrg").value || null;
+        group.segmento = document.getElementById("editSegmento").value || null;
+        group.enviaVideo = document.getElementById("editEnviaVideo").checked;
+        group.naoEnviaVideoMotivo = group.enviaVideo ? null : document.getElementById("editMotivo").value.trim() || "Desabilitado manualmente";
+        group.classificado = Boolean(group.segmento && group.organizationId);
+
+        closeEdit();
+        renderGroups();
+        // TODO: PATCH /groups/:id com { organization_id, segmento, envia_video }
+      });
+
+      document.getElementById("searchInput").addEventListener("input", renderGroups);
+      document.getElementById("statusFilter").addEventListener("change", renderGroups);
+
+      document.getElementById("syncButton").addEventListener("click", () => {
+        const panel = document.getElementById("syncPanel");
+        const status = document.getElementById("syncStatus");
+        const newGroupsWrap = document.getElementById("newGroupsWrap");
+        panel.classList.add("open");
+        newGroupsWrap.innerHTML = "";
+        status.textContent = "Sincronizando grupos com a Evolution API…";
+
+        // TODO: POST /groups/sync { name_contains, get_participants, timeout_ms }
+        setTimeout(() => {
+          status.innerHTML = '<span class="badge badge-success">Sincronização concluída</span> 2 grupo(s) novo(s) encontrado(s), 5 atualizado(s).';
+          newGroupsWrap.innerHTML = `
+            <div class="chip-list" style="margin-bottom:8px;">
+              <strong style="font-size:12.5px;color:var(--text-muted);">Novos grupos:</strong>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Grupo</th><th>Evolution group id</th><th>Ação</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td class="strong">Feira Livre Zona Sul</td>
+                    <td class="mono">120363049912@g.us</td>
+                    <td><button class="btn btn-sm">Importar</button></td>
+                  </tr>
+                  <tr>
+                    <td class="strong">Artesãs Vila Prudente</td>
+                    <td class="mono">120363049987@g.us</td>
+                    <td><button class="btn btn-sm">Importar</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>`;
+        }, 1200);
+      });
+
+      renderGroups();
+    </script>
+  </body>
+</html>
