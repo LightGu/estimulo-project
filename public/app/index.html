@@ -34,6 +34,47 @@
 
           <section class="page-section">
             <div class="section-head">
+              <h2>Visão consolidada por organização</h2>
+            </div>
+            <div class="toolbar">
+              <div class="field" style="min-width:200px;">
+                <label for="orgRollupFilter">Organização</label>
+                <select id="orgRollupFilter"><option value="todas">Todas</option></select>
+              </div>
+              <div class="field" style="min-width:200px;">
+                <label for="campanhaRollupFilter">Campanha</label>
+                <select id="campanhaRollupFilter"><option value="todas">Todas</option></select>
+              </div>
+              <div class="field">
+                <label for="rollupDataInicio">De</label>
+                <input id="rollupDataInicio" type="date">
+              </div>
+              <div class="field">
+                <label for="rollupDataFim">Até</label>
+                <input id="rollupDataFim" type="date">
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Organização</th>
+                    <th>Grupos</th>
+                    <th>Classificados</th>
+                    <th>Campanhas ativas</th>
+                    <th>Enviados</th>
+                    <th>Processando</th>
+                    <th>Erros</th>
+                    <th>Pausas ativas/agendadas</th>
+                  </tr>
+                </thead>
+                <tbody id="orgRollupBody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
               <h2>Tentativas de envio recentes</h2>
               <a class="btn btn-secondary btn-sm" href="monitoramento.html">Ver monitoramento completo</a>
             </div>
@@ -68,7 +109,7 @@
             <div class="grid grid-cols-4">
               <a class="card card-pad" href="grupos.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
                 <strong>Classificar grupos</strong>
-                <span class="text-muted">Segmento, organização e trilha por grupo.</span>
+                <span class="text-muted">Perfil, organização e trilha por grupo.</span>
               </a>
               <a class="card card-pad" href="envio-manual.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
                 <strong>Enviar conteúdo agora</strong>
@@ -141,7 +182,7 @@
 
       function renderCampaignCards() {
         const cards = MOCK.campaigns.slice(0, 3).map((c) => {
-          const pct = Math.round((c.gruposEnviados / c.gruposTotal) * 100);
+          const pct = c.gruposTotal ? Math.round((c.gruposEnviados / c.gruposTotal) * 100) : 0;
           return `
             <div class="card card-pad">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
@@ -156,9 +197,79 @@
         document.getElementById("campaignCards").innerHTML = cards.join("");
       }
 
+      function orgIdForGroupName(nome) {
+        const g = MOCK.groups.find((gr) => gr.nome === nome);
+        return g ? g.organizationId : null;
+      }
+
+      function populateRollupFilters() {
+        document.getElementById("orgRollupFilter").innerHTML =
+          '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.id}">${o.nome}</option>`).join("");
+
+        const campanhas = Array.from(new Set(MOCK.dispatchLog.map((d) => d.campanha)));
+        document.getElementById("campanhaRollupFilter").innerHTML =
+          '<option value="todas">Todas</option>' + campanhas.map((c) => `<option value="${c}">${c}</option>`).join("");
+      }
+
+      function filteredDispatchForRollup() {
+        const campanha = document.getElementById("campanhaRollupFilter").value;
+        const dIni = document.getElementById("rollupDataInicio").value;
+        const dFim = document.getElementById("rollupDataFim").value;
+
+        return MOCK.dispatchLog.filter((d) => {
+          if (campanha !== "todas" && d.campanha !== campanha) return false;
+          const day = d.tentativaEm.slice(0, 10);
+          if (dIni && day < dIni) return false;
+          if (dFim && day > dFim) return false;
+          return true;
+        });
+      }
+
+      function renderOrgRollup() {
+        const orgFilter = document.getElementById("orgRollupFilter").value;
+        const dispatches = filteredDispatchForRollup();
+        const orgs = MOCK.organizations.filter((o) => orgFilter === "todas" || o.id === orgFilter);
+
+        document.getElementById("orgRollupBody").innerHTML = orgs
+          .map((org) => {
+            const groups = MOCK.groups.filter((g) => g.organizationId === org.id);
+            const groupNames = groups.map((g) => g.nome);
+            const orgDispatches = dispatches.filter((d) => groupNames.includes(d.grupo));
+
+            const campanhasAtivasCount = MOCK.campaigns.filter(
+              (c) => c.status !== "concluida" && c.status !== "rascunho" && MOCK.groups.some((g) => g.organizationId === org.id && g.trilha === c.trilha)
+            ).length;
+
+            const pausasAtivas = MOCK.pauses.filter((p) => {
+              if (p.status === "encerrada") return false;
+              if (p.escopo === "organizacao") return p.alvoId === org.id;
+              return groups.some((g) => g.id === p.alvoId);
+            }).length;
+
+            return `
+              <tr>
+                <td class="strong">${org.nome}</td>
+                <td>${groups.length}</td>
+                <td>${groups.filter((g) => g.classificado).length}</td>
+                <td>${campanhasAtivasCount}</td>
+                <td>${orgDispatches.filter((d) => d.status === "enviado").length}</td>
+                <td>${orgDispatches.filter((d) => d.status === "processando").length}</td>
+                <td>${orgDispatches.filter((d) => d.status === "erro").length}</td>
+                <td>${pausasAtivas}</td>
+              </tr>`;
+          })
+          .join("");
+      }
+
+      ["orgRollupFilter", "campanhaRollupFilter", "rollupDataInicio", "rollupDataFim"].forEach((id) =>
+        document.getElementById(id).addEventListener("input", renderOrgRollup)
+      );
+
       renderKpis();
       renderDispatchLog();
       renderCampaignCards();
+      populateRollupFilters();
+      renderOrgRollup();
     </script>
   </body>
 </html>

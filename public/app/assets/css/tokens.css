@@ -31,7 +31,7 @@
   --primary-dark: var(--brand-blue-deep);
   --accent: var(--brand-purple);
 
-  /* Status semantics (RF23: enviado verde, processando amarelo, erro vermelho) */
+  /* Status semantics: enviado verde, processando amarelo, erro vermelho */
   --success: #1d9479;
   --success-bg: #e2f7ee;
   --warning: #b7791f;

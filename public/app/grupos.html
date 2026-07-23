@@ -25,7 +25,7 @@
         <header class="topbar">
           <div class="topbar-titles">
             <h1>Grupos do WhatsApp</h1>
-            <p>Classifique, habilite envios e defina trilhas por grupo. (RF03–RF09, RF28, RF29)</p>
+            <p>Classifique, habilite envios e defina trilhas por grupo.</p>
           </div>
           <div class="topbar-actions">
             <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
@@ -106,9 +106,9 @@
           </div>
           <div class="field-row" style="grid-template-columns:1fr 1fr;">
             <div class="field">
-              <label for="editSegmento">Segmento</label>
+              <label for="editSegmento">Perfil</label>
               <select id="editSegmento">
-                <option value="">Sem segmento</option>
+                <option value="">Sem perfil</option>
               </select>
             </div>
             <div class="field">
@@ -234,7 +234,7 @@
         populateSelect(
           document.getElementById("editSegmento"),
           MOCK.segments.map((s) => ({ value: s, label: s })),
-          "Sem segmento"
+          "Sem perfil"
         );
         document.getElementById("editSegmento").value = group.segmento || "";
 
@@ -302,7 +302,7 @@
           status.innerHTML = '<span class="badge badge-success">Sincronização concluída</span> 2 grupo(s) novo(s) encontrado(s), 5 atualizado(s).';
           newGroupsWrap.innerHTML = `
             <div class="chip-list" style="margin-bottom:8px;">
-              <strong style="font-size:12.5px;color:var(--text-muted);">Novos grupos (RF29):</strong>
+              <strong style="font-size:12.5px;color:var(--text-muted);">Novos grupos:</strong>
             </div>
             <div class="table-wrap">
               <table>
