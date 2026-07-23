@@ -15,6 +15,12 @@
     <style>
       .settings-row { display:flex; align-items:center; gap:12px; padding:16px 20px; }
       .settings-row + .settings-row { border-top: 1px solid var(--line); }
+      .settings-row .switch { flex: none; }
+      .events-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:10px 20px; }
+      .check-row { display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
+      .section-num { color: var(--text-faint); font-weight:600; margin-right:6px; }
+      .agent-model-cell { display:flex; gap:8px; }
+      .agent-model-cell select { min-width:0; }
     </style>
   </head>
   <body data-page="configuracoes">
@@ -25,7 +31,7 @@
         <header class="topbar">
           <div class="topbar-titles">
             <h1>Configurações</h1>
-            <p>Parâmetros globais de agenda e regras de negócio.</p>
+            <p>Integrações, regras globais e parâmetros padrão do sistema.</p>
           </div>
           <div class="topbar-actions">
             <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
@@ -35,11 +41,114 @@
         <main class="page">
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3>Agenda de grupos</h3></div>
+              <div class="card-header"><h3><span class="section-num">1.</span>Google Drive</h3></div>
               <div class="card-body">
-                <p class="text-muted" style="margin-bottom:14px;">
-                  Tempo mínimo e máximo utilizado para gerar o horário randomizado de cada grupo e o intervalo padrão sugerido ao criar campanhas.
-                </p>
+                <p class="text-muted" style="margin-bottom:14px;">Configura tudo relacionado à origem dos vídeos.</p>
+                <div class="field">
+                  <label for="driveFolder">Pasta raiz do Drive</label>
+                  <input id="driveFolder" type="text" value="Estímulo/Trilhas de Vídeo" placeholder="ID ou link da pasta">
+                </div>
+                <div class="field">
+                  <label for="driveServiceAccount">Conta de serviço conectada</label>
+                  <input id="driveServiceAccount" type="text" value="estimulo-drive-sync@estimulo-prod.iam.gserviceaccount.com" readonly>
+                </div>
+                <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                  <div class="field">
+                    <label>Status da conexão</label>
+                    <div><span class="badge badge-success" id="driveStatusBadge">Conectado</span></div>
+                  </div>
+                  <div class="field">
+                    <label for="driveIndexFreq">Frequência de indexação</label>
+                    <select id="driveIndexFreq">
+                      <option value="15">A cada 15 minutos</option>
+                      <option value="30" selected>A cada 30 minutos</option>
+                      <option value="60">A cada 1 hora</option>
+                      <option value="360">A cada 6 horas</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="driveActionStatus" style="margin-right:auto;"></span>
+                <button class="btn btn-secondary" id="driveReindexButton" type="button">Reindexar agora</button>
+                <button class="btn" id="driveTestButton" type="button">Testar conexão</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3><span class="section-num">2.</span>Evolution API (WhatsApp)</h3></div>
+              <div class="card-body">
+                <div class="field-row" style="grid-template-columns:2fr 1fr;">
+                  <div class="field">
+                    <label for="evoUrl">URL da Evolution</label>
+                    <input id="evoUrl" type="text" value="https://evolution.estimulo.org">
+                  </div>
+                  <div class="field">
+                    <label for="evoInstance">Instância utilizada (número WhatsApp)</label>
+                    <input id="evoInstance" type="text" value="+55 11 98888-0000">
+                  </div>
+                </div>
+                <div class="field">
+                  <label for="evoNotifyContact">Grupo/contato para notificações</label>
+                  <input id="evoNotifyContact" type="text" value="Equipe Estímulo - Alertas">
+                </div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="evoActionStatus" style="margin-right:auto;"></span>
+                <button class="btn" id="evoTestButton" type="button">Testar conexão</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3><span class="section-num">3.</span>IA</h3></div>
+              <div class="card-body">
+                <p class="text-muted" style="margin-bottom:14px;">O sistema possui abstração entre provedores de IA — Gemini e GPT podem ser combinados livremente por agente.</p>
+
+                <div class="field">
+                  <label>Provedor padrão</label>
+                  <div class="segmented" id="aiDefaultProviderTabs">
+                    <button class="active" data-provider="gemini">Gemini</button>
+                    <button data-provider="openai">OpenAI</button>
+                  </div>
+                </div>
+                <div class="field" style="max-width:280px;">
+                  <label for="aiDefaultModel">Modelo utilizado</label>
+                  <select id="aiDefaultModel"></select>
+                </div>
+
+                <div class="divider" style="margin:16px 0;"></div>
+
+                <p class="text-muted" style="margin-bottom:10px;">Agentes <span class="text-faint" style="font-weight:400;">— cada um pode usar um provedor e modelo diferentes</span></p>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Agente</th><th>Provedor e modelo</th></tr></thead>
+                    <tbody id="aiAgentsBody"></tbody>
+                  </table>
+                </div>
+                <p class="text-faint" style="font-size:12px;margin-top:8px;">Exemplo: transcrição em Gemini 2.5 Pro, legenda em GPT-5 Mini, revisão em Gemini 2.5 Flash.</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3><span class="section-num">4.</span>Agendamento padrão</h3></div>
+              <div class="card-body">
+                <div class="field" style="max-width:320px;">
+                  <label for="timezoneSelect">Timezone</label>
+                  <select id="timezoneSelect">
+                    <option value="America/Sao_Paulo" selected>América/São Paulo (GMT-3)</option>
+                    <option value="America/Manaus">América/Manaus (GMT-4)</option>
+                    <option value="America/Noronha">América/Noronha (GMT-2)</option>
+                    <option value="UTC">UTC</option>
+                  </select>
+                </div>
+                <div class="divider" style="margin:16px 0;"></div>
+                <p class="text-muted" style="margin-bottom:14px;">Tempo mínimo e máximo utilizado para gerar o horário randomizado de cada grupo e o intervalo padrão sugerido ao criar campanhas.</p>
                 <div class="field-row" style="grid-template-columns:1fr 1fr;">
                   <div class="field">
                     <label for="minInterval">Tempo mínimo entre envios (minutos)</label>
@@ -60,13 +169,48 @@
 
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3>Legendas automáticas</h3></div>
-              <div class="settings-row">
-                <label class="switch" style="margin:0;"><input type="checkbox" id="requireReviewToggle" checked><span class="track"></span></label>
-                <div>
-                  <strong style="font-size:13px;">Exigir revisão humana antes da disponibilização</strong>
-                  <p class="text-faint" style="font-size:12px;">Quando desativado, legendas geradas automaticamente ficam disponíveis sem aprovação manual.</p>
+              <div class="card-header"><h3><span class="section-num">5.</span>Regras de envio</h3></div>
+              <p class="text-muted" style="padding:16px 20px 0;">Regras globais aplicadas a todos os envios automáticos.</p>
+              <div id="dispatchRulesList"></div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3><span class="section-num">6.</span>Notificações</h3></div>
+              <div class="card-body">
+                <p class="text-muted" style="margin-bottom:14px;">Onde o operador recebe avisos.</p>
+                <div class="field-row" style="grid-template-columns:1fr 2fr;">
+                  <div class="field">
+                    <label for="notifyChannel">Canal</label>
+                    <select id="notifyChannel">
+                      <option value="whatsapp" selected>WhatsApp</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="notifyTarget">Destino</label>
+                    <input id="notifyTarget" type="text" value="Equipe Estímulo - Alertas">
+                  </div>
                 </div>
+                <div class="divider" style="margin:14px 0;"></div>
+                <p class="text-muted" style="margin-bottom:10px;">Eventos</p>
+                <div class="events-grid" id="notifyEventsGrid"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3><span class="section-num">8.</span>Banco de dados</h3></div>
+              <div class="card-body">
+                <div class="field">
+                  <label>Status</label>
+                  <div><span class="badge badge-success" id="dbStatusBadge">Conectado</span> <span class="text-faint" style="font-size:12px;">PostgreSQL · latência 8ms</span></div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="dbActionStatus" style="margin-right:auto;"></span>
+                <button class="btn" id="dbTestButton" type="button">Testar conexão</button>
               </div>
             </div>
           </section>
@@ -89,17 +233,184 @@
     <script>
       document.getElementById("segmentChips").innerHTML = MOCK.segments.map((s) => `<span class="chip">${s}</span>`).join("");
 
+      function simulateAction(buttonId, statusId, runningText, doneText) {
+        const button = document.getElementById(buttonId);
+        const status = document.getElementById(statusId);
+        button.addEventListener("click", () => {
+          button.disabled = true;
+          status.style.color = "var(--text-muted)";
+          status.textContent = runningText;
+          setTimeout(() => {
+            status.style.color = "var(--success)";
+            status.textContent = doneText;
+            button.disabled = false;
+            setTimeout(() => (status.textContent = ""), 3000);
+          }, 900);
+        });
+      }
+
+      // ---------- 1. Google Drive ----------
+      simulateAction("driveTestButton", "driveActionStatus", "Testando conexão com o Google Drive…", "Conectado com sucesso.");
+      simulateAction("driveReindexButton", "driveActionStatus", "Reindexando pasta do Drive…", "Reindexação concluída — 3 vídeo(s) novo(s) encontrado(s).");
+      // TODO: POST /settings/drive/test-connection · POST /settings/drive/reindex
+
+      // ---------- 2. Evolution API ----------
+      simulateAction("evoTestButton", "evoActionStatus", "Testando conexão com a Evolution API…", "Conectado com sucesso.");
+      // TODO: POST /settings/evolution/test-connection
+
+      // ---------- 3. IA ----------
+      const AI_MODELS = {
+        gemini: ["Gemini 2.5 Pro", "Gemini 2.5 Flash", "Gemini 2.5 Flash-Lite"],
+        openai: ["GPT-5", "GPT-5 Mini", "GPT-5 Nano"],
+      };
+      const AI_AGENTS = [
+        { id: "transcricao", nome: "Transcrever vídeo", provider: "gemini", model: "Gemini 2.5 Pro" },
+        { id: "legenda", nome: "Gerar legenda", provider: "openai", model: "GPT-5 Mini" },
+        { id: "revisao", nome: "Revisar legenda", provider: "gemini", model: "Gemini 2.5 Flash" },
+      ];
+
+      function modelOptions(provider, selected) {
+        return AI_MODELS[provider].map((m) => `<option${m === selected ? " selected" : ""}>${m}</option>`).join("");
+      }
+
+      function populateDefaultModel(provider) {
+        document.getElementById("aiDefaultModel").innerHTML = modelOptions(provider, AI_MODELS[provider][0]);
+      }
+
+      document.getElementById("aiDefaultProviderTabs").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-provider]");
+        if (!btn) return;
+        document.querySelectorAll("#aiDefaultProviderTabs button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        populateDefaultModel(btn.dataset.provider);
+        // TODO: PATCH /settings/ai { default_provider }
+      });
+
+      function renderAiAgents() {
+        document.getElementById("aiAgentsBody").innerHTML = AI_AGENTS.map(
+          (agent) => `
+          <tr>
+            <td class="strong">${agent.nome}</td>
+            <td>
+              <div class="agent-model-cell">
+                <select data-agent-provider="${agent.id}" style="max-width:130px;">
+                  <option value="gemini"${agent.provider === "gemini" ? " selected" : ""}>Gemini</option>
+                  <option value="openai"${agent.provider === "openai" ? " selected" : ""}>OpenAI</option>
+                </select>
+                <select data-agent-model="${agent.id}">${modelOptions(agent.provider, agent.model)}</select>
+              </div>
+            </td>
+          </tr>`
+        ).join("");
+
+        document.querySelectorAll("[data-agent-provider]").forEach((select) =>
+          select.addEventListener("change", () => {
+            const agent = AI_AGENTS.find((a) => a.id === select.dataset.agentProvider);
+            agent.provider = select.value;
+            agent.model = AI_MODELS[agent.provider][0];
+            renderAiAgents();
+            // TODO: PATCH /settings/ai/agents/:id { provider, model }
+          })
+        );
+        document.querySelectorAll("[data-agent-model]").forEach((select) =>
+          select.addEventListener("change", () => {
+            const agent = AI_AGENTS.find((a) => a.id === select.dataset.agentModel);
+            agent.model = select.value;
+            // TODO: PATCH /settings/ai/agents/:id { provider, model }
+          })
+        );
+      }
+
+      populateDefaultModel("gemini");
+      renderAiAgents();
+
+      // ---------- 4. Agendamento padrão ----------
       document.getElementById("saveScheduleButton").addEventListener("click", () => {
         const status = document.getElementById("scheduleSaveStatus");
         status.textContent = "Configurações salvas.";
         status.style.color = "var(--success)";
-        // TODO: PATCH /settings/schedule { min_interval_min, max_interval_min }
+        // TODO: PATCH /settings/schedule { timezone, min_interval_min, max_interval_min }
         setTimeout(() => (status.textContent = ""), 2500);
       });
 
-      document.getElementById("requireReviewToggle").addEventListener("change", () => {
-        // TODO: PATCH /settings/captions { require_human_review }
-      });
+      // ---------- 5. Regras de envio ----------
+      const DISPATCH_RULES = [
+        { id: "neverRepeat", label: "Nunca repetir vídeo", hint: "Impede que o mesmo vídeo seja enviado duas vezes ao mesmo grupo.", checked: true },
+        { id: "pauseOnTrailEnd", label: "Pausar grupo quando trilha terminar", hint: "O grupo fica sinalizado como 'fim de fila' até que uma nova trilha seja definida.", checked: true },
+        { id: "autoCaption", label: "Gerar legenda automaticamente", hint: "Toda pílula importada recebe uma legenda gerada por IA antes da revisão.", checked: true },
+        { id: "requireReview", label: "Exigir revisão humana", hint: "Legendas geradas por IA ficam pendentes até aprovação manual.", checked: true },
+        { id: "autoSendAfterTimeout", label: "Enviar mesmo sem revisão após X minutos", hint: "Se ninguém revisar a legenda a tempo, o envio segue com a versão gerada por IA.", checked: false, withMinutes: true, minutes: 60 },
+        { id: "autoRetryFailures", label: "Reprocessar falhas automaticamente", hint: "Tentativas com erro voltam para a fila e são reenviadas automaticamente.", checked: true },
+      ];
+
+      function renderDispatchRules() {
+        document.getElementById("dispatchRulesList").innerHTML = DISPATCH_RULES.map(
+          (rule) => `
+          <div class="settings-row">
+            <label class="switch" style="margin:0;"><input type="checkbox" data-rule="${rule.id}"${rule.checked ? " checked" : ""}><span class="track"></span></label>
+            <div style="flex:1;">
+              <strong style="font-size:13px;">${rule.label}</strong>
+              <p class="text-faint" style="font-size:12px;">${rule.hint}</p>
+              ${
+                rule.withMinutes
+                  ? `<div style="margin-top:8px;${rule.checked ? "" : "display:none;"}" data-rule-minutes-wrap="${rule.id}">
+                      <input type="number" min="1" value="${rule.minutes}" data-rule-minutes="${rule.id}" style="width:90px;display:inline-block;"> minutos
+                    </div>`
+                  : ""
+              }
+            </div>
+          </div>`
+        ).join("");
+
+        document.querySelectorAll("[data-rule]").forEach((input) =>
+          input.addEventListener("change", () => {
+            const rule = DISPATCH_RULES.find((r) => r.id === input.dataset.rule);
+            rule.checked = input.checked;
+            if (rule.withMinutes) {
+              document.querySelector(`[data-rule-minutes-wrap="${rule.id}"]`).style.display = rule.checked ? "block" : "none";
+            }
+            // TODO: PATCH /settings/dispatch-rules { [rule.id]: rule.checked }
+          })
+        );
+        document.querySelectorAll("[data-rule-minutes]").forEach((input) =>
+          input.addEventListener("change", () => {
+            const rule = DISPATCH_RULES.find((r) => r.id === input.dataset.ruleMinutes);
+            rule.minutes = Number(input.value);
+            // TODO: PATCH /settings/dispatch-rules { auto_send_after_minutes: rule.minutes }
+          })
+        );
+      }
+      renderDispatchRules();
+
+      // ---------- 6. Notificações ----------
+      const NOTIFY_EVENTS = [
+        { id: "campaignStarted", label: "Campanha iniciada", checked: true },
+        { id: "campaignFinished", label: "Campanha concluída", checked: true },
+        { id: "dispatchFailure", label: "Falha de envio", checked: true },
+        { id: "trailFinished", label: "Trilha encerrada", checked: true },
+        { id: "aiError", label: "Erro na IA", checked: true },
+        { id: "evolutionError", label: "Erro na Evolution", checked: true },
+      ];
+
+      document.getElementById("notifyEventsGrid").innerHTML = NOTIFY_EVENTS.map(
+        (ev) => `
+        <label class="check-row">
+          <input type="checkbox" data-notify-event="${ev.id}"${ev.checked ? " checked" : ""}>
+          ${ev.label}
+        </label>`
+      ).join("");
+
+      document.querySelectorAll("[data-notify-event]").forEach((input) =>
+        input.addEventListener("change", () => {
+          const ev = NOTIFY_EVENTS.find((e) => e.id === input.dataset.notifyEvent);
+          ev.checked = input.checked;
+          // TODO: PATCH /settings/notifications { events: { [ev.id]: ev.checked } }
+        })
+      );
+
+      // ---------- 8. Banco de dados ----------
+      simulateAction("dbTestButton", "dbActionStatus", "Testando conexão com o banco de dados…", "Conectado com sucesso.");
+      // TODO: GET /settings/database/health
     </script>
   </body>
 </html>

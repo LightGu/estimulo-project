@@ -96,8 +96,10 @@
 
     <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const STATUS_BADGE = { enviado: "badge-success", processando: "badge-warning", erro: "badge-danger" };
+      const STATUS_TONE = { enviado: "success", processando: "warning", erro: "danger" };
 
       function populateFilters() {
         document.getElementById("orgFilter").innerHTML =
@@ -168,7 +170,7 @@
               <td class="strong">${r.grupo}</td>
               <td>${r.campanha}</td>
               <td>${r.conteudo}</td>
-              <td><span class="badge ${STATUS_BADGE[r.status]}" title="${r.motivo || ""}">${r.status}</span></td>
+              <td><span class="badge has-tip ${STATUS_BADGE[r.status]}" data-tip="${r.motivo || ""}" data-tip-tone="${STATUS_TONE[r.status]}">${r.status}</span></td>
             </tr>`
           )
           .join("");
