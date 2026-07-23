@@ -27,6 +27,8 @@ function createApp(dependencies = {}) {
 
   app.post("/campaigns", campaignsController);
   app.get("/organizations", organizationsController.list);
+  app.post("/organizations", organizationsController.create);
+  app.patch("/organizations/:id", organizationsController.update);
   app.get("/video-catalog/trails", videoCatalogController.listTrailsByProfile);
   app.post("/video-catalog/transcript", videoCatalogController.transcribeByDriveFileId);
   app.post("/video-catalog/:id/transcript", videoCatalogController.transcribeById);

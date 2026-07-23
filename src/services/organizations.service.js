@@ -1,5 +1,19 @@
 const organizationsRepository = require("../repositories/organizations.repository");
 
+function normalizeNullableText(value, fieldName) {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName} must be a string or null`);
+  }
+
+  const normalized = value.trim();
+
+  return normalized || null;
+}
+
 function createOrganizationsService(dependencies = {}) {
   const repository = dependencies.repository || organizationsRepository;
 
@@ -17,7 +31,17 @@ function createOrganizationsService(dependencies = {}) {
       throw new Error("Organization already exists");
     }
 
-    return repository.create({ ...payload, nome });
+    const nextPayload = { ...payload, nome };
+
+    if (nextPayload.descricao !== undefined) {
+      nextPayload.descricao = normalizeNullableText(nextPayload.descricao, "Descricao");
+    }
+
+    if (nextPayload.programa !== undefined) {
+      nextPayload.programa = normalizeNullableText(nextPayload.programa, "Programa");
+    }
+
+    return repository.create(nextPayload);
   }
 
   async function update(id, payload) {
@@ -43,6 +67,14 @@ function createOrganizationsService(dependencies = {}) {
       if (!nextPayload.nome) {
         throw new Error("Organization name is required");
       }
+    }
+
+    if (nextPayload.descricao !== undefined) {
+      nextPayload.descricao = normalizeNullableText(nextPayload.descricao, "Descricao");
+    }
+
+    if (nextPayload.programa !== undefined) {
+      nextPayload.programa = normalizeNullableText(nextPayload.programa, "Programa");
     }
 
     return repository.update(id, nextPayload);
