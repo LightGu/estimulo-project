@@ -45,17 +45,8 @@
         { key: "envio-automatizado", label: "Envio automatizado", href: "envio-automatizado.html", icon: "auto" },
         { key: "campanhas", label: "Campanhas", href: "campanhas.html", icon: "campaigns" },
         { key: "envio-manual", label: "Envio manual", href: "envio-manual.html", icon: "manual" },
-        { key: "mensagens", label: "Mensagens extraordinárias", href: "mensagens.html", icon: "megaphone" },
+        { key: "mensagens", label: "Disparador Pontual", href: "mensagens.html", icon: "megaphone" },
         { key: "calendario", label: "Calendário editorial", href: "calendario.html", icon: "calendar" },
-        { key: "pausas", label: "Pausas", href: "pausas.html", icon: "pause" },
-        { key: "monitoramento", label: "Monitoramento", href: "monitoramento.html", icon: "monitor" },
-      ],
-    },
-    {
-      group: "Governança",
-      items: [
-        { key: "usuarios", label: "Usuários e permissões", href: "usuarios.html", icon: "users" },
-        { key: "auditoria", label: "Auditoria", href: "auditoria.html", icon: "audit" },
       ],
     },
     {

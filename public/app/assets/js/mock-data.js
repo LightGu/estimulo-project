@@ -532,23 +532,12 @@ const MOCK = {
   ],
 
   reportRows: [
-    { data: "2026-07-21", organizacao: "Associação Comercial Zona Leste", grupo: "Empreendedores Zona Leste 01", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "maria-02-organizando-as-contas.mp4", status: "enviado" },
-    { data: "2026-07-21", organizacao: "Coletivo Pequenos Negócios SP", grupo: "Pequenos Negócios SP - Turma A", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "maria-02-organizando-as-contas.mp4", status: "processando" },
-    { data: "2026-07-21", organizacao: "Associação Comercial Zona Leste", grupo: "Associação Comercial Zona Leste - Feira", campanha: "Pré-infância - Primeiros Passos - Junho", trilha: "Pré-infância - Primeiros Passos", conteudo: "preinfancia-02-primeiros-clientes.mp4", status: "erro" },
-    { data: "2026-07-21", organizacao: "Rede Mulheres Empreendedoras", grupo: "CS01 - Mulheres Empreendedoras Centro", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "-", status: "erro" },
-    { data: "2026-07-20", organizacao: "Cooperativa Eufrásio", grupo: "Cooperativa Eufrásio - Sede", campanha: "Eufrásio - Gestão Financeira - Julho", trilha: "Eufrásio - Gestão Financeira", conteudo: "eufrasio-01-fluxo-de-caixa.mp4", status: "enviado" },
-    { data: "2026-06-30", organizacao: "Associação Comercial Zona Leste", grupo: "Associação Comercial Zona Leste - Feira", campanha: "Pré-infância - Primeiros Passos - Junho", trilha: "Pré-infância - Primeiros Passos", conteudo: "preinfancia-01-boas-vindas.mp4", status: "enviado" },
-    { data: "2026-06-29", organizacao: "Rede Mulheres Empreendedoras", grupo: "CS02 - Mulheres Empreendedoras Leste", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "-", status: "erro" },
-  ],
-
-  calendarEvents: [
-    { id: "cal-1", data: "2026-07-20", hora: "09:15", tipo: "pilula", titulo: "Pílula — Maria: organizando as contas", grupos: ["Empreendedores Zona Leste 01"], origem: "Maria - Crédito Consciente - Julho" },
-    { id: "cal-2", data: "2026-07-21", hora: "09:41", tipo: "pilula", titulo: "Pílula — Maria: organizando as contas", grupos: ["Empreendedores Zona Leste 01"], origem: "Maria - Crédito Consciente - Julho" },
-    { id: "cal-3", data: "2026-07-21", hora: "14:30", tipo: "pilula", titulo: "Pílula — Pré-infância: primeiros clientes", grupos: ["Pequenos Negócios SP - Turma A"], origem: "Pré-infância - Primeiros Passos - Junho" },
-    { id: "cal-4", data: "2026-07-22", hora: "16:00", tipo: "mensagem", titulo: "Pesquisa de satisfação — trilha Maria", grupos: ["CS01 - Mulheres Empreendedoras Centro", "CS02 - Mulheres Empreendedoras Leste"], origem: "Mensagem extraordinária" },
-    { id: "cal-5", data: "2026-07-22", hora: "16:00", tipo: "pilula", titulo: "Pílula — Eufrásio: fluxo de caixa", grupos: ["Cooperativa Eufrásio - Sede"], origem: "Eufrásio - Gestão Financeira - Julho" },
-    { id: "cal-6", data: "2026-07-23", hora: "10:00", tipo: "mensagem", titulo: "Convite — Feira de Empreendedorismo Zona Leste", grupos: ["Empreendedores Zona Leste 01", "Associação Comercial Zona Leste - Feira"], origem: "Mensagem extraordinária" },
-    { id: "cal-7", data: "2026-07-24", hora: "09:00", tipo: "pilula", titulo: "Disparo de campanha — Eufrásio: Gestão Financeira", grupos: ["18 grupo(s) da trilha"], origem: "Eufrásio - Gestão Financeira - Julho" },
-    { id: "cal-8", data: "2026-07-25", hora: "09:30", tipo: "mensagem", titulo: "Aviso — linha de crédito especial (rascunho)", grupos: ["Pequenos Negócios SP - Turma A", "Pequenos Negócios SP - Turma B", "Cooperativa Eufrásio - Sede"], origem: "Mensagem extraordinária" },
+    { data: "2026-07-21", organizacao: "Associação Comercial Zona Leste", grupo: "Empreendedores Zona Leste 01", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "maria-02-organizando-as-contas.mp4", status: "enviado", motivo: "Entregue com sucesso via Evolution API às 09:41." },
+    { data: "2026-07-21", organizacao: "Coletivo Pequenos Negócios SP", grupo: "Pequenos Negócios SP - Turma A", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "maria-02-organizando-as-contas.mp4", status: "processando", motivo: "Aguardando confirmação de entrega pela Evolution API." },
+    { data: "2026-07-21", organizacao: "Associação Comercial Zona Leste", grupo: "Associação Comercial Zona Leste - Feira", campanha: "Pré-infância - Primeiros Passos - Junho", trilha: "Pré-infância - Primeiros Passos", conteudo: "preinfancia-02-primeiros-clientes.mp4", status: "erro", motivo: "Evolution API retornou 500 (grupo removido do WhatsApp)." },
+    { data: "2026-07-21", organizacao: "Rede Mulheres Empreendedoras", grupo: "CS01 - Mulheres Empreendedoras Centro", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "-", status: "erro", motivo: "Grupo marcado como 'não envia vídeo' — envio bloqueado pela regra de negócio." },
+    { data: "2026-07-20", organizacao: "Cooperativa Eufrásio", grupo: "Cooperativa Eufrásio - Sede", campanha: "Eufrásio - Gestão Financeira - Julho", trilha: "Eufrásio - Gestão Financeira", conteudo: "eufrasio-01-fluxo-de-caixa.mp4", status: "enviado", motivo: "Entregue com sucesso via Evolution API às 17:03." },
+    { data: "2026-06-30", organizacao: "Associação Comercial Zona Leste", grupo: "Associação Comercial Zona Leste - Feira", campanha: "Pré-infância - Primeiros Passos - Junho", trilha: "Pré-infância - Primeiros Passos", conteudo: "preinfancia-01-boas-vindas.mp4", status: "enviado", motivo: "Entregue com sucesso via Evolution API." },
+    { data: "2026-06-29", organizacao: "Rede Mulheres Empreendedoras", grupo: "CS02 - Mulheres Empreendedoras Leste", campanha: "Maria - Crédito Consciente - Julho", trilha: "Maria - Crédito Consciente", conteudo: "-", status: "erro", motivo: "Grupo marcado como 'não envia vídeo' — envio bloqueado pela regra de negócio." },
   ],
 };

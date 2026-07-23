@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Organizações · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
@@ -90,7 +92,7 @@
                     groups.length
                       ? `<div class="table-wrap" style="border:0;border-radius:0;">
                           <table>
-                            <thead><tr><th>Grupo</th><th>Perfil</th><th>Envia vídeo</th><th>Trilha</th><th>Fila</th></tr></thead>
+                            <thead><tr><th>Grupo</th><th>Perfil</th><th>Envia vídeo</th><th>Trilha</th></tr></thead>
                             <tbody>
                               ${groups
                                 .map(
@@ -98,9 +100,8 @@
                                 <tr>
                                   <td class="strong">${g.nome}</td>
                                   <td>${g.segmento || '<span class="text-faint">—</span>'}</td>
-                                  <td>${g.enviaVideo ? '<span class="badge badge-info">Habilitado</span>' : '<span class="badge badge-neutral">Não envia</span>'}</td>
+                                  <td>${g.enviaVideo ? '<span class="badge badge-info">Habilitado</span>' : '<span class="badge badge-danger">Não envia</span>'}</td>
                                   <td>${g.trilha || '<span class="text-faint">Sem trilha</span>'}</td>
-                                  <td>${g.filaStatus === "fim_de_fila" ? '<span class="badge badge-warning">Fim de fila</span>' : '<span class="badge badge-success">Em dia</span>'}</td>
                                 </tr>`
                                 )
                                 .join("")}
