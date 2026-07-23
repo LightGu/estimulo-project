@@ -166,6 +166,123 @@ function createVideoCatalogService(dependencies = {}) {
     return repository.listTrailsByProfile(profile);
   }
 
+  async function listTrailsOverview() {
+    return repository.listTrailsOverview();
+  }
+
+  async function listUnclassified() {
+    return repository.listUnclassified();
+  }
+
+  async function createTrailVideos(payload) {
+    const perfilDaJornada = String(payload?.perfil_da_jornada || "").trim();
+    const macrotema = String(payload?.macrotema || "").trim();
+    const trilha = String(payload?.trilha || "").trim();
+    const videoIds = Array.isArray(payload?.video_ids)
+      ? payload.video_ids.map((id) => String(id || "").trim()).filter(Boolean)
+      : [];
+
+    if (!perfilDaJornada) {
+      throw new Error("Perfil da jornada is required");
+    }
+
+    if (!macrotema) {
+      throw new Error("Macrotema is required");
+    }
+
+    if (!trilha) {
+      throw new Error("Trilha is required");
+    }
+
+    if (!videoIds.length) {
+      throw new Error("At least one video_id is required");
+    }
+
+    const existingVideos = await repository.findAll();
+    const trailVideos = existingVideos.filter(
+      (video) => video.perfil_da_jornada === perfilDaJornada && video.macrotema === macrotema && video.trilha === trilha
+    );
+    const maxOrdemGeral = existingVideos.reduce((max, video) => Math.max(max, Number(video.ordem_geral) || 0), 0);
+    const maxOrdem = trailVideos.reduce((max, video) => Math.max(max, Number(video.ordem) || 0), 0);
+
+    const updated = [];
+
+    for (let index = 0; index < videoIds.length; index += 1) {
+      const current = await repository.findById(videoIds[index]);
+
+      if (!current) {
+        throw new Error("Video not found");
+      }
+
+      const video = await repository.update(videoIds[index], {
+        perfil_da_jornada: perfilDaJornada,
+        macrotema,
+        trilha,
+        ordem: maxOrdem + index + 1,
+        ordem_geral: maxOrdemGeral + index + 1,
+      });
+
+      updated.push(video);
+    }
+
+    return updated;
+  }
+
+  async function moveVideoTrail(id, payload) {
+    if (!id) {
+      throw new Error("Video id is required");
+    }
+
+    const perfilDaJornada = String(payload?.perfil_da_jornada || "").trim();
+    const macrotema = String(payload?.macrotema || "").trim();
+    const trilha = String(payload?.trilha || "").trim();
+
+    if (!perfilDaJornada) {
+      throw new Error("Perfil da jornada is required");
+    }
+
+    if (!macrotema) {
+      throw new Error("Macrotema is required");
+    }
+
+    if (!trilha) {
+      throw new Error("Trilha is required");
+    }
+
+    const current = await repository.findById(id);
+
+    if (!current) {
+      throw new Error("Video not found");
+    }
+
+    const existingVideos = await repository.findAll();
+    const destinationVideos = existingVideos.filter(
+      (video) =>
+        video.id !== id &&
+        video.perfil_da_jornada === perfilDaJornada &&
+        video.macrotema === macrotema &&
+        video.trilha === trilha
+    );
+    const maxOrdem = destinationVideos.reduce((max, video) => Math.max(max, Number(video.ordem) || 0), 0);
+    const maxOrdemGeral = existingVideos.reduce((max, video) => Math.max(max, Number(video.ordem_geral) || 0), 0);
+
+    return repository.update(id, {
+      perfil_da_jornada: perfilDaJornada,
+      macrotema,
+      trilha,
+      ordem: maxOrdem + 1,
+      ordem_geral: maxOrdemGeral + 1,
+    });
+  }
+
+  async function reorderTrailVideos(orderedIds) {
+    if (!Array.isArray(orderedIds) || orderedIds.length === 0) {
+      throw new Error("orderedIds is required");
+    }
+
+    return repository.reorderWithinTrail(orderedIds);
+  }
+
   async function getFirstApprovedByProfileAndTrail(profile, trail) {
     if (!profile) {
       throw new Error("Profile is required");
@@ -213,6 +330,11 @@ function createVideoCatalogService(dependencies = {}) {
     listBySegmento,
     listByStatus,
     listTrailsByProfile,
+    listTrailsOverview,
+    listUnclassified,
+    createTrailVideos,
+    moveVideoTrail,
+    reorderTrailVideos,
     getFirstApprovedByProfileAndTrail,
     transcribeByDriveFileId,
     transcribeById,

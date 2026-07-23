@@ -28,7 +28,7 @@ async function findAll(client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("ordem_geral", { ascending: false });
 
   if (error) {
     throw error;
@@ -106,6 +106,64 @@ async function findFirstApprovedByProfileAndTrail(profile, trail, client) {
     })[0] || null;
 }
 
+async function listTrailsOverview(client) {
+  const { data, error } = await getClient(client)
+    .from("video_catalog")
+    .select("*")
+    .order("ordem_geral", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const videos = data || [];
+  const trailsByKey = new Map();
+
+  videos.forEach((video) => {
+    const perfil = video.perfil_da_jornada || video.trilha_segmento || "Sem perfil";
+    const macrotema = video.macrotema || "Sem macrotema";
+    const trilha = video.trilha || video.trilha_segmento || "Sem trilha";
+    const key = `${perfil}␟${macrotema}␟${trilha}`;
+
+    if (!trailsByKey.has(key)) {
+      trailsByKey.set(key, {
+        perfil_da_jornada: perfil,
+        macrotema,
+        trilha,
+        videos: [],
+      });
+    }
+
+    trailsByKey.get(key).videos.push(video);
+  });
+
+  return Array.from(trailsByKey.values()).sort((left, right) => {
+    if (left.perfil_da_jornada !== right.perfil_da_jornada) {
+      return left.perfil_da_jornada.localeCompare(right.perfil_da_jornada);
+    }
+
+    if (left.macrotema !== right.macrotema) {
+      return left.macrotema.localeCompare(right.macrotema);
+    }
+
+    return left.trilha.localeCompare(right.trilha);
+  });
+}
+
+async function listUnclassified(client) {
+  const { data, error } = await getClient(client)
+    .from("video_catalog")
+    .select("*")
+    .or("trilha.is.null,macrotema.is.null,perfil_da_jornada.is.null")
+    .order("nome_do_arquivo", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function listBySegmento(trilhaSegmento, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
@@ -125,7 +183,7 @@ async function listByEtapa(etapa, client) {
     .from("video_catalog")
     .select("*")
     .eq("etapa", etapa)
-    .order("created_at", { ascending: false });
+    .order("ordem_geral", { ascending: false });
 
   if (error) {
     throw error;
@@ -139,7 +197,7 @@ async function listByStatus(status, client) {
     .from("video_catalog")
     .select("*")
     .eq("status", status)
-    .order("created_at", { ascending: false });
+    .order("ordem_geral", { ascending: false });
 
   if (error) {
     throw error;
@@ -160,6 +218,27 @@ async function findByDriveFileId(driveFileId, client) {
   }
 
   return data || null;
+}
+
+async function reorderWithinTrail(orderedIds, client) {
+  const resolvedClient = getClient(client);
+  const updates = orderedIds.map((id, index) =>
+    resolvedClient
+      .from("video_catalog")
+      .update({ ordem: index + 1 })
+      .eq("id", id)
+      .select("*")
+      .single()
+  );
+
+  const results = await Promise.all(updates);
+  const failed = results.find((result) => result.error);
+
+  if (failed) {
+    throw failed.error;
+  }
+
+  return results.map((result) => result.data);
 }
 
 async function create(payload, client) {
@@ -218,6 +297,9 @@ module.exports = {
   listBySegmento,
   listByStatus,
   listTrailsByProfile,
+  listTrailsOverview,
+  listUnclassified,
   remove,
+  reorderWithinTrail,
   update,
 };

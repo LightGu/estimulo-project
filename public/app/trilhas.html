@@ -17,12 +17,19 @@
       .trail-card:hover { box-shadow: var(--shadow-md); }
       .trail-card.selected { border-color: var(--brand-blue); box-shadow: 0 0 0 3px rgba(78,121,255,0.15); }
       .settings-row { display:flex; align-items:center; gap:12px; }
-      .subtema-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-      .subtema-tab { border:1px solid var(--line); background:var(--surface); border-radius:999px; padding:7px 14px; font-size:12.5px; font-weight:600; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px; }
-      .subtema-tab:hover { background: var(--surface-strong); }
-      .subtema-tab.active { background: var(--brand-blue); border-color: var(--brand-blue); color:#fff; }
-      .subtema-tab .count { font-weight:400; opacity:0.85; }
-      .subtema-path { font-size:12px; color: var(--text-faint); margin-bottom:14px; }
+      .macrotema-path { font-size:12px; color: var(--text-faint); margin-bottom:14px; }
+      .trilha-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+      .trilha-tab { border:1px solid var(--line); background:var(--surface); border-radius:999px; padding:7px 14px; font-size:12.5px; font-weight:600; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px; }
+      .trilha-tab:hover { background: var(--surface-strong); }
+      .trilha-tab.active { background: var(--brand-blue); border-color: var(--brand-blue); color:#fff; }
+      .trilha-tab .count { font-weight:400; opacity:0.85; }
+      tr.video-row { cursor: grab; }
+      tr.video-row.dragging { opacity: 0.4; }
+      tr.video-row.drag-over { box-shadow: inset 0 2px 0 var(--brand-blue); }
+      .drag-handle { cursor: grab; color: var(--text-faint); padding-right: 6px; }
+      .unclassified-list { max-height: 220px; overflow-y: auto; border:1px solid var(--line); border-radius: var(--radius-md); }
+      .unclassified-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); font-size:12.5px; }
+      .unclassified-item:last-child { border-bottom: 0; }
     </style>
   </head>
   <body data-page="trilhas">
@@ -33,7 +40,7 @@
         <header class="topbar">
           <div class="topbar-titles">
             <h1>Trilhas de conteúdo</h1>
-            <p>Catálogo de vídeos por perfil de jornada, trilha e subtema.</p>
+            <p>Catálogo de vídeos por perfil de jornada, macrotema e trilha.</p>
           </div>
           <div class="topbar-actions">
             <button class="btn" id="newTrailButton" type="button">+ Nova trilha</button>
@@ -43,39 +50,23 @@
 
         <main class="page">
           <section class="page-section">
-            <div class="card card-pad settings-row">
-              <label class="switch" style="margin:0;"><input type="checkbox" id="requireReviewToggle" checked><span class="track"></span></label>
-              <div>
-                <strong style="font-size:13px;">Exigir revisão humana das legendas antes da disponibilização</strong>
-                <p class="text-faint" style="font-size:12px;">Quando ativado, vídeos com legenda gerada automaticamente ficam com status "Pendente" até aprovação manual.</p>
-              </div>
-            </div>
-          </section>
-
-          <section class="page-section">
             <div class="section-head">
-              <h2>Trilhas por perfil de jornada</h2>
+              <h2>Macrotemas por perfil de jornada</h2>
               <div class="segmented" id="perfilTabs">
                 <button class="active" data-perfil="todos">Todos</button>
-                <button data-perfil="Maria">Maria</button>
-                <button data-perfil="Eufrásio">Eufrásio</button>
-                <button data-perfil="Pré-infância">Pré-infância</button>
               </div>
             </div>
-            <div class="grid grid-cols-3" id="trailGrid"></div>
+            <div class="grid grid-cols-3" id="macrotemaGrid"></div>
           </section>
 
           <section class="page-section" id="trailDetailSection" style="display:none;">
             <div class="section-head">
-              <h2 id="trailDetailTitle">Vídeos da trilha</h2>
+              <h2 id="macrotemaDetailTitle">Trilhas do macrotema</h2>
               <span class="text-faint" id="trailDetailMeta"></span>
             </div>
-            <div class="callout" id="importingCallout" style="display:none;">
-              Trilha detectada automaticamente no Google Drive: cadastro de vídeos e geração de legendas em processamento.
-            </div>
 
-            <div class="subtema-tabs" id="subtemaTabs"></div>
-            <p class="subtema-path" id="subtemaPath"></p>
+            <div class="trilha-tabs" id="trilhaTabs"></div>
+            <p class="macrotema-path" id="macrotemaPath"></p>
 
             <div class="table-wrap">
               <table>
@@ -83,8 +74,7 @@
                   <tr>
                     <th>Ordem</th>
                     <th>Arquivo</th>
-                    <th>Legenda</th>
-                    <th>Aprovação do conteúdo</th>
+                    <th>Status</th>
                     <th>Ações</th>
                   </tr>
                 </thead>
@@ -104,26 +94,26 @@
         </div>
         <div class="modal-body">
           <div class="field">
-            <label for="newTrailNome">Nome da trilha</label>
-            <input id="newTrailNome" type="text" placeholder="Ex.: Maria - Vendas pelo WhatsApp">
-          </div>
-          <div class="field">
             <label for="newTrailPerfil">Perfil da jornada</label>
-            <select id="newTrailPerfil">
-              <option>Maria</option>
-              <option>Eufrásio</option>
-              <option>Pré-infância</option>
-            </select>
+            <select id="newTrailPerfil"></select>
           </div>
           <div class="field">
-            <label for="newTrailSubtema">Nome do primeiro subtema</label>
-            <input id="newTrailSubtema" type="text" placeholder="Ex.: Introdução">
+            <label for="newTrailMacrotema">Macrotema</label>
+            <select id="newTrailMacrotema"></select>
+          </div>
+          <div class="field" id="newTrailMacrotemaNovoField" style="display:none;">
+            <label for="newTrailMacrotemaNovo">Nome do novo macrotema</label>
+            <input id="newTrailMacrotemaNovo" type="text" placeholder="Ex.: GESTÃO FINANCEIRA: Dinheiro Organizado">
           </div>
           <div class="field">
-            <label for="newTrailVideos">Vídeos do subtema (um arquivo por linha)</label>
-            <textarea id="newTrailVideos" rows="4" placeholder="video-01.mp4&#10;video-02.mp4"></textarea>
+            <label for="newTrailNome">Nome da trilha</label>
+            <input id="newTrailNome" type="text" placeholder="Ex.: 2.3 Como Cuidar das Finanças">
           </div>
-          <p class="text-faint" style="font-size:12px;">Todo vídeo cadastrado aqui é automaticamente associado a este subtema e a esta trilha. Outros subtemas podem ser importados depois, diretamente do Google Drive.</p>
+          <div class="field">
+            <label>Vídeos novos do Drive sem trilha definida</label>
+            <div class="unclassified-list" id="newTrailVideosList"></div>
+          </div>
+          <div id="newTrailStatus" class="status-line"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" data-close-new type="button">Cancelar</button>
@@ -141,13 +131,18 @@
         <div class="modal-body">
           <p id="moveVideoLabel" class="text-muted"></p>
           <div class="field">
-            <label for="moveTargetTrail">Nova trilha</label>
-            <select id="moveTargetTrail"></select>
+            <label for="moveTargetPerfil">Perfil da jornada</label>
+            <select id="moveTargetPerfil"></select>
           </div>
           <div class="field">
-            <label for="moveTargetSubtema">Novo subtema</label>
-            <select id="moveTargetSubtema"></select>
+            <label for="moveTargetMacrotema">Macrotema</label>
+            <select id="moveTargetMacrotema"></select>
           </div>
+          <div class="field">
+            <label for="moveTargetTrilha">Trilha</label>
+            <select id="moveTargetTrilha"></select>
+          </div>
+          <div id="moveStatus" class="status-line"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" data-close-move type="button">Cancelar</button>
@@ -156,299 +151,513 @@
       </div>
     </div>
 
-    <div class="overlay" id="captionOverlay" hidden>
-      <div class="modal">
-        <div class="modal-header">
-          <h3>Revisar legenda</h3>
-          <button class="icon-btn-close" data-close-caption type="button" aria-label="Fechar">✕</button>
-        </div>
-        <div class="modal-body">
-          <p id="captionVideoLabel" class="text-muted"></p>
-          <div class="field">
-            <label for="captionText">Legenda gerada automaticamente</label>
-            <textarea id="captionText" rows="5"></textarea>
-          </div>
-          <p class="text-faint" style="font-size:12px;">Revise e edite o texto antes de aprovar a disponibilização do conteúdo.</p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" data-close-caption type="button">Cancelar</button>
-          <button class="btn" id="approveCaptionButton" type="button">Aprovar legenda</button>
-        </div>
-      </div>
-    </div>
-
-    <script src="assets/js/mock-data.js"></script>
-    <script src="assets/js/helpers.js"></script>
     <script src="assets/js/nav.js"></script>
     <script>
+      const state = {
+        trails: [],
+        unclassified: [],
+      };
+      const NEW_MACROTEMA_OPTION = "__new_macrotema__";
       let activePerfil = "todos";
-      let selectedTrailId = MOCK.trails[0].id;
-      let selectedSubtemaId = MOCK.trails[0].subtemas[0].id;
+      let selectedMacrotemaKey = null;
+      let selectedTrilhaKey = null;
       let movingVideo = null;
-      let reviewingVideo = null;
+      let draggingVideoId = null;
 
-      const CAPTION_BADGE = {
-        aprovada: "badge-success",
-        pendente: "badge-warning",
-        processando: "badge-info",
-      };
-
-      const APROVACAO_BADGE = {
-        rascunho: "badge-neutral",
-        aguardando_aprovacao: "badge-warning",
-        aprovado: "badge-success",
-        reprovado: "badge-danger",
-        arquivado: "badge-neutral",
-      };
-      const APROVACAO_LABEL = {
-        rascunho: "Rascunho",
-        aguardando_aprovacao: "Aguardando aprovação",
-        aprovado: "Aprovado",
-        reprovado: "Reprovado",
-        arquivado: "Arquivado",
-      };
-
-      const TRAIL_STATUS_BADGE = {
-        ativa: '<span class="badge badge-success">Ativa</span>',
-        importando: '<span class="badge badge-info">Importando do Drive</span>',
-      };
-
-      function trailVideoCount(trail) {
-        return trail.subtemas.reduce((sum, s) => sum + s.videos.length, 0);
+      function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       }
 
-      function renderTrailGrid() {
-        const trails = MOCK.trails.filter((t) => activePerfil === "todos" || t.perfil === activePerfil);
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
 
-        document.getElementById("trailGrid").innerHTML = trails
-          .map(
-            (t) => `
-            <div class="card card-pad trail-card${t.id === selectedTrailId ? " selected" : ""}" data-trail="${t.id}">
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
+      }
+
+      function macrotemaKey(trail) {
+        return `${trail.perfil_da_jornada}␟${trail.macrotema}`;
+      }
+
+      function trilhaKey(trail) {
+        return `${trail.perfil_da_jornada}␟${trail.macrotema}␟${trail.trilha}`;
+      }
+
+      function approvedCount(trail) {
+        return trail.videos.filter((v) => v.status === true).length;
+      }
+
+      function macrotemasForActivePerfil() {
+        const trails = state.trails.filter((t) => activePerfil === "todos" || t.perfil_da_jornada === activePerfil);
+        const byKey = new Map();
+
+        trails.forEach((t) => {
+          const key = macrotemaKey(t);
+          if (!byKey.has(key)) {
+            byKey.set(key, {
+              perfil_da_jornada: t.perfil_da_jornada,
+              macrotema: t.macrotema,
+              trails: [],
+            });
+          }
+          byKey.get(key).trails.push(t);
+        });
+
+        return Array.from(byKey.values()).sort((left, right) => {
+          if (left.perfil_da_jornada !== right.perfil_da_jornada) {
+            return left.perfil_da_jornada.localeCompare(right.perfil_da_jornada);
+          }
+          return left.macrotema.localeCompare(right.macrotema);
+        });
+      }
+
+      function renderPerfilTabs() {
+        const perfis = Array.from(new Set(state.trails.map((t) => t.perfil_da_jornada))).sort();
+
+        document.getElementById("perfilTabs").innerHTML = [
+          `<button class="${activePerfil === "todos" ? "active" : ""}" data-perfil="todos">Todos</button>`,
+          ...perfis.map(
+            (p) => `<button class="${activePerfil === p ? "active" : ""}" data-perfil="${escapeHtml(p)}">${escapeHtml(p)}</button>`
+          ),
+        ].join("");
+      }
+
+      function renderMacrotemaGrid() {
+        const macrotemas = macrotemasForActivePerfil();
+
+        if (!macrotemas.length) {
+          document.getElementById("macrotemaGrid").innerHTML =
+            '<div class="empty-state"><strong>Nenhum macrotema encontrado</strong></div>';
+          return;
+        }
+
+        document.getElementById("macrotemaGrid").innerHTML = macrotemas
+          .map((m) => {
+            const key = `${m.perfil_da_jornada}␟${m.macrotema}`;
+            const videosCount = m.trails.reduce((sum, t) => sum + t.videos.length, 0);
+            const approved = m.trails.reduce((sum, t) => sum + approvedCount(t), 0);
+
+            return `
+            <div class="card card-pad trail-card${key === selectedMacrotemaKey ? " selected" : ""}" data-macrotema="${escapeHtml(key)}">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                <strong>${trilhaShortName(t.nome)}</strong>
-                ${TRAIL_STATUS_BADGE[t.status]}
+                <strong>${escapeHtml(m.macrotema)}</strong>
+                <span class="badge badge-success">${approved}/${videosCount} aprovado(s)</span>
               </div>
-              <p class="text-muted" style="margin-top:6px;font-size:12.5px;">Perfil: ${t.perfil} · Origem: ${t.origem}</p>
-              <p class="text-faint" style="margin-top:10px;font-size:12.5px;">${t.subtemas.length} subtema(s) · ${trailVideoCount(t)} vídeo(s) cadastrados de ${t.videosCount} · importada em ${t.importadaEm}</p>
-            </div>`
-          )
+              <p class="text-muted" style="margin-top:6px;font-size:12.5px;">Perfil: ${escapeHtml(m.perfil_da_jornada)}</p>
+              <p class="text-faint" style="margin-top:10px;font-size:12.5px;">${m.trails.length} trilha(s) · ${videosCount} vídeo(s)</p>
+            </div>`;
+          })
           .join("");
 
-        document.querySelectorAll("[data-trail]").forEach((card) => {
+        document.querySelectorAll("[data-macrotema]").forEach((card) => {
           card.addEventListener("click", () => {
-            selectedTrailId = card.dataset.trail;
-            const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
-            selectedSubtemaId = trail.subtemas[0] ? trail.subtemas[0].id : null;
-            renderTrailGrid();
+            selectedMacrotemaKey = card.dataset.macrotema;
+            const macrotema = macrotemas.find((m) => `${m.perfil_da_jornada}␟${m.macrotema}` === selectedMacrotemaKey);
+            selectedTrilhaKey = macrotema && macrotema.trails.length ? trilhaKey(macrotema.trails[0]) : null;
+            renderMacrotemaGrid();
             renderTrailDetail();
           });
         });
+      }
+
+      function currentMacrotema() {
+        return macrotemasForActivePerfil().find((m) => `${m.perfil_da_jornada}␟${m.macrotema}` === selectedMacrotemaKey);
+      }
+
+      function allPerfis() {
+        return Array.from(new Set(state.trails.map((t) => t.perfil_da_jornada))).sort();
+      }
+
+      function macrotemasForPerfil(perfil) {
+        return Array.from(new Set(state.trails.filter((t) => t.perfil_da_jornada === perfil).map((t) => t.macrotema))).sort();
+      }
+
+      function trilhasForPerfilMacrotema(perfil, macrotema) {
+        return Array.from(
+          new Set(
+            state.trails
+              .filter((t) => t.perfil_da_jornada === perfil && t.macrotema === macrotema)
+              .map((t) => t.trilha)
+          )
+        ).sort();
       }
 
       function renderTrailDetail() {
-        const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
+        const macrotema = currentMacrotema();
         const section = document.getElementById("trailDetailSection");
-        if (!trail) {
+
+        if (!macrotema) {
           section.style.display = "none";
           return;
         }
-        section.style.display = "flex";
-        document.getElementById("trailDetailTitle").textContent = trilhaShortName(trail.nome);
-        document.getElementById("trailDetailMeta").textContent = `${trail.subtemas.length} subtema(s) · ${trailVideoCount(trail)} de ${trail.videosCount} vídeo(s) cadastrados`;
-        document.getElementById("importingCallout").style.display = trail.status === "importando" ? "flex" : "none";
 
-        document.getElementById("subtemaTabs").innerHTML = trail.subtemas
-          .map(
-            (s) => `
-            <button class="subtema-tab${s.id === selectedSubtemaId ? " active" : ""}" data-subtema="${s.id}">
-              ${s.nome} <span class="count">(${s.videos.length})</span>
-            </button>`
-          )
+        section.style.display = "flex";
+        document.getElementById("macrotemaDetailTitle").textContent = macrotema.macrotema;
+        const videosCount = macrotema.trails.reduce((sum, t) => sum + t.videos.length, 0);
+        const approved = macrotema.trails.reduce((sum, t) => sum + approvedCount(t), 0);
+        document.getElementById("trailDetailMeta").textContent = `${macrotema.trails.length} trilha(s) · ${approved} de ${videosCount} vídeo(s) aprovados`;
+
+        document.getElementById("trilhaTabs").innerHTML = macrotema.trails
+          .map((t) => {
+            const key = trilhaKey(t);
+            return `
+            <button class="trilha-tab${key === selectedTrilhaKey ? " active" : ""}" data-trilha="${escapeHtml(key)}">
+              ${escapeHtml(t.trilha)} <span class="count">(${t.videos.length})</span>
+            </button>`;
+          })
           .join("");
 
-        document.querySelectorAll("[data-subtema]").forEach((btn) => {
+        document.querySelectorAll("[data-trilha]").forEach((btn) => {
           btn.addEventListener("click", () => {
-            selectedSubtemaId = btn.dataset.subtema;
+            selectedTrilhaKey = btn.dataset.trilha;
             renderTrailDetail();
           });
         });
 
-        const subtema = trail.subtemas.find((s) => s.id === selectedSubtemaId) || trail.subtemas[0];
-        if (!subtema) {
-          document.getElementById("subtemaPath").textContent = "";
-          document.getElementById("videosBody").innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Nenhum subtema cadastrado</strong></div></td></tr>`;
+        const trail = macrotema.trails.find((t) => trilhaKey(t) === selectedTrilhaKey) || macrotema.trails[0];
+
+        if (!trail) {
+          document.getElementById("macrotemaPath").textContent = "";
+          document.getElementById("videosBody").innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Nenhuma trilha cadastrada</strong></div></td></tr>`;
           return;
         }
 
-        document.getElementById("subtemaPath").textContent = subtema.origem;
+        document.getElementById("macrotemaPath").textContent = `${trail.perfil_da_jornada} · ${trail.macrotema} · ${trail.trilha}`;
 
-        if (!subtema.videos.length) {
+        if (!trail.videos.length) {
           document.getElementById("videosBody").innerHTML = `
             <tr><td colspan="4">
               <div class="empty-state">
-                <strong>Nenhum vídeo vinculado ainda</strong>
-                <span>Assim que este subtema for conectado ao Google Drive/banco de dados, os vídeos aparecerão automaticamente aqui.</span>
+                <strong>Nenhum vídeo cadastrado nesta trilha</strong>
               </div>
             </td></tr>`;
           return;
         }
 
-        document.getElementById("videosBody").innerHTML = subtema.videos
+        const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? 0) - (right.ordem ?? 0));
+
+        document.getElementById("videosBody").innerHTML = sortedVideos
           .map(
-            (v) => `
-            <tr>
-              <td>${v.ordem}</td>
-              <td class="mono">${v.arquivo}</td>
-              <td><span class="badge ${CAPTION_BADGE[v.legendaStatus]}">${v.legendaStatus}</span></td>
-              <td><span class="badge ${APROVACAO_BADGE[v.aprovacaoStatus]}">${APROVACAO_LABEL[v.aprovacaoStatus]}</span></td>
+            (v, index) => `
+            <tr class="video-row" draggable="true" data-video-id="${escapeHtml(v.id)}">
+              <td><span class="drag-handle">⠿</span>${index + 1}</td>
+              <td class="mono">${escapeHtml(v.nome_do_arquivo)}</td>
+              <td>${v.status === true ? '<span class="badge badge-success">Aprovado</span>' : '<span class="badge badge-warning">Pendente</span>'}</td>
               <td style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="btn btn-secondary btn-sm" data-move="${v.id}">Mover de trilha</button>
-                ${v.legendaStatus !== "processando" ? `<button class="btn btn-ghost btn-sm" data-review="${v.id}">Revisar legenda</button>` : ""}
-                ${v.aprovacaoStatus === "aguardando_aprovacao" ? `<button class="btn btn-sm" data-approve="${v.id}">Aprovar</button><button class="btn btn-ghost btn-sm" data-reject="${v.id}">Reprovar</button>` : ""}
+                <button class="btn btn-secondary btn-sm" data-move="${escapeHtml(v.id)}">Mover de trilha</button>
+                <button class="btn btn-ghost btn-sm" disabled title="Em breve">Revisar legenda</button>
               </td>
             </tr>`
           )
           .join("");
 
         document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(btn.dataset.move)));
-        document.querySelectorAll("[data-review]").forEach((btn) => btn.addEventListener("click", () => openCaption(btn.dataset.review)));
-        document.querySelectorAll("[data-approve]").forEach((btn) => btn.addEventListener("click", () => setAprovacaoStatus(btn.dataset.approve, "aprovado")));
-        document.querySelectorAll("[data-reject]").forEach((btn) => btn.addEventListener("click", () => setAprovacaoStatus(btn.dataset.reject, "reprovado")));
+        attachDragAndDrop(trail);
       }
 
-      function setAprovacaoStatus(videoId, status) {
-        const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
-        const subtema = trail.subtemas.find((s) => s.id === selectedSubtemaId);
-        const video = subtema.videos.find((v) => v.id === videoId);
-        video.aprovacaoStatus = status;
-        renderTrailDetail();
-        // TODO: PATCH /video-catalog/videos/:id { aprovacao_status: 'aprovado' | 'reprovado' }
+      function attachDragAndDrop(trail) {
+        const rows = document.querySelectorAll("#videosBody tr.video-row");
+
+        rows.forEach((row) => {
+          row.addEventListener("dragstart", () => {
+            draggingVideoId = row.dataset.videoId;
+            row.classList.add("dragging");
+          });
+
+          row.addEventListener("dragend", () => {
+            row.classList.remove("dragging");
+            document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+          });
+
+          row.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            row.classList.add("drag-over");
+          });
+
+          row.addEventListener("dragleave", () => {
+            row.classList.remove("drag-over");
+          });
+
+          row.addEventListener("drop", async (event) => {
+            event.preventDefault();
+            row.classList.remove("drag-over");
+
+            const targetVideoId = row.dataset.videoId;
+            if (!draggingVideoId || draggingVideoId === targetVideoId) return;
+
+            const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? 0) - (right.ordem ?? 0));
+            const orderedIds = sortedVideos.map((v) => v.id);
+            const fromIndex = orderedIds.indexOf(draggingVideoId);
+            const toIndex = orderedIds.indexOf(targetVideoId);
+            if (fromIndex === -1 || toIndex === -1) return;
+
+            orderedIds.splice(toIndex, 0, orderedIds.splice(fromIndex, 1)[0]);
+
+            try {
+              const updatedVideos = await requestJson("/video-catalog/reorder", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ordered_ids: orderedIds }),
+              });
+
+              updatedVideos.forEach((updated) => {
+                const video = trail.videos.find((v) => v.id === updated.id);
+                if (video) video.ordem = updated.ordem;
+              });
+
+              renderTrailDetail();
+            } catch (error) {
+              alert(error.message);
+            }
+
+            draggingVideoId = null;
+          });
+        });
       }
 
       document.getElementById("perfilTabs").addEventListener("click", (e) => {
         const btn = e.target.closest("button[data-perfil]");
         if (!btn) return;
-        document.querySelectorAll("#perfilTabs button").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
         activePerfil = btn.dataset.perfil;
-        renderTrailGrid();
+        selectedMacrotemaKey = null;
+        selectedTrilhaKey = null;
+        renderPerfilTabs();
+        renderMacrotemaGrid();
+        renderTrailDetail();
       });
 
       // Nova trilha
       const newTrailOverlay = document.getElementById("newTrailOverlay");
-      document.getElementById("newTrailButton").addEventListener("click", () => (newTrailOverlay.hidden = false));
-      document.querySelectorAll("[data-close-new]").forEach((el) => el.addEventListener("click", () => (newTrailOverlay.hidden = true)));
 
-      document.getElementById("createTrailButton").addEventListener("click", () => {
-        const nome = document.getElementById("newTrailNome").value.trim();
+      function renderNewTrailPerfilSelect() {
+        const select = document.getElementById("newTrailPerfil");
+        select.innerHTML = allPerfis()
+          .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
+          .join("");
+      }
+
+      function renderNewTrailMacrotemaSelect() {
         const perfil = document.getElementById("newTrailPerfil").value;
-        const subtemaNome = document.getElementById("newTrailSubtema").value.trim() || "Geral";
-        const arquivos = document.getElementById("newTrailVideos").value.split("\n").map((s) => s.trim()).filter(Boolean);
-        if (!nome || !arquivos.length) return;
+        const select = document.getElementById("newTrailMacrotema");
+        const macrotemas = macrotemasForPerfil(perfil);
 
-        const newTrailId = `trilha-${Date.now()}`;
-        const newSubtemaId = `sub-${Date.now()}`;
+        select.innerHTML = [
+          ...macrotemas.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`),
+          `<option value="${NEW_MACROTEMA_OPTION}">+ Criar novo macrotema</option>`,
+        ].join("");
 
-        MOCK.trails.unshift({
-          id: newTrailId,
-          nome,
-          perfil,
-          origem: "Cadastro manual",
-          videosCount: arquivos.length,
-          status: "ativa",
-          importadaEm: new Date().toISOString().slice(0, 10),
-          subtemas: [
-            {
-              id: newSubtemaId,
-              nome: subtemaNome,
-              origem: `Cadastro manual · ${nome} / ${subtemaNome}`,
-              videos: arquivos.map((arquivo, i) => ({ id: `vid-${Date.now()}-${i}`, ordem: i + 1, arquivo, legendaStatus: "pendente", aprovacaoStatus: "aguardando_aprovacao" })),
-            },
-          ],
-        });
+        toggleNewMacrotemaField();
+      }
 
+      function toggleNewMacrotemaField() {
+        const isNew = document.getElementById("newTrailMacrotema").value === NEW_MACROTEMA_OPTION;
+        document.getElementById("newTrailMacrotemaNovoField").style.display = isNew ? "block" : "none";
+      }
+
+      function renderNewTrailVideosList() {
+        const list = document.getElementById("newTrailVideosList");
+
+        if (!state.unclassified.length) {
+          list.innerHTML = '<div class="unclassified-item text-faint">Nenhum vídeo novo do Drive sem trilha definida.</div>';
+          return;
+        }
+
+        list.innerHTML = state.unclassified
+          .map(
+            (v) => `
+            <label class="unclassified-item">
+              <input type="checkbox" value="${escapeHtml(v.id)}">
+              <span class="mono">${escapeHtml(v.nome_do_arquivo)}</span>
+            </label>`
+          )
+          .join("");
+      }
+
+      document.getElementById("newTrailButton").addEventListener("click", async () => {
+        renderNewTrailPerfilSelect();
+        renderNewTrailMacrotemaSelect();
+        document.getElementById("newTrailMacrotemaNovo").value = "";
         document.getElementById("newTrailNome").value = "";
-        document.getElementById("newTrailSubtema").value = "";
-        document.getElementById("newTrailVideos").value = "";
-        newTrailOverlay.hidden = true;
-        selectedTrailId = newTrailId;
-        selectedSubtemaId = newSubtemaId;
-        renderTrailGrid();
-        renderTrailDetail();
-        // TODO: POST /video-catalog/trails { nome, perfil, subtemas: [{ nome, videos }] }
+        document.getElementById("newTrailStatus").textContent = "";
+        document.getElementById("newTrailStatus").className = "status-line";
+        renderNewTrailVideosList();
+        newTrailOverlay.hidden = false;
+
+        try {
+          state.unclassified = await requestJson("/video-catalog/unclassified");
+        } catch (error) {
+          state.unclassified = [];
+        }
+
+        renderNewTrailVideosList();
+      });
+      document.querySelectorAll("[data-close-new]").forEach((el) => el.addEventListener("click", () => (newTrailOverlay.hidden = true)));
+      document.getElementById("newTrailPerfil").addEventListener("change", renderNewTrailMacrotemaSelect);
+      document.getElementById("newTrailMacrotema").addEventListener("change", toggleNewMacrotemaField);
+
+      document.getElementById("createTrailButton").addEventListener("click", async () => {
+        const button = document.getElementById("createTrailButton");
+        const status = document.getElementById("newTrailStatus");
+        const perfil_da_jornada = document.getElementById("newTrailPerfil").value;
+        const macrotemaSelect = document.getElementById("newTrailMacrotema").value;
+        const macrotema =
+          macrotemaSelect === NEW_MACROTEMA_OPTION
+            ? document.getElementById("newTrailMacrotemaNovo").value.trim()
+            : macrotemaSelect;
+        const trilha = document.getElementById("newTrailNome").value.trim();
+        const video_ids = Array.from(document.querySelectorAll("#newTrailVideosList input[type=checkbox]:checked")).map(
+          (input) => input.value
+        );
+
+        if (!perfil_da_jornada || !macrotema || !trilha || !video_ids.length) {
+          status.textContent = "Preencha perfil, macrotema, nome da trilha e selecione ao menos um vídeo.";
+          status.className = "status-line error";
+          return;
+        }
+
+        button.disabled = true;
+        status.textContent = "Cadastrando trilha...";
+        status.className = "status-line";
+
+        try {
+          await requestJson("/video-catalog/trails", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ perfil_da_jornada, macrotema, trilha, video_ids }),
+          });
+
+          newTrailOverlay.hidden = true;
+          await initialize();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          button.disabled = false;
+        }
       });
 
       // Mover vídeo de trilha
       const moveOverlay = document.getElementById("moveOverlay");
-      function populateMoveSubtemas(trailId) {
-        const trail = MOCK.trails.find((t) => t.id === trailId);
-        const select = document.getElementById("moveTargetSubtema");
-        select.innerHTML = trail.subtemas.map((s) => `<option value="${s.id}">${s.nome}</option>`).join("");
+
+      function renderMoveMacrotemaSelect(selectedMacrotema) {
+        const perfil = document.getElementById("moveTargetPerfil").value;
+        const select = document.getElementById("moveTargetMacrotema");
+        const macrotemas = macrotemasForPerfil(perfil);
+
+        select.innerHTML = macrotemas.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+
+        if (selectedMacrotema && macrotemas.includes(selectedMacrotema)) {
+          select.value = selectedMacrotema;
+        }
+
+        renderMoveTrilhaSelect();
+      }
+
+      function renderMoveTrilhaSelect(selectedTrilha) {
+        const perfil = document.getElementById("moveTargetPerfil").value;
+        const macrotema = document.getElementById("moveTargetMacrotema").value;
+        const select = document.getElementById("moveTargetTrilha");
+        const trilhas = trilhasForPerfilMacrotema(perfil, macrotema);
+
+        select.innerHTML = trilhas.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
+
+        if (selectedTrilha && trilhas.includes(selectedTrilha)) {
+          select.value = selectedTrilha;
+        }
       }
 
       function openMove(videoId) {
-        const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
-        const subtema = trail.subtemas.find((s) => s.id === selectedSubtemaId);
-        const video = subtema.videos.find((v) => v.id === videoId);
-        movingVideo = { trailId: trail.id, subtemaId: subtema.id, videoId };
-        document.getElementById("moveVideoLabel").textContent = `Vídeo: ${video.arquivo} (subtema atual: ${subtema.nome})`;
+        const macrotema = currentMacrotema();
+        const trail = macrotema ? macrotema.trails.find((t) => trilhaKey(t) === selectedTrilhaKey) : null;
+        const video = trail ? trail.videos.find((v) => v.id === videoId) : null;
+        if (!video) return;
 
-        const trailSelect = document.getElementById("moveTargetTrail");
-        trailSelect.innerHTML = MOCK.trails.map((t) => `<option value="${t.id}">${t.nome}</option>`).join("");
-        trailSelect.value = trail.id;
-        populateMoveSubtemas(trail.id);
+        movingVideo = videoId;
+        document.getElementById("moveVideoLabel").textContent = `Vídeo: ${video.nome_do_arquivo}`;
+
+        const perfilSelect = document.getElementById("moveTargetPerfil");
+        perfilSelect.innerHTML = allPerfis().map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+        perfilSelect.value = trail.perfil_da_jornada;
+
+        renderMoveMacrotemaSelect(trail.macrotema);
+        renderMoveTrilhaSelect(trail.trilha);
+
+        document.getElementById("moveStatus").textContent = "";
+        document.getElementById("moveStatus").className = "status-line";
         moveOverlay.hidden = false;
       }
-      document.getElementById("moveTargetTrail").addEventListener("change", (e) => populateMoveSubtemas(e.target.value));
       document.querySelectorAll("[data-close-move]").forEach((el) => el.addEventListener("click", () => (moveOverlay.hidden = true)));
+      document.getElementById("moveTargetPerfil").addEventListener("change", () => renderMoveMacrotemaSelect());
+      document.getElementById("moveTargetMacrotema").addEventListener("change", () => renderMoveTrilhaSelect());
 
-      document.getElementById("confirmMoveButton").addEventListener("click", () => {
-        const fromTrail = MOCK.trails.find((t) => t.id === movingVideo.trailId);
-        const fromSubtema = fromTrail.subtemas.find((s) => s.id === movingVideo.subtemaId);
-        const toTrail = MOCK.trails.find((t) => t.id === document.getElementById("moveTargetTrail").value);
-        const toSubtema = toTrail.subtemas.find((s) => s.id === document.getElementById("moveTargetSubtema").value);
+      document.getElementById("confirmMoveButton").addEventListener("click", async () => {
+        const button = document.getElementById("confirmMoveButton");
+        const status = document.getElementById("moveStatus");
+        const perfil_da_jornada = document.getElementById("moveTargetPerfil").value;
+        const macrotema = document.getElementById("moveTargetMacrotema").value;
+        const trilha = document.getElementById("moveTargetTrilha").value;
 
-        const videoIndex = fromSubtema.videos.findIndex((v) => v.id === movingVideo.videoId);
-        const [video] = fromSubtema.videos.splice(videoIndex, 1);
-        video.ordem = toSubtema.videos.length + 1;
-        toSubtema.videos.push(video);
-        fromTrail.videosCount = trailVideoCount(fromTrail);
-        toTrail.videosCount = trailVideoCount(toTrail);
+        if (!perfil_da_jornada || !macrotema || !trilha) {
+          status.textContent = "Preencha perfil, macrotema e trilha de destino.";
+          status.className = "status-line error";
+          return;
+        }
 
-        moveOverlay.hidden = true;
-        renderTrailGrid();
-        renderTrailDetail();
-        // TODO: PATCH /video-catalog/videos/:id { trilha_id, subtema_id }
+        button.disabled = true;
+        status.textContent = "Movendo vídeo...";
+        status.className = "status-line";
+
+        try {
+          await requestJson(`/video-catalog/${encodeURIComponent(movingVideo)}/move-trail`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ perfil_da_jornada, macrotema, trilha }),
+          });
+
+          moveOverlay.hidden = true;
+          await initialize();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          button.disabled = false;
+        }
       });
 
-      // Revisar legenda
-      const captionOverlay = document.getElementById("captionOverlay");
-      function openCaption(videoId) {
-        const trail = MOCK.trails.find((t) => t.id === selectedTrailId);
-        const subtema = trail.subtemas.find((s) => s.id === selectedSubtemaId);
-        const video = subtema.videos.find((v) => v.id === videoId);
-        reviewingVideo = { trailId: trail.id, subtemaId: subtema.id, videoId };
-        document.getElementById("captionVideoLabel").textContent = `Vídeo: ${video.arquivo}`;
-        document.getElementById("captionText").value =
-          video.legendaStatus === "aprovada"
-            ? "Legenda já aprovada. Edite e salve para gerar uma nova revisão."
-            : "Legenda gerada automaticamente: revise o conteúdo antes de aprovar.";
-        captionOverlay.hidden = false;
+      function renderLoadError(error) {
+        document.getElementById("macrotemaGrid").innerHTML = `
+          <div class="empty-state"><strong>Falha ao carregar trilhas</strong><span>${escapeHtml(error.message)}</span></div>`;
       }
-      document.querySelectorAll("[data-close-caption]").forEach((el) => el.addEventListener("click", () => (captionOverlay.hidden = true)));
 
-      document.getElementById("approveCaptionButton").addEventListener("click", () => {
-        const trail = MOCK.trails.find((t) => t.id === reviewingVideo.trailId);
-        const subtema = trail.subtemas.find((s) => s.id === reviewingVideo.subtemaId);
-        const video = subtema.videos.find((v) => v.id === reviewingVideo.videoId);
-        video.legendaStatus = "aprovada";
-        captionOverlay.hidden = true;
-        renderTrailDetail();
-        // TODO: PATCH /video-catalog/videos/:id { legenda, legenda_status: 'aprovada' }
-      });
+      async function initialize() {
+        try {
+          const trails = await requestJson("/video-catalog/trails-overview");
+          state.trails = Array.isArray(trails) ? trails : [];
 
-      renderTrailGrid();
-      renderTrailDetail();
+          if (!selectedMacrotemaKey) {
+            const macrotemas = macrotemasForActivePerfil();
+            selectedMacrotemaKey = macrotemas.length ? `${macrotemas[0].perfil_da_jornada}␟${macrotemas[0].macrotema}` : null;
+            selectedTrilhaKey = macrotemas.length && macrotemas[0].trails.length ? trilhaKey(macrotemas[0].trails[0]) : null;
+          }
+
+          renderPerfilTabs();
+          renderMacrotemaGrid();
+          renderTrailDetail();
+        } catch (error) {
+          renderLoadError(error);
+        }
+      }
+
+      initialize();
     </script>
   </body>
 </html>
