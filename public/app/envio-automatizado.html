@@ -24,10 +24,14 @@
 
       .dispatch-config-body { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end; }
       .dispatch-config-body .field { margin-bottom: 0; }
-      .dispatch-config-body .field-date { width: 160px; }
+      .dispatch-config-body .field-date { width: 210px; }
       .dispatch-config-body .field-periods { flex: 1; min-width: 260px; }
       .dispatch-config-body .field-delay { width: 200px; }
       .dispatch-config-body .field-hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+      .dispatch-config-body .field-action { display: flex; flex-direction: column; }
+      .dispatch-config-body .field-action label { visibility: hidden; }
+      .dispatch-config-body .field-action .field-hint { visibility: hidden; }
+      .dispatch-config-body .field-action .btn { height: 38px; }
 
       .period-add-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
       .period-add-row input[type="time"] { width: 92px; }
@@ -129,7 +133,11 @@
                     <p class="field-hint">Mínimo e máximo entre envios.</p>
                   </div>
 
-                  <button class="btn" id="dispatchButton" type="button" style="height:38px;">Disparar campanha</button>
+                  <div class="field field-action">
+                    <label>Ação</label>
+                    <button class="btn" id="dispatchButton" type="button">Disparar campanha</button>
+                    <p class="field-hint">.</p>
+                  </div>
                 </div>
               </div>
               <div class="callout callout-warning" id="validationCallout" style="display:none;"></div>

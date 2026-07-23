@@ -195,6 +195,63 @@
   content: none;
 }
 
+/* Custom tooltip: add class="has-tip" + data-tip="..." (+ optional data-tip-tone="success|warning|danger|info|neutral")
+   to any element. Rendering is handled by assets/js/tooltip.js — a single element positioned with
+   `position: fixed` and appended to <body>, so it always renders above scroll/overflow containers
+   like .table-wrap instead of being clipped or forcing a scrollbar. */
+.tooltip-bubble {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  width: max-content;
+  max-width: 240px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: normal;
+  box-shadow: var(--shadow-md);
+  background: var(--neutral-bg);
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.tooltip-bubble.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.tooltip-bubble::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--neutral-bg);
+  border-bottom-width: 0;
+}
+
+.tooltip-bubble--success { background: var(--success-bg); color: var(--success); }
+.tooltip-bubble--success::after { border-top-color: var(--success-bg); }
+
+.tooltip-bubble--warning { background: var(--warning-bg); color: var(--warning); }
+.tooltip-bubble--warning::after { border-top-color: var(--warning-bg); }
+
+.tooltip-bubble--danger { background: var(--danger-bg); color: var(--danger); }
+.tooltip-bubble--danger::after { border-top-color: var(--danger-bg); }
+
+.tooltip-bubble--info { background: var(--info-bg); color: #0577bf; }
+.tooltip-bubble--info::after { border-top-color: var(--info-bg); }
+
+.tooltip-bubble--neutral { background: var(--neutral-bg); color: var(--text-muted); }
+.tooltip-bubble--neutral::after { border-top-color: var(--neutral-bg); }
+
 /* Tables */
 .table-wrap {
   overflow-x: auto;
