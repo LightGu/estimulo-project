@@ -26,6 +26,8 @@ async function main() {
     },
     organizationService: {
       list: async () => [{ id: "org-1", nome: "AMBEV" }],
+      create: async (payload) => ({ id: "org-2", nome: payload.nome, descricao: payload.descricao ?? null, programa: payload.programa ?? null }),
+      update: async (id, payload) => ({ id, nome: "AMBEV", descricao: payload.descricao ?? null, programa: payload.programa ?? null }),
     },
     videoCatalogService: {
       listTrailsByProfile: async () => [],
@@ -110,6 +112,36 @@ async function main() {
     const organizationsPayload = await organizationsResponse.json();
     assert.deepEqual(organizationsPayload, [{ id: "org-1", nome: "AMBEV" }]);
 
+    const createOrganizationResponse = await fetch(`http://127.0.0.1:${port}/organizations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nome: "Nova Organizacao", descricao: "Descricao teste", programa: "Programa teste" }),
+    });
+
+    assert.equal(createOrganizationResponse.status, 201);
+    const createOrganizationPayload = await createOrganizationResponse.json();
+    assert.deepEqual(createOrganizationPayload, {
+      id: "org-2",
+      nome: "Nova Organizacao",
+      descricao: "Descricao teste",
+      programa: "Programa teste",
+    });
+
+    const updateOrganizationResponse = await fetch(`http://127.0.0.1:${port}/organizations/org-1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ descricao: "Descricao atualizada", programa: "Programa atualizado" }),
+    });
+
+    assert.equal(updateOrganizationResponse.status, 200);
+    const updateOrganizationPayload = await updateOrganizationResponse.json();
+    assert.deepEqual(updateOrganizationPayload, {
+      id: "org-1",
+      nome: "AMBEV",
+      descricao: "Descricao atualizada",
+      programa: "Programa atualizado",
+    });
+
     const skippedTranscriptResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/transcript`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -191,6 +223,19 @@ async function main() {
     assert.match(groupsAppPage, /requestJson\("\/organizations"\)/);
     assert.match(groupsAppPage, /requestJson\("\/groups\/sync"/);
     assert.match(groupsAppPage, /requestJson\(`\/groups\/\$\{encodeURIComponent\(editingGroupId\)\}`/);
+
+    const organizacoesAppPageResponse = await fetch(`http://127.0.0.1:${port}/app/organizacoes.html`);
+    assert.equal(organizacoesAppPageResponse.status, 200);
+    const organizacoesAppPage = await organizacoesAppPageResponse.text();
+    assert.doesNotMatch(organizacoesAppPage, /mock-data\.js/);
+    assert.doesNotMatch(organizacoesAppPage, /MOCK\./);
+    assert.match(organizacoesAppPage, /requestJson\("\/organizations"\)/);
+    assert.match(organizacoesAppPage, /requestJson\("\/groups\/search"\)/);
+    assert.match(organizacoesAppPage, /id="newOrgButton"/);
+    assert.match(organizacoesAppPage, /id="orgDescricao"/);
+    assert.match(organizacoesAppPage, /id="orgPrograma"/);
+    assert.match(organizacoesAppPage, /requestJson\(`\/organizations\/\$\{encodeURIComponent\(editingOrgId\)\}`/);
+    assert.match(organizacoesAppPage, /requestJson\("\/organizations", \{/);
 
     const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1`, {
       method: "PATCH",
