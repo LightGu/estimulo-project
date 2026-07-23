@@ -30,6 +30,11 @@ function createApp(dependencies = {}) {
   app.post("/organizations", organizationsController.create);
   app.patch("/organizations/:id", organizationsController.update);
   app.get("/video-catalog/trails", videoCatalogController.listTrailsByProfile);
+  app.get("/video-catalog/trails-overview", videoCatalogController.listTrailsOverview);
+  app.get("/video-catalog/unclassified", videoCatalogController.listUnclassified);
+  app.post("/video-catalog/trails", videoCatalogController.createTrailVideos);
+  app.post("/video-catalog/reorder", videoCatalogController.reorderTrailVideos);
+  app.patch("/video-catalog/:id/move-trail", videoCatalogController.moveVideoTrail);
   app.post("/video-catalog/transcript", videoCatalogController.transcribeByDriveFileId);
   app.post("/video-catalog/:id/transcript", videoCatalogController.transcribeById);
   app.get("/groups/search", groupsController.search);
