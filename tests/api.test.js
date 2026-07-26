@@ -16,6 +16,33 @@ async function main() {
         listRecent: async () => [{ criado_em: new Date(Date.now() - 5 * 60000).toISOString() }],
       },
     },
+    dispatchLogsService: {
+      listForReport: async (filters) => {
+        if (filters.startDate === "2026-12-31") {
+          throw new Error("Start date cannot be in the future");
+        }
+
+        return [
+          {
+            id: "log-1",
+            status: filters.status || "enviado",
+            criado_em: "2026-07-21T09:41:00.000Z",
+            campaigns: {
+              id: "campaign-1",
+              trilha: "Trilha A",
+              data_envio: "2026-07-21",
+            },
+            groups: {
+              id: "group-1",
+              nome: "Grupo sem segmento",
+              organization_id: "org-1",
+              organizations: { id: "org-1", nome: "AMBEV" },
+            },
+            video_catalog: { id: "video-1", nome_do_arquivo: "video.mp4" },
+          },
+        ];
+      },
+    },
     campaignService: {
       create: async (payload) => ({ id: "campaign-1", ...payload }),
       createAndQueue: async (payload) => ({
@@ -23,6 +50,65 @@ async function main() {
         campaign_groups: payload.group_ids.map((groupId) => ({ campaign_id: "campaign-queued-1", group_id: groupId })),
         trigger_job: { id: "trigger-1", data: { campaign_id: "campaign-queued-1" } },
       }),
+      listWithSummary: async () => [
+        { id: "campaign-1", trilha: "Campanha do dia 21/07", status: "programado", grupos_total: 2, data_envio: "2026-07-21" },
+      ],
+      getById: async (id) => ({ id, trilha: "Campanha do dia 21/07", status: "programado" }),
+      getGroupsDetail: async (campaignId) => [
+        {
+          group_id: "group-1",
+          nome: "Grupo sem segmento",
+          evolution_group_id: "120363@g.us",
+          video_id: "video-1",
+          status: "enviado",
+          criado_em: "2026-07-21T09:41:12.000Z",
+        },
+      ],
+      dispatchCampaign: async (payload) => ({
+        campaign: { id: "campaign-dispatch-1", trilha: payload.trilha, status: "gerando_legendas" },
+        campaign_groups: (payload.group_ids || []).map((groupId) => ({ campaign_id: "campaign-dispatch-1", group_id: groupId })),
+        trigger_job: null,
+      }),
+      confirmDispatch: async (campaignId, payload) => {
+        if (campaignId === "campaign-pending") {
+          const error = new Error("Existem legendas pendentes para esta campanha");
+          error.code = "CAPTIONS_PENDING";
+          throw error;
+        }
+
+        return {
+          campaign: { id: campaignId, status: "programado" },
+          trigger_job: { id: "trigger-confirm-1", data: { campaign_id: campaignId } },
+        };
+      },
+    },
+    campaignVideoCaptionsService: {
+      getCaptionProgress: async (campaignId) => ({
+        total: 2,
+        gerado: 1,
+        erro: 0,
+        pendente: 1,
+        pct: 50,
+        items: [
+          {
+            id: "cvc-1",
+            campaign_id: campaignId,
+            status: "gerado",
+            caption_text: "Legenda pronta",
+            groups: { nome: "Grupo A" },
+            video_catalog: { nome_do_arquivo: "video-a.mp4", trilha_segmento: "Trilha A" },
+          },
+          {
+            id: "cvc-2",
+            campaign_id: campaignId,
+            status: "processando",
+            caption_text: null,
+            groups: { nome: "Grupo B" },
+            video_catalog: { nome_do_arquivo: "video-b.mp4", trilha_segmento: "Trilha A" },
+          },
+        ],
+      }),
+      updateCaptionText: async (id, captionText) => ({ id, caption_text: captionText, status: "gerado" }),
     },
     organizationService: {
       list: async () => [{ id: "org-1", nome: "AMBEV" }],
@@ -106,6 +192,13 @@ async function main() {
         video: { id: "video-1", nome_do_arquivo: "aula.mp4", drive_file_id: "drive-1" },
         dispatch_job: { id: "dispatch-1", name: "dispatch-content", queue: "dispatch" },
       }),
+      getById: async (id) => (id === "group-1" ? { id, nome: "Grupo sem segmento", trilha_override: "Trilha A" } : null),
+    },
+    groupVideoProgressService: {
+      getGroupProgressSummary: async (groupId) => ({
+        current: { trilha: "Trilha A", total: 2, enviados: 1, concluida: false, next_video: { id: "video-a2" }, rows: [] },
+        history: [{ trilha: "Trilha B", enviados: 3, total: 3, concluida: true, ultima_atividade: "2026-07-10" }],
+      }),
     },
   });
 
@@ -118,7 +211,7 @@ async function main() {
     const postResponse = await fetch(`http://127.0.0.1:${port}/campaigns`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nome: "Campanha", organization_id: "org-1", cron_expression: "0 * * * *", ativo: true }),
+      body: JSON.stringify({ nome: "Campanha", cron_expression: "0 * * * *", ativo: true }),
     });
 
     assert.equal(postResponse.status, 201);
@@ -128,7 +221,6 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         nome: "Trilha A",
-        organization_id: "org-1",
         group_ids: ["group-1"],
         execution_at: "2026-07-17T10:00:00.000Z",
       }),
@@ -139,6 +231,82 @@ async function main() {
     assert.equal(queuedCampaignPayload.campaign.id, "campaign-queued-1");
     assert.equal(queuedCampaignPayload.campaign_groups[0].group_id, "group-1");
     assert.equal(queuedCampaignPayload.trigger_job.id, "trigger-1");
+
+    const listCampaignsResponse = await fetch(`http://127.0.0.1:${port}/campaigns`);
+    assert.equal(listCampaignsResponse.status, 200);
+    const listCampaignsPayload = await listCampaignsResponse.json();
+    assert.equal(listCampaignsPayload[0].status, "programado");
+    assert.equal(listCampaignsPayload[0].grupos_total, 2);
+
+    const getCampaignResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-1`);
+    assert.equal(getCampaignResponse.status, 200);
+    const getCampaignPayload = await getCampaignResponse.json();
+    assert.equal(getCampaignPayload.id, "campaign-1");
+
+    const campaignGroupsResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-1/groups`);
+    assert.equal(campaignGroupsResponse.status, 200);
+    const campaignGroupsPayload = await campaignGroupsResponse.json();
+    assert.equal(campaignGroupsPayload[0].group_id, "group-1");
+    assert.equal(campaignGroupsPayload[0].status, "enviado");
+
+    const dispatchCampaignResponse = await fetch(`http://127.0.0.1:${port}/campaigns/dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        group_ids: ["group-1"],
+        execution_at: "2026-07-24T10:00:00.000Z",
+      }),
+    });
+
+    assert.equal(dispatchCampaignResponse.status, 202);
+    const dispatchCampaignPayload = await dispatchCampaignResponse.json();
+    assert.equal(dispatchCampaignPayload.campaign.id, "campaign-dispatch-1");
+    assert.equal(dispatchCampaignPayload.campaign.status, "gerando_legendas");
+    assert.equal(dispatchCampaignPayload.trigger_job, null);
+
+    const captionsProgressResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-dispatch-1/captions/progress`);
+    assert.equal(captionsProgressResponse.status, 200);
+    const captionsProgressPayload = await captionsProgressResponse.json();
+    assert.equal(captionsProgressPayload.total, 2);
+    assert.equal(captionsProgressPayload.pendente, 1);
+    assert.equal(captionsProgressPayload.items[0].status, "gerado");
+
+    const updateCaptionResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-dispatch-1/captions/cvc-2`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption_text: "Legenda editada manualmente" }),
+    });
+
+    assert.equal(updateCaptionResponse.status, 200);
+    const updateCaptionPayload = await updateCaptionResponse.json();
+    assert.equal(updateCaptionPayload.caption_text, "Legenda editada manualmente");
+
+    const confirmDispatchResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-dispatch-1/dispatch/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ execution_at: "2026-07-24T10:00:00.000Z" }),
+    });
+
+    assert.equal(confirmDispatchResponse.status, 200);
+    const confirmDispatchPayload = await confirmDispatchResponse.json();
+    assert.equal(confirmDispatchPayload.campaign.status, "programado");
+    assert.equal(confirmDispatchPayload.trigger_job.id, "trigger-confirm-1");
+
+    const confirmDispatchPendingResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-pending/dispatch/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ execution_at: "2026-07-24T10:00:00.000Z" }),
+    });
+
+    assert.equal(confirmDispatchPendingResponse.status, 409);
+
+    const envioAutomatizadoPageResponse = await fetch(`http://127.0.0.1:${port}/app/envio-automatizado.html`);
+    assert.equal(envioAutomatizadoPageResponse.status, 200);
+    const envioAutomatizadoPage = await envioAutomatizadoPageResponse.text();
+    assert.match(envioAutomatizadoPage, /requestJson\("\/campaigns\/dispatch"/);
+    assert.match(envioAutomatizadoPage, /\/captions\/progress/);
+    assert.match(envioAutomatizadoPage, /\/dispatch\/confirm/);
+    assert.match(envioAutomatizadoPage, /id="backToConfigButton"/);
 
     const organizationsResponse = await fetch(`http://127.0.0.1:${port}/organizations`);
     assert.equal(organizationsResponse.status, 200);
@@ -174,6 +342,24 @@ async function main() {
       descricao: "Descricao atualizada",
       programa: "Programa atualizado",
     });
+
+    const reportResponse = await fetch(`http://127.0.0.1:${port}/reports/dispatches?status=enviado`);
+    assert.equal(reportResponse.status, 200);
+    const reportPayload = await reportResponse.json();
+    assert.equal(reportPayload[0].status, "enviado");
+    assert.equal(reportPayload[0].groups.organizations.nome, "AMBEV");
+    assert.equal(reportPayload[0].groups.nome, "Grupo sem segmento");
+
+    const reportFutureDateResponse = await fetch(`http://127.0.0.1:${port}/reports/dispatches?start_date=2026-12-31`);
+    assert.equal(reportFutureDateResponse.status, 400);
+
+    const relatoriosPageResponse = await fetch(`http://127.0.0.1:${port}/app/relatorios.html`);
+    assert.equal(relatoriosPageResponse.status, 200);
+    const relatoriosPage = await relatoriosPageResponse.text();
+    assert.match(relatoriosPage, /requestJson\(`\/reports\/dispatches/);
+    assert.match(relatoriosPage, /id="groupFilter"/);
+    assert.doesNotMatch(relatoriosPage, /campanhaFilter/);
+    assert.doesNotMatch(relatoriosPage, /trilhaFilter/);
 
     const skippedTranscriptResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/transcript`, {
       method: "POST",
@@ -396,6 +582,16 @@ async function main() {
     assert.equal(testDispatchResponse.status, 202);
     const testDispatchPayload = await testDispatchResponse.json();
     assert.equal(testDispatchPayload.dispatch_job.id, "dispatch-1");
+
+    const groupProgressResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/video-progress`);
+    assert.equal(groupProgressResponse.status, 200);
+    const groupProgressPayload = await groupProgressResponse.json();
+    assert.equal(groupProgressPayload.current.trilha, "Trilha A");
+    assert.equal(groupProgressPayload.current.next_video.id, "video-a2");
+    assert.equal(groupProgressPayload.history[0].trilha, "Trilha B");
+
+    const missingGroupProgressResponse = await fetch(`http://127.0.0.1:${port}/groups/group-missing/video-progress`);
+    assert.equal(missingGroupProgressResponse.status, 404);
 
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);

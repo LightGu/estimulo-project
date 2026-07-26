@@ -171,10 +171,7 @@
           <!-- ETAPA 2: geração de legendas -->
           <div id="stepCaptions" style="display:none;">
             <section class="page-section">
-              <div style="display:flex;justify-content:space-between;align-items:center;">
-                <p class="breadcrumb">Automação / Disparar campanha / Geração de legendas</p>
-                <button class="btn btn-secondary btn-sm" id="backToConfigButton" type="button">← Voltar para grupos</button>
-              </div>
+              <p class="breadcrumb">Automação / Disparar campanha / Geração de legendas</p>
               <div class="section-head">
                 <div>
                   <h2>Acompanhamento de Geração de Legendas</h2>
@@ -250,6 +247,10 @@
                 <button class="btn" id="startSendButton" type="button">Iniciar envio dos vídeos</button>
               </div>
             </section>
+
+            <div style="display:flex;justify-content:flex-start;margin-top:4px;">
+              <button class="btn btn-secondary btn-sm" id="backToConfigButton" type="button">← Voltar para grupos</button>
+            </div>
           </div>
         </main>
       </div>
@@ -275,7 +276,6 @@
       </div>
     </div>
 
-    <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
     <script>
       const ICONS = {
@@ -290,6 +290,14 @@
 
       const SEGMENT_BADGE = { "Pré-Infância": "badge-info", "Infância": "badge-warning", "Adolescência/Maturidade": "badge-success" };
 
+      const state = {
+        groups: [],
+        organizations: [],
+        trailsByProfile: new Map(),
+        progressByGroup: new Map(),
+        currentCampaignIds: [],
+      };
+
       let selectedGroupId = null;
       let editingTrilhaGroupId = null;
       let periods = [
@@ -300,77 +308,90 @@
       let captionItems = [];
       let captionFilter = "todos";
 
+      function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
+      }
+
       function wrapSegmento(seg) {
         return seg ? seg.replace("/", "/​") : seg;
       }
 
       function orgName(id) {
-        const org = MOCK.organizations.find((o) => o.id === id);
+        const org = state.organizations.find((o) => o.id === id);
         return org ? org.nome : "—";
       }
 
-      function trailsForGroup(group) {
-        const current = group.trilha ? MOCK.trails.find((t) => t.nome === group.trilha) : null;
-        if (!current) return MOCK.trails;
-        return MOCK.trails.filter((t) => t.perfil === current.perfil);
-      }
-
       function eligibleGroups() {
-        return MOCK.groups.filter((g) => g.classificado && g.enviaVideo);
+        return state.groups.filter((g) => g.segmento && g.envia_video === true);
       }
 
-      function eligibleVideosOf(trailName) {
-        const trail = MOCK.trails.find((t) => t.nome === trailName);
-        if (!trail) return [];
-        return trail.subtemas.flatMap((s) => s.videos.filter((v) => v.aprovacaoStatus === "aprovado").map((v) => ({ ...v, subtemaNome: s.nome })));
+      const VISIBLE_TRAIL_PROFILES_BY_SEGMENT = {
+        "Pré-Infância": ["Pré-Infância", "Todos", "Pré-Infância/Infância"],
+        "Infância": ["Infância", "Infância (setorial)", "Infância/Adolescência", "Infância/Adolescência (setorial)", "Todos"],
+        "Adolescente": ["Adolescência", "Adolescência/Maturidade", "Infância/Adolescência", "Todos"],
+        "Maturidade": ["Adolescência", "Adolescência/Maturidade", "Infância/Adolescência", "Todos"],
+      };
+
+      function visibleTrailProfilesForSegment(segmento) {
+        return VISIBLE_TRAIL_PROFILES_BY_SEGMENT[segmento] || (segmento ? [segmento] : []);
       }
 
-      function deliveriesOf(groupId, trailName) {
-        return MOCK.groupVideoDeliveries.filter((d) => d.groupId === groupId && d.trilha === trailName);
+      async function loadTrailsForSingleProfile(profile) {
+        try {
+          const trails = await requestJson(`/video-catalog/trails?perfil=${encodeURIComponent(profile)}`);
+          return Array.isArray(trails) ? trails : [];
+        } catch (error) {
+          return [];
+        }
       }
 
-      function trailStatusForGroup(groupId, trailName) {
-        const videos = eligibleVideosOf(trailName);
-        const delivered = deliveriesOf(groupId, trailName);
-        const deliveredMap = new Map(delivered.map((d) => [d.videoId, d.enviadoEm]));
-        let nextAssigned = false;
-        const rows = videos.map((v) => {
-          if (deliveredMap.has(v.id)) return { ...v, status: "enviado", enviadoEm: deliveredMap.get(v.id) };
-          if (!nextAssigned) {
-            nextAssigned = true;
-            return { ...v, status: "proximo", enviadoEm: null };
-          }
-          return { ...v, status: "pendente", enviadoEm: null };
+      async function loadTrailsForProfile(segmento) {
+        if (!segmento) return [];
+        if (state.trailsByProfile.has(segmento)) return state.trailsByProfile.get(segmento);
+
+        const profiles = visibleTrailProfilesForSegment(segmento);
+        const results = await Promise.all(profiles.map(loadTrailsForSingleProfile));
+        const seenTrilhas = new Set();
+        const list = results.flat().filter((trail) => {
+          if (!trail || seenTrilhas.has(trail.trilha)) return false;
+          seenTrilhas.add(trail.trilha);
+          return true;
         });
-        return {
-          rows,
-          total: videos.length,
-          enviados: delivered.length,
-          nextVideo: rows.find((r) => r.status === "proximo") || null,
-          concluida: videos.length > 0 && delivered.length >= videos.length,
-        };
+
+        state.trailsByProfile.set(segmento, list);
+        return list;
       }
 
-      function dispatchBlockReason(g) {
-        if (!g.trilha) return "Nenhuma trilha selecionada para este grupo.";
-        const status = trailStatusForGroup(g.id, g.trilha);
-        if (status.total === 0) return `A trilha '${g.trilha}' ainda não tem vídeos aprovados disponíveis.`;
-        if (status.concluida) return `A trilha '${g.trilha}' já foi concluída para este grupo — escolha uma nova trilha.`;
+      async function loadProgressForGroup(groupId) {
+        if (state.progressByGroup.has(groupId)) return state.progressByGroup.get(groupId);
+
+        const progress = await requestJson(`/groups/${encodeURIComponent(groupId)}/video-progress`);
+        state.progressByGroup.set(groupId, progress);
+        return progress;
+      }
+
+      function dispatchBlockReason(g, progress) {
+        if (!g.trilha_override) return "Nenhuma trilha selecionada para este grupo.";
+        if (!progress || !progress.current) return "Nenhuma trilha selecionada para este grupo.";
+        if (progress.current.total === 0) return `A trilha '${g.trilha_override}' ainda não tem vídeos aprovados disponíveis.`;
+        if (progress.current.concluida) return `A trilha '${g.trilha_override}' já foi concluída para este grupo — escolha uma nova trilha.`;
         return null;
-      }
-
-      function historyForGroup(groupId) {
-        const trilhas = [...new Set(MOCK.groupVideoDeliveries.filter((d) => d.groupId === groupId).map((d) => d.trilha))];
-        return trilhas
-          .map((trilha) => {
-            const status = trailStatusForGroup(groupId, trilha);
-            const dates = MOCK.groupVideoDeliveries
-              .filter((d) => d.groupId === groupId && d.trilha === trilha)
-              .map((d) => d.enviadoEm)
-              .sort();
-            return { trilha, enviados: status.enviados, total: status.total, concluida: status.concluida, ultimaData: dates[dates.length - 1] };
-          })
-          .sort((a, b) => (a.ultimaData < b.ultimaData ? 1 : -1));
       }
 
       // ---------- Etapa 1: renderização ----------
@@ -401,7 +422,7 @@
         renderPeriodChips();
       });
 
-      function renderGroupList() {
+      async function renderGroupList() {
         const groups = eligibleGroups();
         document.getElementById("groupCountBadge").textContent = `${groups.length} grupo(s)`;
 
@@ -409,15 +430,16 @@
 
         document.getElementById("groupList").innerHTML = groups
           .map((g) => {
-            const blockReason = dispatchBlockReason(g);
+            const progress = state.progressByGroup.get(g.id) || null;
+            const blockReason = dispatchBlockReason(g, progress);
             return `
             <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}">
               <td class="strong group-name-cell">
-                <div class="ellipsis" title="${g.nome}">${g.nome}${blockReason ? `<span class="block-flag" title="${blockReason}">${icon("warning")}</span>` : ""}</div>
-                <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${orgName(g.organizationId)}">${orgName(g.organizationId)}</div>
+                <div class="ellipsis" title="${escapeHtml(g.nome)}">${escapeHtml(g.nome)}${blockReason ? `<span class="block-flag" title="${escapeHtml(blockReason)}">${icon("warning")}</span>` : ""}</div>
+                <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
               </td>
               <td><span class="badge badge-wrap ${SEGMENT_BADGE[g.segmento] || "badge-neutral"}">${wrapSegmento(g.segmento) || "Sem perfil"}</span></td>
-              <td class="group-name-cell"><div class="ellipsis" title="${g.trilha || ""}">${g.trilha || '<span class="text-faint">Sem trilha</span>'}</div></td>
+              <td class="group-name-cell"><div class="ellipsis" title="${escapeHtml(g.trilha_override || "")}">${g.trilha_override ? escapeHtml(g.trilha_override) : '<span class="text-faint">Sem trilha</span>'}</div></td>
               <td class="chevron-cell">${icon("chevron")}</td>
             </tr>`;
           })
@@ -433,16 +455,41 @@
         );
       }
 
-      function renderDetail() {
+      async function preloadProgressForEligibleGroups() {
+        const groups = eligibleGroups();
+        await Promise.all(
+          groups.map(async (g) => {
+            try {
+              await loadProgressForGroup(g.id);
+            } catch (error) {
+              state.progressByGroup.set(g.id, { current: null, history: [] });
+            }
+          })
+        );
+      }
+
+      async function renderDetail() {
         const detailCard = document.getElementById("detailCard");
-        const group = MOCK.groups.find((g) => g.id === selectedGroupId);
+        const group = state.groups.find((g) => g.id === selectedGroupId);
         if (!group) {
           detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Nenhum grupo selecionado</strong></div></div>`;
           return;
         }
 
-        const history = historyForGroup(group.id);
-        const status = group.trilha ? trailStatusForGroup(group.id, group.trilha) : null;
+        detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Carregando progresso...</strong></div></div>`;
+
+        let progress;
+        try {
+          progress = await loadProgressForGroup(group.id);
+        } catch (error) {
+          detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Falha ao carregar progresso</strong><span>${escapeHtml(error.message)}</span></div></div>`;
+          return;
+        }
+
+        if (selectedGroupId !== group.id) return;
+
+        const history = progress.history || [];
+        const status = progress.current || null;
         const editingThis = editingTrilhaGroupId === group.id;
 
         const historyHtml = history.length
@@ -457,10 +504,10 @@
                       .map(
                         (h) => `
                       <tr>
-                        <td class="strong">${h.trilha}</td>
+                        <td class="strong">${escapeHtml(h.trilha)}</td>
                         <td>${h.enviados}/${h.total} vídeos</td>
                         <td>${h.concluida ? '<span class="badge badge-success">Concluída</span>' : '<span class="badge badge-warning">Parcial</span>'}</td>
-                        <td class="mono">${h.ultimaData}</td>
+                        <td class="mono">${escapeHtml(h.ultima_atividade || "—")}</td>
                       </tr>`
                       )
                       .join("")}
@@ -470,26 +517,31 @@
             </details>`
           : `<p class="text-faint" style="font-size:12.5px;">Nenhuma trilha executada anteriormente neste grupo.</p>`;
 
+        let trilhaOptions = [];
+        if (editingThis) {
+          trilhaOptions = await loadTrailsForProfile(group.segmento);
+        }
+
         const trilhaSelectHtml = editingThis
           ? `
             <div class="trilha-select-row">
               <select id="trilhaChangeSelect" style="max-width:260px;">
                 <option value="">Selecionar trilha</option>
-                ${trailsForGroup(group).map((t) => `<option value="${t.nome}"${t.nome === group.trilha ? " selected" : ""}>${t.nome}</option>`).join("")}
+                ${trilhaOptions.map((t) => `<option value="${escapeHtml(t.trilha)}"${t.trilha === group.trilha_override ? " selected" : ""}>${escapeHtml(t.trilha)}</option>`).join("")}
               </select>
               <button class="btn btn-sm" id="confirmTrilhaChange" type="button">Confirmar</button>
               <button class="btn btn-ghost btn-sm" id="cancelTrilhaChange" type="button">Cancelar</button>
             </div>`
           : `
             <div class="trilha-select-row">
-              <strong style="font-size:14px;">${group.trilha || "Nenhuma trilha selecionada"}</strong>
-              <button class="btn btn-secondary btn-sm" id="toggleTrilhaChange" type="button">${icon("refresh")} ${group.trilha ? "Alterar trilha" : "Selecionar trilha"}</button>
+              <strong style="font-size:14px;">${group.trilha_override ? escapeHtml(group.trilha_override) : "Nenhuma trilha selecionada"}</strong>
+              <button class="btn btn-secondary btn-sm" id="toggleTrilhaChange" type="button">${icon("refresh")} ${group.trilha_override ? "Alterar trilha" : "Selecionar trilha"}</button>
             </div>`;
 
         let progressHtml = "";
         let videosTableHtml = "";
 
-        if (group.trilha && status) {
+        if (group.trilha_override && status) {
           if (status.total === 0) {
             progressHtml = `<div class="callout callout-warning" style="margin-top:12px;">Esta trilha ainda não tem vídeos aprovados disponíveis para envio.</div>`;
           } else {
@@ -513,7 +565,7 @@
                         (v, i) => `
                       <tr class="${v.status === "proximo" ? "video-row-next" : ""}">
                         <td>${i + 1}</td>
-                        <td class="${v.status === "proximo" ? "strong" : ""}">${v.subtemaNome} — ${v.arquivo}</td>
+                        <td class="${v.status === "proximo" ? "strong" : ""}">${escapeHtml(v.nome_do_arquivo)}</td>
                         <td>${
                           v.status === "enviado"
                             ? '<span class="badge badge-success">Enviado</span>'
@@ -521,7 +573,7 @@
                             ? '<span class="badge badge-success">Próximo a enviar</span>'
                             : '<span class="badge badge-neutral">Pendente</span>'
                         }</td>
-                        <td class="mono">${v.enviadoEm || "—"}</td>
+                        <td class="mono">${escapeHtml(v.enviado_em || "—")}</td>
                       </tr>`
                       )
                       .join("")}
@@ -537,7 +589,7 @@
 
         detailCard.innerHTML = `
           <div class="card-header">
-            <h3>${group.nome} <span class="badge ${SEGMENT_BADGE[group.segmento] || "badge-neutral"}" style="margin-left:8px;">${group.segmento || "Sem perfil"}</span></h3>
+            <h3>${escapeHtml(group.nome)} <span class="badge ${SEGMENT_BADGE[group.segmento] || "badge-neutral"}" style="margin-left:8px;">${escapeHtml(group.segmento || "Sem perfil")}</span></h3>
             <span class="badge badge-info">Envia vídeo ✓</span>
           </div>
           <div class="card-body">
@@ -549,15 +601,31 @@
             ${videosTableHtml}
           </div>`;
 
-        document.querySelector("details.trail-history")?.addEventListener("toggle", () => {});
-
         if (editingThis) {
-          document.getElementById("confirmTrilhaChange").addEventListener("click", () => {
-            group.trilha = document.getElementById("trilhaChangeSelect").value || null;
-            editingTrilhaGroupId = null;
-            renderGroupList();
-            renderDetail();
-            // TODO: PATCH /groups/:id { trilha_override: group.trilha }
+          document.getElementById("confirmTrilhaChange").addEventListener("click", async () => {
+            const novaTrilha = document.getElementById("trilhaChangeSelect").value || null;
+            const confirmButton = document.getElementById("confirmTrilhaChange");
+            confirmButton.disabled = true;
+
+            try {
+              const updatedGroup = await requestJson(`/groups/${encodeURIComponent(group.id)}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ trilha_override: novaTrilha }),
+              });
+
+              const index = state.groups.findIndex((item) => item.id === group.id);
+              if (index >= 0) state.groups[index] = updatedGroup;
+              state.progressByGroup.delete(group.id);
+              editingTrilhaGroupId = null;
+
+              await loadProgressForGroup(group.id);
+              renderGroupList();
+              renderDetail();
+            } catch (error) {
+              alert(error.message);
+              confirmButton.disabled = false;
+            }
           });
           document.getElementById("cancelTrilhaChange").addEventListener("click", () => {
             editingTrilhaGroupId = null;
@@ -571,78 +639,162 @@
         }
       }
 
+      function parseDateOnly(value) {
+        const [year, month, day] = value.split("-").map(Number);
+        return new Date(year, (month || 1) - 1, day || 1);
+      }
+
+      function startOfDay(date) {
+        return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+      }
+
       function validateDispatch() {
         const errors = [];
-        if (!document.getElementById("dispatchDate").value) errors.push("Selecione a data do disparo.");
+        const dispatchDateValue = document.getElementById("dispatchDate").value;
+        const now = new Date();
+
+        if (!dispatchDateValue) {
+          errors.push("Selecione a data do disparo.");
+        } else {
+          const dispatchDate = parseDateOnly(dispatchDateValue);
+          const today = startOfDay(now);
+
+          if (dispatchDate < today) {
+            errors.push("A data do disparo não pode ser anterior à data atual.");
+          } else if (dispatchDate.getTime() === today.getTime()) {
+            const minStart = new Date(now.getTime() + 15 * 60000);
+
+            periods.forEach((p) => {
+              const [h, m] = p.inicio.split(":").map(Number);
+              const periodStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, m);
+
+              if (periodStart < minStart) {
+                errors.push(`Período ${p.inicio}–${p.fim}: horário de início deve ser pelo menos 15 minutos a partir de agora.`);
+              }
+            });
+          }
+        }
+
         if (!periods.length) errors.push("Adicione ao menos um período de envio.");
 
         eligibleGroups().forEach((g) => {
-          const reason = dispatchBlockReason(g);
+          const progress = state.progressByGroup.get(g.id) || null;
+          const reason = dispatchBlockReason(g, progress);
           if (reason) errors.push(`${g.nome}: ${reason}`);
         });
         return errors;
       }
 
-      document.getElementById("dispatchButton").addEventListener("click", () => {
+      document.getElementById("dispatchButton").addEventListener("click", async () => {
         const errors = validateDispatch();
         const callout = document.getElementById("validationCallout");
         if (errors.length) {
           callout.style.display = "flex";
-          callout.innerHTML = `<div><strong>Não é possível disparar a campanha ainda:</strong><ul style="margin:6px 0 0 18px;padding:0;">${errors.map((e) => `<li>${e}</li>`).join("")}</ul></div>`;
+          callout.innerHTML = `<div><strong>Não é possível disparar a campanha ainda:</strong><ul style="margin:6px 0 0 18px;padding:0;">${errors.map((e) => `<li>${escapeHtml(e)}</li>`).join("")}</ul></div>`;
           return;
         }
         callout.style.display = "none";
 
-        dispatchGroups = eligibleGroups().map((g) => ({ group: g, video: trailStatusForGroup(g.id, g.trilha).nextVideo }));
-        buildCaptionItems();
-        goToStep(2);
-        // TODO: POST /campaigns/dispatch { data, periodos, delay_min_min, delay_max_min, group_ids: [...] }
+        const groups = eligibleGroups();
+        dispatchGroups = groups.map((g) => {
+          const progress = state.progressByGroup.get(g.id) || null;
+          const nextVideo = progress && progress.current ? progress.current.next_video : null;
+          const video = nextVideo
+            ? { ...nextVideo, arquivo: nextVideo.nome_do_arquivo, subtemaNome: nextVideo.trilha || "Conteúdo" }
+            : null;
+          return { group: g, video };
+        });
+
+        const dispatchButton = document.getElementById("dispatchButton");
+        dispatchButton.disabled = true;
+
+        try {
+          const dataEnvio = document.getElementById("dispatchDate").value;
+          const delayMinMin = Number(document.getElementById("delayMin").value);
+          const delayMaxMin = Number(document.getElementById("delayMax").value);
+          const firstPeriod = periods[0] || {};
+          const executionAt = new Date(`${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`);
+
+          const result = await requestJson("/campaigns/dispatch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              execution_at: executionAt.toISOString(),
+              group_ids: groups.map((g) => g.id),
+              time_window: {
+                start: `${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`,
+                end: `${dataEnvio}T${(periods[periods.length - 1] || firstPeriod).fim || "17:00"}:00`,
+              },
+              jitter_delay_min_ms: delayMinMin * 60000,
+              jitter_delay_max_ms: delayMaxMin * 60000,
+            }),
+          });
+
+          state.currentCampaignIds = [result.campaign.id];
+          goToStep(2);
+          startCaptionPolling();
+        } catch (error) {
+          callout.style.display = "flex";
+          callout.innerHTML = `<div><strong>Falha ao disparar a campanha:</strong> ${escapeHtml(error.message)}</div>`;
+        } finally {
+          dispatchButton.disabled = false;
+        }
       });
 
       // ---------- Etapa 2: geração de legendas ----------
 
-      const CAPTION_TEMPLATES = [
-        (v) => `Vamos juntos nessa jornada! Conteúdo prático de ${v.subtemaNome.toLowerCase()} para o seu grupo evoluir 🚀`,
-        (v) => `${v.subtemaNome}: o próximo passo para o seu negócio crescer. Vamos nessa?`,
-        (v) => `Hoje é dia de ${v.subtemaNome.toLowerCase()}! Conteúdo direto ao ponto para aplicar agora mesmo.`,
-        (v) => `Prepare-se: chegou a pílula sobre ${v.subtemaNome.toLowerCase()}. Assista e coloque em prática ainda hoje.`,
-      ];
+      let captionPollingInterval = null;
 
-      function generateCaption(item, index) {
-        const template = CAPTION_TEMPLATES[index % CAPTION_TEMPLATES.length];
-        return template(item.video);
+      function mapCaptionRowToItem(row, campaignId) {
+        const group = row.groups || {};
+        const video = row.video_catalog || {};
+        return {
+          id: row.id,
+          campaignId,
+          groupNome: group.nome || "—",
+          trilha: video.trilha || "",
+          video: { arquivo: video.nome_do_arquivo || "—", subtemaNome: video.trilha || "Conteúdo" },
+          legenda: row.caption_text || null,
+          status: row.status === "gerado" ? "gerado" : row.status === "erro" ? "erro" : "pendente",
+        };
       }
 
-      function buildCaptionItems() {
-        captionItems = dispatchGroups
-          .filter((d) => d.video)
-          .map((d, i) => ({
-            id: `cap-${i}`,
-            groupNome: d.group.nome,
-            trilha: d.group.trilha,
-            video: d.video,
-            legenda: null,
-            status: "pendente",
-          }));
+      async function refreshCaptionProgress() {
+        if (!state.currentCampaignIds.length) return;
 
-        captionItems.forEach((item, i) => {
-          const isLastAndMultiple = captionItems.length > 1 && i === captionItems.length - 1;
-          if (!isLastAndMultiple) {
-            item.legenda = generateCaption(item, i);
-            item.status = "gerado";
+        try {
+          const progressList = await Promise.all(
+            state.currentCampaignIds.map((campaignId) =>
+              requestJson(`/campaigns/${encodeURIComponent(campaignId)}/captions/progress`).then((progress) => ({
+                campaignId,
+                progress,
+              }))
+            )
+          );
+
+          captionItems = progressList.flatMap(({ campaignId, progress }) =>
+            (progress.items || []).map((row) => mapCaptionRowToItem(row, campaignId))
+          );
+          const totalPendente = progressList.reduce((sum, { progress }) => sum + (progress.pendente || 0), 0);
+          const allStarted = progressList.every(({ progress }) => progress.total > 0);
+
+          renderCaptionStats();
+          renderCaptions();
+
+          const startSendButton = document.getElementById("startSendButton");
+          startSendButton.disabled = !allStarted || totalPendente > 0;
+
+          if (allStarted && totalPendente === 0 && captionPollingInterval) {
+            clearInterval(captionPollingInterval);
+            captionPollingInterval = null;
           }
-        });
-
-        if (captionItems.length > 1) {
-          setTimeout(() => {
-            const last = captionItems[captionItems.length - 1];
-            last.legenda = generateCaption(last, captionItems.length - 1);
-            last.status = "gerado";
-            renderCaptions();
-            renderCaptionStats();
-          }, 1800);
+        } catch (error) {
+          // Mantém o último estado renderizado; tenta novamente no próximo tick.
         }
+      }
 
+      function startCaptionPolling() {
+        if (captionPollingInterval) clearInterval(captionPollingInterval);
         captionFilter = "todos";
         document.querySelectorAll("#captionFilterTabs button").forEach((b) => b.classList.toggle("active", b.dataset.filter === "todos"));
         document.getElementById("captionSearch").value = "";
@@ -650,6 +802,17 @@
         document.getElementById("sendSuccessCallout").style.display = "none";
         document.getElementById("stepLegendas").className = "step active";
         document.getElementById("stepEnvio").className = "step";
+        document.getElementById("startSendButton").disabled = true;
+
+        refreshCaptionProgress();
+        captionPollingInterval = setInterval(refreshCaptionProgress, 3000);
+      }
+
+      function stopCaptionPolling() {
+        if (captionPollingInterval) {
+          clearInterval(captionPollingInterval);
+          captionPollingInterval = null;
+        }
       }
 
       function renderCaptionStats() {
@@ -667,9 +830,16 @@
 
       function matchesCaptionFilters(item) {
         const q = document.getElementById("captionSearch").value.trim().toLowerCase();
-        if (captionFilter !== "todos" && item.status !== captionFilter) return false;
+        if (captionFilter === "gerado" && item.status !== "gerado") return false;
+        if (captionFilter === "pendente" && item.status === "gerado") return false;
         if (q && !(item.groupNome.toLowerCase().includes(q) || item.video.arquivo.toLowerCase().includes(q) || item.video.subtemaNome.toLowerCase().includes(q))) return false;
         return true;
+      }
+
+      function captionStatusBadge(item) {
+        if (item.status === "gerado") return '<span class="badge badge-success">Gerado</span>';
+        if (item.status === "erro") return '<span class="badge badge-danger">Erro</span>';
+        return '<span class="badge badge-warning">Processando</span>';
       }
 
       function renderCaptions() {
@@ -677,7 +847,9 @@
         document.getElementById("captionCountBadge").textContent = `${captionItems.length} vídeo(s)`;
 
         if (!filtered.length) {
-          document.getElementById("captionsBody").innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Nenhum vídeo encontrado</strong><span>Ajuste os filtros ou a busca.</span></div></td></tr>`;
+          document.getElementById("captionsBody").innerHTML = captionItems.length
+            ? `<tr><td colspan="5"><div class="empty-state"><strong>Nenhum vídeo encontrado</strong><span>Ajuste os filtros ou a busca.</span></div></td></tr>`
+            : `<tr><td colspan="5"><div class="empty-state"><strong>Preparando os vídeos da campanha...</strong><span>As legendas estão sendo geradas, aguarde.</span></div></td></tr>`;
           return;
         }
 
@@ -685,16 +857,18 @@
           .map((item) => {
             const legendaCell =
               item.status === "gerado"
-                ? `${item.legenda}<br><span class="text-faint" style="font-size:11px;">${item.legenda.length} caracteres</span>`
-                : `<span class="text-faint" style="font-style:italic;">Aguardando geração da legenda...</span>`;
+                ? `${escapeHtml(item.legenda)}<br><span class="text-faint" style="font-size:11px;">${item.legenda.length} caracteres</span>`
+                : item.status === "erro"
+                ? `<span class="text-faint" style="font-style:italic;">Falha ao gerar legenda. Edite manualmente.</span>`
+                : `<span class="text-faint" style="font-style:italic;">Processando...</span>`;
             return `
             <tr>
               <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size:11.5px;">${item.trilha}</span></td>
               <td>${item.video.subtemaNome}<br><span class="mono text-faint" style="font-size:11.5px;">${item.video.arquivo}</span></td>
               <td style="max-width:280px;">${legendaCell}</td>
-              <td>${item.status === "gerado" ? '<span class="badge badge-success">Gerado</span>' : '<span class="badge badge-warning">Pendente</span>'}</td>
+              <td>${captionStatusBadge(item)}</td>
               <td>${
-                item.status === "gerado"
+                item.status !== "processando"
                   ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>`
                   : '<span class="text-faint">—</span>'
               }</td>
@@ -716,9 +890,11 @@
       document.getElementById("captionSearch").addEventListener("input", renderCaptions);
 
       let editingCaptionId = null;
+      let editingCaptionCampaignId = null;
       function openCaptionModal(itemId) {
         const item = captionItems.find((i) => i.id === itemId);
         editingCaptionId = itemId;
+        editingCaptionCampaignId = item.campaignId;
         document.getElementById("captionModalTitle").textContent = "Editar legenda";
         document.getElementById("captionModalMeta").textContent = `${item.groupNome} · ${item.video.subtemaNome} — ${item.video.arquivo}`;
         document.getElementById("captionModalText").value = item.legenda || "";
@@ -727,20 +903,31 @@
       function closeCaptionModal() {
         document.getElementById("captionOverlay").hidden = true;
         editingCaptionId = null;
+        editingCaptionCampaignId = null;
       }
       document.getElementById("closeCaptionModal").addEventListener("click", closeCaptionModal);
       document.getElementById("cancelCaptionModal").addEventListener("click", closeCaptionModal);
-      document.getElementById("saveCaptionModal").addEventListener("click", () => {
-        const item = captionItems.find((i) => i.id === editingCaptionId);
-        item.legenda = document.getElementById("captionModalText").value;
-        item.status = "gerado";
-        closeCaptionModal();
-        renderCaptions();
-        renderCaptionStats();
-        // TODO: PATCH /video-catalog/videos/:id { legenda }
+      document.getElementById("saveCaptionModal").addEventListener("click", async () => {
+        const saveButton = document.getElementById("saveCaptionModal");
+        const captionText = document.getElementById("captionModalText").value;
+        saveButton.disabled = true;
+
+        try {
+          await requestJson(`/campaigns/${encodeURIComponent(editingCaptionCampaignId)}/captions/${encodeURIComponent(editingCaptionId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ caption_text: captionText }),
+          });
+          closeCaptionModal();
+          await refreshCaptionProgress();
+        } catch (error) {
+          alert(error.message);
+        } finally {
+          saveButton.disabled = false;
+        }
       });
 
-      document.getElementById("startSendButton").addEventListener("click", () => {
+      document.getElementById("startSendButton").addEventListener("click", async () => {
         const pendentes = captionItems.filter((i) => i.status !== "gerado").length;
         const warningCallout = document.getElementById("sendWarningCallout");
         if (pendentes > 0) {
@@ -750,35 +937,59 @@
           return;
         }
         warningCallout.style.display = "none";
-        applyDispatch();
+        await confirmDispatch();
       });
 
-      function randomTimeInPeriods() {
-        if (!periods.length) return null;
-        const p = periods[Math.floor(Math.random() * periods.length)];
-        return p.inicio;
+      async function confirmDispatch() {
+        const startSendButton = document.getElementById("startSendButton");
+        const warningCallout = document.getElementById("sendWarningCallout");
+        startSendButton.disabled = true;
+
+        try {
+          const dataEnvio = document.getElementById("dispatchDate").value;
+          const firstPeriod = periods[0] || {};
+          const executionAt = new Date(`${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`);
+          const delayMinMin = Number(document.getElementById("delayMin").value);
+          const delayMaxMin = Number(document.getElementById("delayMax").value);
+
+          await Promise.all(
+            state.currentCampaignIds.map((campaignId) =>
+              requestJson(`/campaigns/${encodeURIComponent(campaignId)}/dispatch/confirm`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  execution_at: executionAt.toISOString(),
+                  time_window: {
+                    start: `${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`,
+                    end: `${dataEnvio}T${(periods[periods.length - 1] || firstPeriod).fim || "17:00"}:00`,
+                  },
+                  jitter_delay_min_ms: delayMinMin * 60000,
+                  jitter_delay_max_ms: delayMaxMin * 60000,
+                }),
+              })
+            )
+          );
+
+          stopCaptionPolling();
+          document.getElementById("stepLegendas").className = "step done";
+          document.getElementById("stepLegendas").querySelector(".step-num").textContent = "✓";
+          document.getElementById("stepEnvio").className = "step active";
+
+          const successCallout = document.getElementById("sendSuccessCallout");
+          successCallout.style.display = "flex";
+          successCallout.innerHTML = `Envio iniciado com sucesso! <strong>${captionItems.length}</strong> vídeo(s) programado(s) para ${dataEnvio} nos períodos configurados. Acompanhe em <a href="relatorios.html">Relatório operacional</a>.`;
+        } catch (error) {
+          warningCallout.style.display = "flex";
+          warningCallout.className = "callout callout-danger";
+          warningCallout.textContent = `Falha ao iniciar o envio: ${error.message}`;
+          startSendButton.disabled = false;
+        }
       }
 
-      function applyDispatch() {
-        const dataEnvio = document.getElementById("dispatchDate").value;
-        dispatchGroups.forEach(({ group, video }) => {
-          if (!video) return;
-          MOCK.groupVideoDeliveries.push({ groupId: group.id, trilha: group.trilha, videoId: video.id, enviadoEm: dataEnvio });
-          group.horarioProgramado = randomTimeInPeriods();
-        });
-
-        document.getElementById("stepLegendas").className = "step done";
-        document.getElementById("stepLegendas").querySelector(".step-num").textContent = "✓";
-        document.getElementById("stepEnvio").className = "step active";
-
-        const successCallout = document.getElementById("sendSuccessCallout");
-        successCallout.style.display = "flex";
-        successCallout.innerHTML = `Envio iniciado com sucesso! <strong>${captionItems.length}</strong> vídeo(s) programado(s) para ${dataEnvio} nos períodos configurados. Acompanhe em <a href="relatorios.html">Relatório operacional</a>.`;
-        document.getElementById("startSendButton").disabled = true;
-        // TODO: POST /dispatch/execute { campaign batch já validado } — worker assíncrono cuida do jitter/randomização
-      }
-
-      document.getElementById("backToConfigButton").addEventListener("click", () => goToStep(1));
+      document.getElementById("backToConfigButton").addEventListener("click", () => {
+        stopCaptionPolling();
+        goToStep(1);
+      });
 
       function goToStep(step) {
         document.getElementById("stepConfig").style.display = step === 1 ? "block" : "none";
@@ -786,17 +997,36 @@
         if (step === 1) {
           renderGroupList();
           renderDetail();
-        } else {
-          document.getElementById("startSendButton").disabled = false;
-          renderCaptionStats();
-          renderCaptions();
         }
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
 
-      renderPeriodChips();
-      renderGroupList();
-      renderDetail();
+      function renderLoadError(error) {
+        document.getElementById("groupList").innerHTML = `
+          <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+      }
+
+      async function initialize() {
+        renderPeriodChips();
+
+        try {
+          const [groups, organizations] = await Promise.all([
+            requestJson("/groups/search"),
+            requestJson("/organizations"),
+          ]);
+          state.groups = Array.isArray(groups) ? groups : [];
+          state.organizations = Array.isArray(organizations) ? organizations : [];
+
+          await preloadProgressForEligibleGroups();
+
+          await renderGroupList();
+          await renderDetail();
+        } catch (error) {
+          renderLoadError(error);
+        }
+      }
+
+      initialize();
     </script>
   </body>
 </html>

@@ -111,7 +111,10 @@ function createVideoCaptionsService(dependencies = {}) {
 
     const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
     const todayStart = getStartOfTodayInTimeZone(now, options.timeZone || timeZone);
-    const captions = await repository.listUnusedTodayByVideo(videoId, todayStart);
+    const excludeCaptionIds = new Set((options.excludeCaptionIds || []).filter(Boolean));
+    const captions = (await repository.listUnusedTodayByVideo(videoId, todayStart)).filter(
+      (candidate) => !excludeCaptionIds.has(candidate.id)
+    );
     const shouldReviewCaption = Boolean(options.requireCaptionReview || options.transcript);
     const hasTranscriptOption = Object.prototype.hasOwnProperty.call(options, "transcript");
     let transcriptResolved = false;
