@@ -8,6 +8,7 @@ const videoCatalogRepository = require("../src/repositories/video-catalog.reposi
 const videoCaptionsRepository = require("../src/repositories/video-captions.repository");
 const groupVideoProgressRepository = require("../src/repositories/group-video-progress.repository");
 const dispatchLogsRepository = require("../src/repositories/dispatch-logs.repository");
+const campaignVideoCaptionsRepository = require("../src/repositories/campaign-video-captions.repository");
 
 function createMockClient() {
   const calls = [];
@@ -29,6 +30,14 @@ function createMockClient() {
     },
     eq(column, value) {
       calls.push({ type: "eq", column, value });
+      return this;
+    },
+    gte(column, value) {
+      calls.push({ type: "gte", column, value });
+      return this;
+    },
+    lte(column, value) {
+      calls.push({ type: "lte", column, value });
       return this;
     },
     is(column, value) {
@@ -104,15 +113,15 @@ async function main() {
     assert.ok(client.__calls.some((call) => call.type === "is" && call.column === "segmento" && call.value === null));
     await groupsRepository.delete("group-1", client);
 
-    await campaignsRepository.create({ nome: "Campanha", organization_id: "org-1", ativo: true }, client);
+    await campaignsRepository.create({ nome: "Campanha", ativo: true }, client);
     await campaignsRepository.update("camp-1", { ativo: false }, client);
     await campaignsRepository.findById("camp-1", client);
     await campaignsRepository.findAll(client);
     await campaignsRepository.listActive(client);
-    await campaignsRepository.listByOrganization("org-1", client);
+    await campaignsRepository.findByData("2026-07-21", client);
     await campaignsRepository.delete("camp-1", client);
 
-    await campaignGroupsRepository.associateGroup("camp-1", "group-1", client);
+    await campaignGroupsRepository.associateGroup("camp-1", "group-1", "org-1", client);
     await campaignGroupsRepository.listGroups("camp-1", client);
     await campaignGroupsRepository.removeGroup("camp-1", "group-1", client);
 
@@ -147,6 +156,7 @@ async function main() {
 
     await groupVideoProgressRepository.registerDelivery({ group_id: "group-1", video_id: "video-1" }, client);
     await groupVideoProgressRepository.listDelivered("group-1", client);
+    await groupVideoProgressRepository.listDeliveredWithVideo("group-1", client);
     await groupVideoProgressRepository.getLastVideo("group-1", client);
     await groupVideoProgressRepository.hasDuplicate("group-1", "video-1", client);
 
@@ -155,6 +165,33 @@ async function main() {
     await dispatchLogsRepository.listByCampaign("camp-1", client);
     await dispatchLogsRepository.listByGroup("group-1", client);
     await dispatchLogsRepository.listRecent(5, client);
+    await dispatchLogsRepository.listWithFilters(
+      { startDate: "2026-07-01T00:00:00.000Z", endDate: "2026-07-23T23:59:59.999Z", groupId: "group-1", status: "enviado" },
+      client
+    );
+    assert.ok(client.__calls.some((call) => call.type === "gte" && call.column === "criado_em"));
+    assert.ok(client.__calls.some((call) => call.type === "lte" && call.column === "criado_em"));
+
+    await campaignVideoCaptionsRepository.createPending(
+      { campaign_id: "camp-1", group_id: "group-1", video_id: "video-1" },
+      client
+    );
+    await campaignVideoCaptionsRepository.markGenerated(
+      "record-1",
+      { caption_id: "caption-1", caption_text: "Legenda gerada" },
+      client
+    );
+    await campaignVideoCaptionsRepository.markError("record-1", { erro_mensagem: "Falha na IA" }, client);
+    await campaignVideoCaptionsRepository.updateCaptionText("record-1", { caption_text: "Legenda editada" }, client);
+    await campaignVideoCaptionsRepository.listByCampaign("camp-1", client);
+    assert.ok(
+      client.__calls.some((call) => call.type === "from" && call.tableName === "campaign_video_captions")
+    );
+    assert.ok(
+      client.__calls.some(
+        (call) => call.type === "update" && call.payload.caption_text === "Legenda editada"
+      )
+    );
   } finally {
     // no-op
   }

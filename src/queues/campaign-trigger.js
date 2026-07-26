@@ -1,5 +1,6 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { addDispatchJob, addJitteredDispatchJobs } = require("./dispatch");
+const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const campaignsRepository = require("../repositories/campaigns.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
@@ -553,6 +554,124 @@ async function updateCampaignScheduledDispatch(campaigns, campaignId, dispatchJo
   });
 }
 
+function resolvePlannedScheduleByGroup(dispatchGroups, scheduleParams, logger = console) {
+  const plannedByKey = new Map();
+
+  if (!scheduleParams || !scheduleParams.window_start || !scheduleParams.window_end) {
+    return plannedByKey;
+  }
+
+  try {
+    const schedule = buildJitteredDispatchSchedule({
+      ...scheduleParams,
+      groups: dispatchGroups.map((group) => ({
+        group_id: group.progress_group_id,
+        video_id: group.video_id,
+        envia_video: true,
+      })),
+    });
+
+    schedule.forEach((item) => {
+      plannedByKey.set(`${item.group_id}::${item.video_id}`, item.scheduled_at);
+    });
+  } catch (error) {
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "dispatch_log.planned_schedule_failed",
+          error_message: error.message,
+        })
+      );
+  }
+
+  return plannedByKey;
+}
+
+async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
+  const {
+    campaignGroups = campaignGroupsRepository,
+    campaigns = campaignsRepository,
+    dispatchLogs = dispatchLogsRepository,
+    videoFlowRepository = buildCampaignVideoFlowRepository(options),
+    logger = console,
+  } = options;
+
+  if (!campaignId) {
+    throw new Error("campaign_id e obrigatorio para criar logs de disparo");
+  }
+
+  const campaign = campaigns && typeof campaigns.findById === "function"
+    ? await campaigns.findById(campaignId)
+    : null;
+  const campaignGroupRows = await campaignGroups.listGroups(campaignId);
+  const groups = campaignGroupRows
+    .map(extractCampaignGroup)
+    .map((group) => applyCampaignTrailFallback(group, campaign))
+    .filter(isVideoEnabledGroup);
+  const flow = await resolveGroupsVideoFlow({
+    campaign_id: campaignId,
+    groups,
+    repository: videoFlowRepository,
+    logger,
+  });
+  const plannedScheduleByKey = resolvePlannedScheduleByGroup(
+    flow.dispatchGroups,
+    {
+      execution_at: options.execution_at,
+      window_start: options.window_start,
+      window_end: options.window_end,
+      jitter_delay_min_ms: options.jitter_delay_min_ms,
+      jitter_delay_max_ms: options.jitter_delay_max_ms,
+    },
+    logger
+  );
+  const logPayloads = flow.dispatchGroups
+    .map((group) => ({
+      campaign_id: campaignId,
+      group_id: group.progress_group_id,
+      video_id: group.video_id,
+      status: "pendente",
+      mensagem_erro: null,
+      horario_envio_planejado: plannedScheduleByKey.get(`${group.progress_group_id}::${group.video_id}`) || null,
+    }))
+    .filter((payload) => payload.group_id && payload.video_id);
+
+  const existingLogs = typeof dispatchLogs.listByCampaign === "function"
+    ? await dispatchLogs.listByCampaign(campaignId)
+    : [];
+  let created = 0;
+
+  for (const payload of logPayloads) {
+    if (hasExistingDispatchLog(existingLogs, payload)) {
+      continue;
+    }
+
+    const log = await dispatchLogs.createLog(payload);
+    existingLogs.push(log || payload);
+    created += 1;
+
+    logger.info &&
+      logger.info(
+        JSON.stringify({
+          event: "dispatch_log.pending_created",
+          campaign_id: payload.campaign_id,
+          group_id: payload.group_id,
+          video_id: payload.video_id,
+          log_id: log && log.id,
+        })
+      );
+  }
+
+  return {
+    pending_logs_created: created,
+    total_campaign_groups: campaignGroupRows.length,
+    video_enabled_groups: groups.length,
+    eligible_groups: flow.dispatchGroups.length,
+    paused_groups: flow.pausedGroups.length,
+    skipped_groups: flow.skippedGroups.length,
+  };
+}
+
 function createCampaignTriggerProcessor(options = {}) {
   const {
     campaignGroups = campaignGroupsRepository,
@@ -734,12 +853,16 @@ module.exports = {
   CAMPAIGN_TRIGGER_JOB_NAME,
   CAMPAIGN_TRIGGER_TYPE_RECURRING,
   addCampaignTriggerJob,
+  applyCampaignTrailFallback,
   buildCampaignScheduleJobData,
   buildCampaignScheduleKey,
   buildCampaignTriggerJobData,
   buildCampaignVideoFlowRepository,
+  createPendingDispatchLogsForCampaign,
+  extractCampaignGroup,
   formatScheduledDateTime,
   ensurePendingDispatchLogs,
+  isVideoEnabledGroup,
   get campaignTriggerQueue() {
     return getCampaignTriggerQueue();
   },

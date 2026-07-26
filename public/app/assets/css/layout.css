@@ -8,10 +8,10 @@
 .sidebar {
   background: linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-strong) 100%);
   color: var(--sidebar-text);
-  padding: 20px 14px 20px;
+  padding: 14px 14px 12px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 10px;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -28,7 +28,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 4px 10px 10px;
+  padding: 2px 10px 6px;
 }
 
 .sidebar-brand img {
@@ -44,20 +44,9 @@
   letter-spacing: -0.01em;
 }
 
-.sidebar-env-tag {
-  margin: 0 10px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px dashed rgba(255, 255, 255, 0.25);
-  font-size: 11.5px;
-  color: var(--sidebar-text);
-  line-height: 1.4;
-}
-
 .nav-group-label {
   padding: 0 12px;
-  margin: 4px 0 6px;
+  margin: 2px 0 3px;
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -68,15 +57,15 @@
 .nav-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin-bottom: 10px;
+  gap: 1px;
+  margin-bottom: 4px;
 }
 
 .nav-link {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 12px;
+  padding: 6px 12px;
   border-radius: var(--radius-sm);
   color: var(--sidebar-text);
   text-decoration: none;
@@ -108,7 +97,7 @@
 
 .sidebar-footer {
   margin-top: auto;
-  padding: 12px 10px 4px;
+  padding: 8px 10px 2px;
   font-size: 11.5px;
   color: rgba(198, 201, 236, 0.55);
   border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -206,6 +195,11 @@
   gap: 8px;
 }
 
+.actions-bar-end {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .grid {
   display: grid;
   gap: 16px;
@@ -231,7 +225,6 @@
   .sidebar-brand span,
   .nav-link span:not(.nav-ico),
   .nav-group-label,
-  .sidebar-env-tag,
   .sidebar-footer {
     display: none;
   }
