@@ -7,6 +7,7 @@ const createGroupVideoProgressController = require("./controllers/group-video-pr
 const createHealthController = require("./controllers/health.controller");
 const createOrganizationsController = require("./controllers/organizations.controller");
 const createReportController = require("./controllers/report.controller");
+const createTrilhasController = require("./controllers/trilhas.controller");
 const createVideoCatalogController = require("./controllers/video-catalog.controller");
 const campaignsService = require("../services/campaigns.service");
 const campaignVideoCaptionsService = require("../services/campaign-video-captions.service");
@@ -14,6 +15,7 @@ const dispatchLogsService = require("../services/dispatch-logs.service");
 const groupsService = require("../services/groups.service");
 const groupVideoProgressService = require("../services/group-video-progress.service");
 const organizationsService = require("../services/organizations.service");
+const trilhasService = require("../services/trilhas.service");
 const videoCatalogService = require("../services/video-catalog.service");
 
 function createApp(dependencies = {}) {
@@ -28,6 +30,7 @@ function createApp(dependencies = {}) {
   const groupVideoProgressServiceDependency = dependencies.groupVideoProgressService || groupVideoProgressService;
   const organizationService = dependencies.organizationService || organizationsService;
   const dispatchLogsServiceDependency = dependencies.dispatchLogsService || dispatchLogsService;
+  const trilhasServiceDependency = dependencies.trilhasService || trilhasService;
   const videoService = dependencies.videoCatalogService || videoCatalogService;
   const campaignsController = createCampaignsController({ campaignService });
   const campaignVideoCaptionsController = createCampaignVideoCaptionsController({
@@ -41,6 +44,7 @@ function createApp(dependencies = {}) {
   const healthController = createHealthController(dependencies.healthController || {});
   const organizationsController = createOrganizationsController({ organizationService });
   const reportController = createReportController({ dispatchLogsService: dispatchLogsServiceDependency });
+  const trilhasController = createTrilhasController({ trilhasService: trilhasServiceDependency });
   const videoCatalogController = createVideoCatalogController({ videoCatalogService: videoService });
 
   app.get("/campaigns", campaignsController.list);
@@ -55,12 +59,17 @@ function createApp(dependencies = {}) {
   app.post("/organizations", organizationsController.create);
   app.patch("/organizations/:id", organizationsController.update);
   app.get("/reports/dispatches", reportController.listDispatches);
-  app.get("/video-catalog/trails", videoCatalogController.listTrailsByProfile);
-  app.get("/video-catalog/trails-overview", videoCatalogController.listTrailsOverview);
-  app.get("/video-catalog/unclassified", videoCatalogController.listUnclassified);
-  app.post("/video-catalog/trails", videoCatalogController.createTrailVideos);
-  app.post("/video-catalog/reorder", videoCatalogController.reorderTrailVideos);
-  app.patch("/video-catalog/:id/move-trail", videoCatalogController.moveVideoTrail);
+  app.get("/trilhas", trilhasController.listByOrganization);
+  app.get("/trilhas/overview", trilhasController.listOverview);
+  app.get("/trilhas/selectable-videos", trilhasController.listSelectableVideos);
+  app.post("/trilhas", trilhasController.createTrilha);
+  app.patch("/trilhas/:id", trilhasController.renameTrilha);
+  app.delete("/trilhas/:id", trilhasController.removeTrilha);
+  app.patch("/trilhas/:id/perfis", trilhasController.updateTrailPerfis);
+  app.post("/trilhas/:id/videos", trilhasController.addVideoToTrilha);
+  app.delete("/trilhas/:id/videos/:videoId", trilhasController.removeVideoFromTrilha);
+  app.post("/trilhas/:id/videos/:videoId/move", trilhasController.moveVideoBetweenTrilhas);
+  app.post("/trilhas/:id/reorder", trilhasController.reorderTrilhaVideos);
   app.post("/video-catalog/transcript", videoCatalogController.transcribeByDriveFileId);
   app.post("/video-catalog/:id/transcript", videoCatalogController.transcribeById);
   app.get("/groups/search", groupsController.search);

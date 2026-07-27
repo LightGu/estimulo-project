@@ -288,7 +288,7 @@
         return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
       }
 
-      const SEGMENT_BADGE = { "Pré-Infância": "badge-info", "Infância": "badge-warning", "Adolescência/Maturidade": "badge-success" };
+      const SEGMENT_BADGE = { "Pré-Infância": "badge-info", "Infância": "badge-warning", "Adolescente": "badge-success", "Maturidade": "badge-success" };
 
       const state = {
         groups: [],
@@ -341,38 +341,30 @@
         return state.groups.filter((g) => g.segmento && g.envia_video === true);
       }
 
-      const VISIBLE_TRAIL_PROFILES_BY_SEGMENT = {
-        "Pré-Infância": ["Pré-Infância", "Todos", "Pré-Infância/Infância"],
-        "Infância": ["Infância", "Infância (setorial)", "Infância/Adolescência", "Infância/Adolescência (setorial)", "Todos"],
-        "Adolescente": ["Adolescência", "Adolescência/Maturidade", "Infância/Adolescência", "Todos"],
-        "Maturidade": ["Adolescência", "Adolescência/Maturidade", "Infância/Adolescência", "Todos"],
+      const GROUP_SEGMENT_TO_TRAIL_PROFILE = {
+        "Pré-Infância": "Pré-infância",
+        "Infância": "Infância",
+        "Adolescente": "Adolescência",
+        "Maturidade": "Maturidade",
       };
 
-      function visibleTrailProfilesForSegment(segmento) {
-        return VISIBLE_TRAIL_PROFILES_BY_SEGMENT[segmento] || (segmento ? [segmento] : []);
-      }
-
-      async function loadTrailsForSingleProfile(profile) {
-        try {
-          const trails = await requestJson(`/video-catalog/trails?perfil=${encodeURIComponent(profile)}`);
-          return Array.isArray(trails) ? trails : [];
-        } catch (error) {
-          return [];
-        }
+      function trailProfileForSegment(segmento) {
+        return GROUP_SEGMENT_TO_TRAIL_PROFILE[segmento] || segmento;
       }
 
       async function loadTrailsForProfile(segmento) {
         if (!segmento) return [];
         if (state.trailsByProfile.has(segmento)) return state.trailsByProfile.get(segmento);
 
-        const profiles = visibleTrailProfilesForSegment(segmento);
-        const results = await Promise.all(profiles.map(loadTrailsForSingleProfile));
-        const seenTrilhas = new Set();
-        const list = results.flat().filter((trail) => {
-          if (!trail || seenTrilhas.has(trail.trilha)) return false;
-          seenTrilhas.add(trail.trilha);
-          return true;
-        });
+        const profile = trailProfileForSegment(segmento);
+
+        let list = [];
+        try {
+          const trails = await requestJson(`/video-catalog/trails?perfil=${encodeURIComponent(profile)}`);
+          list = Array.isArray(trails) ? trails : [];
+        } catch (error) {
+          list = [];
+        }
 
         state.trailsByProfile.set(segmento, list);
         return list;

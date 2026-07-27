@@ -6,9 +6,29 @@ const {
   DEFAULT_CAPTION_REVIEW_PROMPT,
   DEFAULT_TRANSCRIPTION_PROMPT,
 } = require("./constants");
-const { assertFetch, readResponseJson } = require("./http-utils");
+const { RateLimitError, assertFetch, readResponseJson } = require("./http-utils");
 
 const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
+
+function resolveModelCandidates(callOptions, instanceOptions) {
+  const explicit = callOptions.models || instanceOptions.models;
+
+  if (Array.isArray(explicit) && explicit.length) {
+    return explicit.filter(Boolean);
+  }
+
+  const single =
+    callOptions.model ||
+    instanceOptions.model ||
+    process.env.GEMINI_TRANSCRIPTION_MODEL ||
+    DEFAULT_GEMINI_MODEL;
+  const fallbacks = String(process.env.GEMINI_TRANSCRIPTION_MODEL_FALLBACKS || "")
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean);
+
+  return [single, ...fallbacks].filter((model, index, all) => all.indexOf(model) === index);
+}
 
 function extractGeminiText(response) {
   const text = (response?.candidates || [])
@@ -190,10 +210,10 @@ class GeminiAdapter extends AIProviderAdapter {
   async generateCaption(downloadedVideo, callOptions = {}) {
     const apiKey = callOptions.apiKey || this.options.apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY;
     const fetchImplementation = callOptions.fetch || this.options.fetch || globalThis.fetch;
-    const model = callOptions.model || this.options.model || process.env.GEMINI_TRANSCRIPTION_MODEL || DEFAULT_GEMINI_MODEL;
     const baseUrl = callOptions.baseUrl || this.options.baseUrl || "https://generativelanguage.googleapis.com";
     const prompt =
       callOptions.prompt || this.options.prompt || process.env.VIDEO_TRANSCRIPTION_PROMPT || DEFAULT_TRANSCRIPTION_PROMPT;
+    const modelCandidates = resolveModelCandidates(callOptions, this.options);
 
     assertFetch(fetchImplementation, "Gemini");
 
@@ -205,28 +225,42 @@ class GeminiAdapter extends AIProviderAdapter {
     const uploadedFile = await uploadGeminiFile(downloadedVideo, requestOptions);
     const activeFile = await waitForGeminiFile(uploadedFile, requestOptions);
 
-    const response = await fetchImplementation(
-      `${baseUrl}/v1beta/${resolveGeminiModelPath(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                { file_data: { mime_type: downloadedVideo.mime_type, file_uri: activeFile.uri } },
-                { text: prompt },
-              ],
-            },
-          ],
-        }),
-      }
-    );
+    let lastRateLimitError = null;
 
-    return extractGeminiText(await readResponseJson(response, "Falha ao gerar legenda com Gemini"));
+    for (const model of modelCandidates) {
+      try {
+        const response = await fetchImplementation(
+          `${baseUrl}/v1beta/${resolveGeminiModelPath(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              contents: [
+                {
+                  role: "user",
+                  parts: [
+                    { file_data: { mime_type: downloadedVideo.mime_type, file_uri: activeFile.uri } },
+                    { text: prompt },
+                  ],
+                },
+              ],
+            }),
+          }
+        );
+
+        return extractGeminiText(await readResponseJson(response, `Falha ao gerar legenda com Gemini (modelo ${model})`));
+      } catch (error) {
+        if (!(error instanceof RateLimitError)) {
+          throw error;
+        }
+
+        lastRateLimitError = error;
+      }
+    }
+
+    throw lastRateLimitError || new Error("Nenhum modelo Gemini disponivel para gerar legenda");
   }
 }
 
