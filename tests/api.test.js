@@ -116,18 +116,6 @@ async function main() {
       update: async (id, payload) => ({ id, nome: "AMBEV", descricao: payload.descricao ?? null, programa: payload.programa ?? null }),
     },
     videoCatalogService: {
-      listTrailsByProfile: async () => [],
-      listTrailsOverview: async () => [
-        {
-          perfil_da_jornada: "Infância",
-          macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
-          trilha: "2.3 Como Cuidar das Finanças para Sobreviver e Crescer",
-          videos: [
-            { id: "video-1", ordem: 1, ordem_geral: 1, nome_do_arquivo: "1) Principais erros financeiros.mp4", status: true },
-            { id: "video-2", ordem: 2, ordem_geral: 2, nome_do_arquivo: "2) Organizando as contas.mp4", status: false },
-          ],
-        },
-      ],
       transcribeByDriveFileId: async (driveFileId, options) => ({
         skipped: options.force !== "true",
         transcript: options.force === "true" ? "Transcricao nova" : "Transcricao existente",
@@ -138,28 +126,63 @@ async function main() {
         transcript: "Transcricao por id",
         video: { id, drive_file_id: "drive-1" },
       }),
-      listUnclassified: async () => [
-        { id: "unclassified-1", nome_do_arquivo: "novo-video-drive.mp4" },
+    },
+    trilhasService: {
+      listByOrganization: async (organizationId) => [
+        {
+          id: "trilha-1",
+          organization_id: organizationId,
+          macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
+          trilha: "2.3 Como Cuidar das Finanças para Sobreviver e Crescer",
+        },
       ],
-      createTrailVideos: async (payload) =>
-        payload.video_ids.map((videoId, index) => ({
-          id: videoId,
-          perfil_da_jornada: payload.perfil_da_jornada,
-          macrotema: payload.macrotema,
-          trilha: payload.trilha,
-          nome_do_arquivo: "novo-video-drive.mp4",
-          ordem: index + 1,
-          status: false,
-        })),
-      moveVideoTrail: async (id, payload) => ({
-        id,
-        perfil_da_jornada: payload.perfil_da_jornada,
+      listOverview: async (organizationId) => [
+        {
+          id: "trilha-1",
+          organization_id: organizationId,
+          perfis: ["Infância", "Adolescência"],
+          macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
+          trilha: "2.3 Como Cuidar das Finanças para Sobreviver e Crescer",
+          videos: [
+            { id: "video-1", ordem: 1, nome_do_arquivo: "1) Principais erros financeiros.mp4", status: true },
+            { id: "video-2", ordem: 2, nome_do_arquivo: "2) Organizando as contas.mp4", status: false },
+          ],
+        },
+      ],
+      listSelectableVideos: async () => [
+        {
+          id: "video-1",
+          nome_do_arquivo: "1) Principais erros financeiros.mp4",
+          status: true,
+          trilhas: [{ id: "trilha-1", macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado", trilha: "2.3 Como Cuidar das Finanças para Sobreviver e Crescer" }],
+        },
+        { id: "unclassified-1", nome_do_arquivo: "novo-video-drive.mp4", status: false, trilhas: [] },
+      ],
+      createTrilha: async (payload) => ({
+        id: "trilha-2",
+        organization_id: payload.organization_id,
         macrotema: payload.macrotema,
         trilha: payload.trilha,
-        nome_do_arquivo: "1) Principais erros financeiros.mp4",
-        status: true,
+        perfis: payload.perfis,
+        videos: payload.video_ids.map((id, index) => ({
+          id,
+          ordem: index + 1,
+          nome_do_arquivo: id === "video-1" ? "1) Principais erros financeiros.mp4" : "novo-video-drive.mp4",
+          status: id === "video-1",
+        })),
       }),
-      reorderTrailVideos: async (orderedIds) => orderedIds.map((id, index) => ({ id, ordem: index + 1 })),
+      addVideoToTrilha: async (trilhaId, videoId) => ({ trilha_id: trilhaId, video_id: videoId, ordem: 3 }),
+      removeVideoFromTrilha: async (trilhaId, videoId) => ({ trilha_id: trilhaId, video_id: videoId }),
+      moveVideoBetweenTrilhas: async (videoId, payload) => ({
+        video_id: videoId,
+        from_trilha_id: payload.from_trilha_id,
+        to_trilha_id: payload.to_trilha_id,
+      }),
+      reorderTrilhaVideos: async (trilhaId, orderedVideoIds) =>
+        orderedVideoIds.map((id, index) => ({ trilha_id: trilhaId, video_id: id, ordem: index + 1 })),
+      renameTrilha: async (id, payload) => ({ id, macrotema: payload.macrotema, trilha: payload.trilha }),
+      removeTrilha: async (id) => ({ id }),
+      updateTrailPerfis: async (id, perfis) => perfis,
     },
     groupService: {
       listWithoutSegment: async () => [
@@ -456,7 +479,13 @@ async function main() {
     assert.match(organizacoesAppPage, /requestJson\(`\/organizations\/\$\{encodeURIComponent\(editingOrgId\)\}`/);
     assert.match(organizacoesAppPage, /requestJson\("\/organizations", \{/);
 
-    const trailsOverviewResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/trails-overview`);
+    const trilhasResponse = await fetch(`http://127.0.0.1:${port}/trilhas?organization_id=org-1`);
+    assert.equal(trilhasResponse.status, 200);
+    const trilhasPayload = await trilhasResponse.json();
+    assert.equal(trilhasPayload.length, 1);
+    assert.equal(trilhasPayload[0].id, "trilha-1");
+
+    const trailsOverviewResponse = await fetch(`http://127.0.0.1:${port}/trilhas/overview?organization_id=org-1`);
     assert.equal(trailsOverviewResponse.status, 200);
     const trailsOverviewPayload = await trailsOverviewResponse.json();
     assert.equal(trailsOverviewPayload.length, 1);
@@ -470,70 +499,123 @@ async function main() {
     assert.doesNotMatch(trilhasAppPage, /mock-data\.js/);
     assert.doesNotMatch(trilhasAppPage, /helpers\.js/);
     assert.doesNotMatch(trilhasAppPage, /MOCK\./);
-    assert.match(trilhasAppPage, /requestJson\("\/video-catalog\/trails-overview"\)/);
+    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/overview\?organization_id=/);
     assert.match(trilhasAppPage, /nome_do_arquivo/);
     assert.match(trilhasAppPage, /id="newTrailButton" type="button">\+ Nova trilha<\/button>/);
     assert.doesNotMatch(trilhasAppPage, /id="newTrailButton"[^>]*disabled/);
-    assert.match(trilhasAppPage, /requestJson\("\/video-catalog\/trails", \{/);
-    assert.match(trilhasAppPage, /requestJson\("\/video-catalog\/unclassified"\)/);
-    assert.match(trilhasAppPage, /requestJson\(`\/video-catalog\/\$\{encodeURIComponent\(movingVideo\)\}\/move-trail`/);
-    assert.match(trilhasAppPage, /requestJson\("\/video-catalog\/reorder", \{/);
+    assert.match(trilhasAppPage, /requestJson\("\/trilhas", \{/);
+    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/selectable-videos\?organization_id=/);
+    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(movingVideo\.trilhaId\)\}\/videos\/\$\{encodeURIComponent\(movingVideo\.videoId\)\}\/move`/);
+    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(trail\.id\)\}\/reorder`, \{/);
     assert.match(trilhasAppPage, /draggable="true"/);
-    assert.match(trilhasAppPage, /id="newTrailPerfil"><\/select>/);
+    assert.match(trilhasAppPage, /id="newTrailPerfil"><\/div>/);
     assert.match(trilhasAppPage, /id="newTrailMacrotema"><\/select>/);
     assert.match(trilhasAppPage, /Criar novo macrotema/);
-    assert.match(trilhasAppPage, /id="moveTargetPerfil"><\/select>/);
-    assert.match(trilhasAppPage, /id="moveTargetMacrotema"><\/select>/);
+    assert.match(trilhasAppPage, /id="organizationSelect"/);
     assert.match(trilhasAppPage, /id="moveTargetTrilha"><\/select>/);
     assert.doesNotMatch(trilhasAppPage, /id="newTrailVideos"/);
+    assert.match(trilhasAppPage, /TRAIL_PROFILES = \["Pré-infância", "Infância", "Adolescência", "Maturidade"\]/);
+    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(renameContext\.trilhaId\)\}`/);
+    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(trail\.id\)\}\/perfis`/);
 
-    const unclassifiedResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/unclassified`);
-    assert.equal(unclassifiedResponse.status, 200);
-    const unclassifiedPayload = await unclassifiedResponse.json();
-    assert.deepEqual(unclassifiedPayload, [{ id: "unclassified-1", nome_do_arquivo: "novo-video-drive.mp4" }]);
+    const selectableVideosResponse = await fetch(`http://127.0.0.1:${port}/trilhas/selectable-videos?organization_id=org-1`);
+    assert.equal(selectableVideosResponse.status, 200);
+    const selectableVideosPayload = await selectableVideosResponse.json();
+    assert.equal(selectableVideosPayload.length, 2);
+    assert.equal(selectableVideosPayload[0].trilhas.length, 1);
+    assert.equal(selectableVideosPayload[1].trilhas.length, 0);
 
-    const createTrailResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/trails`, {
+    // Teste central do requisito: criar trilha misturando um video ja classificado
+    // em outra trilha (video-1) com um video novo/nao classificado (unclassified-1).
+    const createTrailResponse = await fetch(`http://127.0.0.1:${port}/trilhas`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        perfil_da_jornada: "Infância",
+        organization_id: "org-1",
+        perfis: ["Infância", "Adolescência"],
         macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
         trilha: "Nova trilha teste",
-        video_ids: ["unclassified-1"],
+        video_ids: ["video-1", "unclassified-1"],
       }),
     });
 
     assert.equal(createTrailResponse.status, 201);
     const createTrailPayload = await createTrailResponse.json();
-    assert.equal(createTrailPayload.length, 1);
-    assert.equal(createTrailPayload[0].nome_do_arquivo, "novo-video-drive.mp4");
+    assert.equal(createTrailPayload.id, "trilha-2");
+    assert.equal(createTrailPayload.videos.length, 2);
+    assert.equal(createTrailPayload.videos[0].nome_do_arquivo, "1) Principais erros financeiros.mp4");
+    assert.equal(createTrailPayload.videos[1].nome_do_arquivo, "novo-video-drive.mp4");
 
-    const moveVideoResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-1/move-trail`, {
-      method: "PATCH",
+    const addVideoResponse = await fetch(`http://127.0.0.1:${port}/trilhas/trilha-1/videos`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        perfil_da_jornada: "Infância",
-        macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
-        trilha: "Outra trilha",
-      }),
+      body: JSON.stringify({ video_id: "unclassified-1" }),
+    });
+
+    assert.equal(addVideoResponse.status, 201);
+    const addVideoPayload = await addVideoResponse.json();
+    assert.equal(addVideoPayload.trilha_id, "trilha-1");
+    assert.equal(addVideoPayload.video_id, "unclassified-1");
+
+    const removeVideoResponse = await fetch(`http://127.0.0.1:${port}/trilhas/trilha-1/videos/video-2`, {
+      method: "DELETE",
+    });
+
+    assert.equal(removeVideoResponse.status, 200);
+    const removeVideoPayload = await removeVideoResponse.json();
+    assert.equal(removeVideoPayload.video_id, "video-2");
+
+    const moveVideoResponse = await fetch(`http://127.0.0.1:${port}/trilhas/trilha-1/videos/video-1/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to_trilha_id: "trilha-2" }),
     });
 
     assert.equal(moveVideoResponse.status, 200);
     const moveVideoPayload = await moveVideoResponse.json();
-    assert.equal(moveVideoPayload.trilha, "Outra trilha");
+    assert.equal(moveVideoPayload.from_trilha_id, "trilha-1");
+    assert.equal(moveVideoPayload.to_trilha_id, "trilha-2");
 
-    const reorderResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/reorder`, {
+    const renameTrilhaResponse = await fetch(`http://127.0.0.1:${port}/trilhas/trilha-1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trilha: "2.3 Cuidando do Dinheiro" }),
+    });
+
+    assert.equal(renameTrilhaResponse.status, 200);
+    const renameTrilhaPayload = await renameTrilhaResponse.json();
+    assert.equal(renameTrilhaPayload.trilha, "2.3 Cuidando do Dinheiro");
+
+    const updateTrailPerfisResponse = await fetch(`http://127.0.0.1:${port}/trilhas/trilha-1/perfis`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ perfis: ["Infância", "Adolescência"] }),
+    });
+
+    assert.equal(updateTrailPerfisResponse.status, 200);
+    const updateTrailPerfisPayload = await updateTrailPerfisResponse.json();
+    assert.deepEqual(updateTrailPerfisPayload.perfis, ["Infância", "Adolescência"]);
+
+    const reorderResponse = await fetch(`http://127.0.0.1:${port}/trilhas/trilha-1/reorder`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ordered_ids: ["video-2", "video-1"] }),
+      body: JSON.stringify({ ordered_video_ids: ["video-2", "video-1"] }),
     });
 
     assert.equal(reorderResponse.status, 200);
     const reorderPayload = await reorderResponse.json();
     assert.deepEqual(reorderPayload, [
-      { id: "video-2", ordem: 1 },
-      { id: "video-1", ordem: 2 },
+      { trilha_id: "trilha-1", video_id: "video-2", ordem: 1 },
+      { trilha_id: "trilha-1", video_id: "video-1", ordem: 2 },
     ]);
+
+    const removeTrilhaResponse = await fetch(`http://127.0.0.1:${port}/trilhas/trilha-2`, {
+      method: "DELETE",
+    });
+
+    assert.equal(removeTrilhaResponse.status, 200);
+    const removeTrilhaPayload = await removeTrilhaResponse.json();
+    assert.equal(removeTrilhaPayload.id, "trilha-2");
 
     const operationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1`, {
       method: "PATCH",
@@ -616,14 +698,21 @@ async function main() {
         list: async () => [],
       },
       videoCatalogService: {
-        listTrailsByProfile: async () => [],
-        listTrailsOverview: async () => [],
-        listUnclassified: async () => [],
         transcribeByDriveFileId: async () => ({ skipped: true, transcript: "", video: null }),
         transcribeById: async () => ({ skipped: true, transcript: "", video: null }),
-        createTrailVideos: async () => [],
-        moveVideoTrail: async (id, payload) => ({ id, ...payload }),
-        reorderTrailVideos: async () => [],
+      },
+      trilhasService: {
+        listByOrganization: async () => [],
+        listOverview: async () => [],
+        listSelectableVideos: async () => [],
+        createTrilha: async () => ({ id: "trilha-1", videos: [] }),
+        addVideoToTrilha: async (trilhaId, videoId) => ({ trilha_id: trilhaId, video_id: videoId }),
+        removeVideoFromTrilha: async (trilhaId, videoId) => ({ trilha_id: trilhaId, video_id: videoId }),
+        moveVideoBetweenTrilhas: async (videoId, payload) => ({ video_id: videoId, ...payload }),
+        reorderTrilhaVideos: async () => [],
+        renameTrilha: async (id, payload) => ({ id, ...payload }),
+        removeTrilha: async (id) => ({ id }),
+        updateTrailPerfis: async (id, perfis) => perfis,
       },
       groupService: {
         listWithoutSegment: async () => [],

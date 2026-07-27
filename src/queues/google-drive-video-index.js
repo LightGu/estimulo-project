@@ -27,9 +27,8 @@ function buildVideoCatalogPayload(video) {
   return Object.fromEntries(
     Object.entries({
       drive_file_id: video.drive_file_id,
-      etapa: video.etapa,
-      trilha_segmento: video.trilha_segmento,
-      genero_conteudo: video.genero_conteudo || "video",
+      nome_do_arquivo: video.nome_do_arquivo || video.name,
+      pasta_atual: video.pasta_atual,
       status: video.status === undefined ? false : video.status,
       link_video: video.web_view_link || video.link_video,
       google_drive_created_at: video.google_drive_created_at,
@@ -38,6 +37,8 @@ function buildVideoCatalogPayload(video) {
 }
 
 function createDefaultVideoUpsert(repository = videoCatalogRepository) {
+  let nextOrdemGeral;
+
   return async function upsertVideo(video) {
     const existingVideo = await repository.findByDriveFileId(video.drive_file_id);
     const payload = buildVideoCatalogPayload(video);
@@ -51,7 +52,13 @@ function createDefaultVideoUpsert(repository = videoCatalogRepository) {
       };
     }
 
-    const createdVideo = await repository.create(payload);
+    if (nextOrdemGeral === undefined) {
+      const existingVideos = await repository.findAll();
+      nextOrdemGeral = existingVideos.reduce((max, item) => Math.max(max, Number(item.ordem_geral) || 0), 0) + 1;
+    }
+
+    const createdVideo = await repository.create({ ...payload, ordem_geral: nextOrdemGeral });
+    nextOrdemGeral += 1;
 
     return {
       created: true,
@@ -82,6 +89,7 @@ function buildGoogleDriveVideoIndexJobData(params = {}) {
     root_folder_name: params.root_folder_name || params.rootFolderName || "root",
     status: params.status || GOOGLE_DRIVE_VIDEO_INDEX_INITIAL_STATUS,
     requested_at: (params.requested_at ? new Date(params.requested_at) : new Date()).toISOString(),
+    force_full_index: Boolean(params.force_full_index || params.forceFullIndex),
   };
 }
 

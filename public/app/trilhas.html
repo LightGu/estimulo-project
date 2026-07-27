@@ -27,9 +27,19 @@
       tr.video-row.dragging { opacity: 0.4; }
       tr.video-row.drag-over { box-shadow: inset 0 2px 0 var(--brand-blue); }
       .drag-handle { cursor: grab; color: var(--text-faint); padding-right: 6px; }
-      .unclassified-list { max-height: 220px; overflow-y: auto; border:1px solid var(--line); border-radius: var(--radius-md); }
+      .unclassified-list { max-height: 260px; overflow-y: auto; border:1px solid var(--line); border-radius: var(--radius-md); }
       .unclassified-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); font-size:12.5px; }
       .unclassified-item:last-child { border-bottom: 0; }
+      .videos-group-title { font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-faint); padding:8px 12px 4px; }
+      .videos-group-title:not(:first-child) { border-top:1px solid var(--line); margin-top:4px; }
+      .icon-btn-edit { border:0; background:transparent; cursor:pointer; color:var(--text-faint); padding:2px 4px; line-height:1; font-size:13px; }
+      .icon-btn-edit:hover { color: var(--brand-blue); }
+      .trilha-tab-wrap { display:flex; align-items:center; gap:2px; }
+      .perfil-checkboxes { display:flex; flex-wrap:wrap; gap:10px; }
+      .perfil-checkboxes label { display:flex; align-items:center; gap:6px; font-size:12.5px; }
+      .perfis-panel { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0 16px; flex-wrap:wrap; }
+      .already-in-trilha { margin-left:auto; font-size:11px; white-space:nowrap; }
+      #organizationSelect { min-width:220px; }
     </style>
   </head>
   <body data-page="trilhas">
@@ -43,6 +53,7 @@
             <p>Catálogo de vídeos por perfil de jornada, macrotema e trilha.</p>
           </div>
           <div class="topbar-actions">
+            <select id="organizationSelect"></select>
             <button class="btn" id="newTrailButton" type="button">+ Nova trilha</button>
             <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
           </div>
@@ -67,6 +78,12 @@
 
             <div class="trilha-tabs" id="trilhaTabs"></div>
             <p class="macrotema-path" id="macrotemaPath"></p>
+
+            <div class="perfis-panel">
+              <div class="perfil-checkboxes" id="trailPerfisCheckboxes"></div>
+              <button class="btn btn-secondary btn-sm" id="saveTrailPerfisButton" type="button">Salvar perfis</button>
+            </div>
+            <div id="trailPerfisStatus" class="status-line"></div>
 
             <div class="table-wrap">
               <table>
@@ -94,8 +111,8 @@
         </div>
         <div class="modal-body">
           <div class="field">
-            <label for="newTrailPerfil">Perfil da jornada</label>
-            <select id="newTrailPerfil"></select>
+            <label>Perfis da jornada</label>
+            <div class="perfil-checkboxes" id="newTrailPerfil"></div>
           </div>
           <div class="field">
             <label for="newTrailMacrotema">Macrotema</label>
@@ -110,7 +127,7 @@
             <input id="newTrailNome" type="text" placeholder="Ex.: 2.3 Como Cuidar das Finanças">
           </div>
           <div class="field">
-            <label>Vídeos novos do Drive sem trilha definida</label>
+            <label>Vídeos</label>
             <div class="unclassified-list" id="newTrailVideosList"></div>
           </div>
           <div id="newTrailStatus" class="status-line"></div>
@@ -125,7 +142,7 @@
     <div class="overlay" id="moveOverlay" hidden>
       <div class="modal">
         <div class="modal-header">
-          <h3>Mover vídeo de trilha</h3>
+          <h3>Adicionar vídeo a outra trilha</h3>
           <button class="icon-btn-close" data-close-move type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
@@ -151,11 +168,36 @@
       </div>
     </div>
 
+    <div class="overlay" id="renameOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="renameModalTitle">Editar nome</h3>
+          <button class="icon-btn-close" data-close-rename type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field">
+            <label for="renameNome">Nome</label>
+            <input id="renameNome" type="text">
+          </div>
+          <div id="renameStatus" class="status-line"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-close-rename type="button">Cancelar</button>
+          <button class="btn" id="confirmRenameButton" type="button">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <script src="assets/js/nav.js"></script>
     <script>
+      const TRAIL_PROFILES = ["Pré-infância", "Infância", "Adolescência", "Maturidade"];
+      const LAST_ORGANIZATION_KEY = "estimulo:trilhas:lastOrganizationId";
+
       const state = {
+        organizations: [],
+        organizationId: null,
         trails: [],
-        unclassified: [],
+        selectableVideos: [],
       };
       const NEW_MACROTEMA_OPTION = "__new_macrotema__";
       let activePerfil = "todos";
@@ -163,6 +205,7 @@
       let selectedTrilhaKey = null;
       let movingVideo = null;
       let draggingVideoId = null;
+      let renameContext = null;
 
       function escapeHtml(value) {
         return String(value === null || value === undefined ? "" : value)
@@ -185,11 +228,11 @@
       }
 
       function macrotemaKey(trail) {
-        return `${trail.perfil_da_jornada}␟${trail.macrotema}`;
+        return trail.macrotema;
       }
 
       function trilhaKey(trail) {
-        return `${trail.perfil_da_jornada}␟${trail.macrotema}␟${trail.trilha}`;
+        return trail.id;
       }
 
       function approvedCount(trail) {
@@ -197,14 +240,15 @@
       }
 
       function macrotemasForActivePerfil() {
-        const trails = state.trails.filter((t) => activePerfil === "todos" || t.perfil_da_jornada === activePerfil);
+        const trails = state.trails.filter(
+          (t) => activePerfil === "todos" || (t.perfis || []).includes(activePerfil)
+        );
         const byKey = new Map();
 
         trails.forEach((t) => {
           const key = macrotemaKey(t);
           if (!byKey.has(key)) {
             byKey.set(key, {
-              perfil_da_jornada: t.perfil_da_jornada,
               macrotema: t.macrotema,
               trails: [],
             });
@@ -212,20 +256,13 @@
           byKey.get(key).trails.push(t);
         });
 
-        return Array.from(byKey.values()).sort((left, right) => {
-          if (left.perfil_da_jornada !== right.perfil_da_jornada) {
-            return left.perfil_da_jornada.localeCompare(right.perfil_da_jornada);
-          }
-          return left.macrotema.localeCompare(right.macrotema);
-        });
+        return Array.from(byKey.values()).sort((left, right) => left.macrotema.localeCompare(right.macrotema));
       }
 
       function renderPerfilTabs() {
-        const perfis = Array.from(new Set(state.trails.map((t) => t.perfil_da_jornada))).sort();
-
         document.getElementById("perfilTabs").innerHTML = [
           `<button class="${activePerfil === "todos" ? "active" : ""}" data-perfil="todos">Todos</button>`,
-          ...perfis.map(
+          ...TRAIL_PROFILES.map(
             (p) => `<button class="${activePerfil === p ? "active" : ""}" data-perfil="${escapeHtml(p)}">${escapeHtml(p)}</button>`
           ),
         ].join("");
@@ -242,26 +279,37 @@
 
         document.getElementById("macrotemaGrid").innerHTML = macrotemas
           .map((m) => {
-            const key = `${m.perfil_da_jornada}␟${m.macrotema}`;
+            const key = macrotemaKey(m);
             const videosCount = m.trails.reduce((sum, t) => sum + t.videos.length, 0);
             const approved = m.trails.reduce((sum, t) => sum + approvedCount(t), 0);
+            const perfis = Array.from(new Set(m.trails.flatMap((t) => t.perfis || [])));
 
             return `
             <div class="card card-pad trail-card${key === selectedMacrotemaKey ? " selected" : ""}" data-macrotema="${escapeHtml(key)}">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                 <strong>${escapeHtml(m.macrotema)}</strong>
-                <span class="badge badge-success">${approved}/${videosCount} aprovado(s)</span>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span class="badge badge-success">${approved}/${videosCount} aprovado(s)</span>
+                  <button class="icon-btn-edit" data-edit-macrotema="${escapeHtml(m.macrotema)}" type="button" title="Editar nome" aria-label="Editar nome do macrotema">✎</button>
+                </div>
               </div>
-              <p class="text-muted" style="margin-top:6px;font-size:12.5px;">Perfil: ${escapeHtml(m.perfil_da_jornada)}</p>
+              <p class="text-muted" style="margin-top:6px;font-size:12.5px;">Perfis: ${perfis.length ? escapeHtml(perfis.join(", ")) : '<span class="text-faint">Nenhum</span>'}</p>
               <p class="text-faint" style="margin-top:10px;font-size:12.5px;">${m.trails.length} trilha(s) · ${videosCount} vídeo(s)</p>
             </div>`;
           })
           .join("");
 
+        document.querySelectorAll("[data-edit-macrotema]").forEach((button) => {
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            openRenameMacrotema(button.dataset.editMacrotema);
+          });
+        });
+
         document.querySelectorAll("[data-macrotema]").forEach((card) => {
           card.addEventListener("click", () => {
             selectedMacrotemaKey = card.dataset.macrotema;
-            const macrotema = macrotemas.find((m) => `${m.perfil_da_jornada}␟${m.macrotema}` === selectedMacrotemaKey);
+            const macrotema = macrotemas.find((m) => macrotemaKey(m) === selectedMacrotemaKey);
             selectedTrilhaKey = macrotema && macrotema.trails.length ? trilhaKey(macrotema.trails[0]) : null;
             renderMacrotemaGrid();
             renderTrailDetail();
@@ -270,25 +318,25 @@
       }
 
       function currentMacrotema() {
-        return macrotemasForActivePerfil().find((m) => `${m.perfil_da_jornada}␟${m.macrotema}` === selectedMacrotemaKey);
-      }
-
-      function allPerfis() {
-        return Array.from(new Set(state.trails.map((t) => t.perfil_da_jornada))).sort();
+        return macrotemasForActivePerfil().find((m) => macrotemaKey(m) === selectedMacrotemaKey);
       }
 
       function macrotemasForPerfil(perfil) {
-        return Array.from(new Set(state.trails.filter((t) => t.perfil_da_jornada === perfil).map((t) => t.macrotema))).sort();
+        return Array.from(
+          new Set(state.trails.filter((t) => (t.perfis || []).includes(perfil)).map((t) => t.macrotema))
+        ).sort();
       }
 
-      function trilhasForPerfilMacrotema(perfil, macrotema) {
-        return Array.from(
-          new Set(
-            state.trails
-              .filter((t) => t.perfil_da_jornada === perfil && t.macrotema === macrotema)
-              .map((t) => t.trilha)
+      function trilhasForPerfilMacrotema(perfil, macrotema, excludeTrilhaId) {
+        return state.trails
+          .filter(
+            (t) =>
+              (t.perfis || []).includes(perfil) &&
+              t.macrotema === macrotema &&
+              t.id !== excludeTrilhaId
           )
-        ).sort();
+          .map((t) => ({ id: t.id, trilha: t.trilha }))
+          .sort((left, right) => left.trilha.localeCompare(right.trilha));
       }
 
       function renderTrailDetail() {
@@ -310,9 +358,12 @@
           .map((t) => {
             const key = trilhaKey(t);
             return `
-            <button class="trilha-tab${key === selectedTrilhaKey ? " active" : ""}" data-trilha="${escapeHtml(key)}">
-              ${escapeHtml(t.trilha)} <span class="count">(${t.videos.length})</span>
-            </button>`;
+            <span class="trilha-tab-wrap">
+              <button class="trilha-tab${key === selectedTrilhaKey ? " active" : ""}" data-trilha="${escapeHtml(key)}">
+                ${escapeHtml(t.trilha)} <span class="count">(${t.videos.length})</span>
+              </button>
+              <button class="icon-btn-edit" data-edit-trilha="${escapeHtml(key)}" type="button" title="Editar nome" aria-label="Editar nome da trilha">✎</button>
+            </span>`;
           })
           .join("");
 
@@ -323,6 +374,10 @@
           });
         });
 
+        document.querySelectorAll("[data-edit-trilha]").forEach((btn) => {
+          btn.addEventListener("click", () => openRenameTrilha(btn.dataset.editTrilha));
+        });
+
         const trail = macrotema.trails.find((t) => trilhaKey(t) === selectedTrilhaKey) || macrotema.trails[0];
 
         if (!trail) {
@@ -331,7 +386,8 @@
           return;
         }
 
-        document.getElementById("macrotemaPath").textContent = `${trail.perfil_da_jornada} · ${trail.macrotema} · ${trail.trilha}`;
+        document.getElementById("macrotemaPath").textContent = `${trail.macrotema} · ${trail.trilha}`;
+        renderPerfisPanel(trail);
 
         if (!trail.videos.length) {
           document.getElementById("videosBody").innerHTML = `
@@ -353,15 +409,81 @@
               <td class="mono">${escapeHtml(v.nome_do_arquivo)}</td>
               <td>${v.status === true ? '<span class="badge badge-success">Aprovado</span>' : '<span class="badge badge-warning">Pendente</span>'}</td>
               <td style="display:flex;gap:6px;flex-wrap:wrap;">
-                <button class="btn btn-secondary btn-sm" data-move="${escapeHtml(v.id)}">Mover de trilha</button>
+                <button class="btn btn-secondary btn-sm" data-move="${escapeHtml(v.id)}">Adicionar a outra trilha</button>
+                <button class="btn btn-secondary btn-sm" data-remove="${escapeHtml(v.id)}">Remover desta trilha</button>
                 <button class="btn btn-ghost btn-sm" disabled title="Em breve">Revisar legenda</button>
               </td>
             </tr>`
           )
           .join("");
 
-        document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(btn.dataset.move)));
+        document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(trail, btn.dataset.move)));
+        document.querySelectorAll("[data-remove]").forEach((btn) => btn.addEventListener("click", () => removeVideoFromCurrentTrail(trail, btn.dataset.remove)));
         attachDragAndDrop(trail);
+      }
+
+      async function removeVideoFromCurrentTrail(trail, videoId) {
+        if (!confirm("Remover este vídeo da trilha atual?")) {
+          return;
+        }
+
+        try {
+          await requestJson(`/trilhas/${encodeURIComponent(trail.id)}/videos/${encodeURIComponent(videoId)}`, {
+            method: "DELETE",
+          });
+
+          await initialize();
+        } catch (error) {
+          alert(error.message);
+        }
+      }
+
+      function renderPerfisPanel(trail) {
+        const perfis = trail.perfis || [];
+
+        document.getElementById("trailPerfisCheckboxes").innerHTML = TRAIL_PROFILES.map(
+          (perfil) => `
+          <label>
+            <input type="checkbox" data-trail-perfil value="${escapeHtml(perfil)}" ${perfis.includes(perfil) ? "checked" : ""}>
+            ${escapeHtml(perfil)}
+          </label>`
+        ).join("");
+
+        document.getElementById("trailPerfisStatus").textContent = "";
+        document.getElementById("trailPerfisStatus").className = "status-line";
+
+        document.getElementById("saveTrailPerfisButton").onclick = async () => {
+          const button = document.getElementById("saveTrailPerfisButton");
+          const status = document.getElementById("trailPerfisStatus");
+          const selectedPerfis = Array.from(
+            document.querySelectorAll("[data-trail-perfil]:checked")
+          ).map((input) => input.value);
+
+          if (!selectedPerfis.length) {
+            status.textContent = "Selecione ao menos um perfil.";
+            status.className = "status-line error";
+            return;
+          }
+
+          button.disabled = true;
+          status.textContent = "Salvando perfis...";
+          status.className = "status-line";
+
+          try {
+            await requestJson(`/trilhas/${encodeURIComponent(trail.id)}/perfis`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ perfis: selectedPerfis }),
+            });
+
+            await initialize();
+          } catch (error) {
+            status.textContent = error.message;
+            status.className = "status-line error";
+          } finally {
+            button.disabled = false;
+          }
+        };
       }
 
       function attachDragAndDrop(trail) {
@@ -403,14 +525,14 @@
             orderedIds.splice(toIndex, 0, orderedIds.splice(fromIndex, 1)[0]);
 
             try {
-              const updatedVideos = await requestJson("/video-catalog/reorder", {
+              const updatedLinks = await requestJson(`/trilhas/${encodeURIComponent(trail.id)}/reorder`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ordered_ids: orderedIds }),
+                body: JSON.stringify({ ordered_video_ids: orderedIds }),
               });
 
-              updatedVideos.forEach((updated) => {
-                const video = trail.videos.find((v) => v.id === updated.id);
+              updatedLinks.forEach((updated) => {
+                const video = trail.videos.find((v) => v.id === updated.video_id);
                 if (video) video.ordem = updated.ordem;
               });
 
@@ -435,20 +557,47 @@
         renderTrailDetail();
       });
 
+      // Organizacao
+      function renderOrganizationSelect() {
+        const select = document.getElementById("organizationSelect");
+
+        select.innerHTML = state.organizations
+          .map((org) => `<option value="${escapeHtml(org.id)}">${escapeHtml(org.nome)}</option>`)
+          .join("");
+
+        if (state.organizationId) {
+          select.value = state.organizationId;
+        }
+      }
+
+      document.getElementById("organizationSelect").addEventListener("change", async (event) => {
+        state.organizationId = event.target.value;
+        localStorage.setItem(LAST_ORGANIZATION_KEY, state.organizationId);
+        selectedMacrotemaKey = null;
+        selectedTrilhaKey = null;
+        await initialize();
+      });
+
       // Nova trilha
       const newTrailOverlay = document.getElementById("newTrailOverlay");
 
-      function renderNewTrailPerfilSelect() {
-        const select = document.getElementById("newTrailPerfil");
-        select.innerHTML = allPerfis()
-          .map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`)
-          .join("");
+      function allMacrotemas() {
+        return Array.from(new Set(state.trails.map((t) => t.macrotema))).sort();
+      }
+
+      function renderNewTrailPerfilCheckboxes() {
+        document.getElementById("newTrailPerfil").innerHTML = TRAIL_PROFILES.map(
+          (p) => `
+          <label>
+            <input type="checkbox" data-new-trail-perfil value="${escapeHtml(p)}">
+            ${escapeHtml(p)}
+          </label>`
+        ).join("");
       }
 
       function renderNewTrailMacrotemaSelect() {
-        const perfil = document.getElementById("newTrailPerfil").value;
         const select = document.getElementById("newTrailMacrotema");
-        const macrotemas = macrotemasForPerfil(perfil);
+        const macrotemas = allMacrotemas();
 
         select.innerHTML = [
           ...macrotemas.map((m) => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`),
@@ -466,24 +615,42 @@
       function renderNewTrailVideosList() {
         const list = document.getElementById("newTrailVideosList");
 
-        if (!state.unclassified.length) {
-          list.innerHTML = '<div class="unclassified-item text-faint">Nenhum vídeo novo do Drive sem trilha definida.</div>';
+        if (!state.selectableVideos.length) {
+          list.innerHTML = '<div class="unclassified-item text-faint">Nenhum vídeo disponível para esta organização.</div>';
           return;
         }
 
-        list.innerHTML = state.unclassified
-          .map(
-            (v) => `
+        const newVideos = state.selectableVideos.filter((v) => !(v.trilhas || []).length);
+        const classifiedVideos = state.selectableVideos.filter((v) => (v.trilhas || []).length);
+
+        function renderItem(v) {
+          const existingTrilhas = (v.trilhas || []).map((t) => t.trilha).join(", ");
+          const badge = existingTrilhas
+            ? `<span class="text-faint already-in-trilha">Já em: ${escapeHtml(existingTrilhas)}</span>`
+            : "";
+
+          return `
             <label class="unclassified-item">
               <input type="checkbox" value="${escapeHtml(v.id)}">
               <span class="mono">${escapeHtml(v.nome_do_arquivo)}</span>
-            </label>`
-          )
-          .join("");
+              ${badge}
+            </label>`;
+        }
+
+        list.innerHTML = [
+          `<div class="videos-group-title">Vídeos novos (${newVideos.length})</div>`,
+          newVideos.length
+            ? newVideos.map(renderItem).join("")
+            : '<div class="unclassified-item text-faint">Nenhum vídeo novo encontrado pelo indexador.</div>',
+          `<div class="videos-group-title">Já classificados em outras trilhas (${classifiedVideos.length})</div>`,
+          classifiedVideos.length
+            ? classifiedVideos.map(renderItem).join("")
+            : '<div class="unclassified-item text-faint">Nenhum vídeo já classificado.</div>',
+        ].join("");
       }
 
       document.getElementById("newTrailButton").addEventListener("click", async () => {
-        renderNewTrailPerfilSelect();
+        renderNewTrailPerfilCheckboxes();
         renderNewTrailMacrotemaSelect();
         document.getElementById("newTrailMacrotemaNovo").value = "";
         document.getElementById("newTrailNome").value = "";
@@ -493,21 +660,22 @@
         newTrailOverlay.hidden = false;
 
         try {
-          state.unclassified = await requestJson("/video-catalog/unclassified");
+          state.selectableVideos = await requestJson(`/trilhas/selectable-videos?organization_id=${encodeURIComponent(state.organizationId)}`);
         } catch (error) {
-          state.unclassified = [];
+          state.selectableVideos = [];
         }
 
         renderNewTrailVideosList();
       });
       document.querySelectorAll("[data-close-new]").forEach((el) => el.addEventListener("click", () => (newTrailOverlay.hidden = true)));
-      document.getElementById("newTrailPerfil").addEventListener("change", renderNewTrailMacrotemaSelect);
       document.getElementById("newTrailMacrotema").addEventListener("change", toggleNewMacrotemaField);
 
       document.getElementById("createTrailButton").addEventListener("click", async () => {
         const button = document.getElementById("createTrailButton");
         const status = document.getElementById("newTrailStatus");
-        const perfil_da_jornada = document.getElementById("newTrailPerfil").value;
+        const perfis = Array.from(document.querySelectorAll("[data-new-trail-perfil]:checked")).map(
+          (input) => input.value
+        );
         const macrotemaSelect = document.getElementById("newTrailMacrotema").value;
         const macrotema =
           macrotemaSelect === NEW_MACROTEMA_OPTION
@@ -518,8 +686,8 @@
           (input) => input.value
         );
 
-        if (!perfil_da_jornada || !macrotema || !trilha || !video_ids.length) {
-          status.textContent = "Preencha perfil, macrotema, nome da trilha e selecione ao menos um vídeo.";
+        if (!perfis.length || !macrotema || !trilha || !video_ids.length) {
+          status.textContent = "Selecione ao menos um perfil, preencha macrotema, nome da trilha e selecione ao menos um vídeo.";
           status.className = "status-line error";
           return;
         }
@@ -529,10 +697,10 @@
         status.className = "status-line";
 
         try {
-          await requestJson("/video-catalog/trails", {
+          await requestJson("/trilhas", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ perfil_da_jornada, macrotema, trilha, video_ids }),
+            body: JSON.stringify({ organization_id: state.organizationId, perfis, macrotema, trilha, video_ids }),
           });
 
           newTrailOverlay.hidden = true;
@@ -545,7 +713,7 @@
         }
       });
 
-      // Mover vídeo de trilha
+      // Adicionar vídeo a outra trilha (endpoint de conveniencia "move")
       const moveOverlay = document.getElementById("moveOverlay");
 
       function renderMoveMacrotemaSelect(selectedMacrotema) {
@@ -562,34 +730,27 @@
         renderMoveTrilhaSelect();
       }
 
-      function renderMoveTrilhaSelect(selectedTrilha) {
+      function renderMoveTrilhaSelect() {
         const perfil = document.getElementById("moveTargetPerfil").value;
         const macrotema = document.getElementById("moveTargetMacrotema").value;
         const select = document.getElementById("moveTargetTrilha");
-        const trilhas = trilhasForPerfilMacrotema(perfil, macrotema);
+        const trilhas = trilhasForPerfilMacrotema(perfil, macrotema, movingVideo ? movingVideo.trilhaId : null);
 
-        select.innerHTML = trilhas.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
-
-        if (selectedTrilha && trilhas.includes(selectedTrilha)) {
-          select.value = selectedTrilha;
-        }
+        select.innerHTML = trilhas.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.trilha)}</option>`).join("");
       }
 
-      function openMove(videoId) {
-        const macrotema = currentMacrotema();
-        const trail = macrotema ? macrotema.trails.find((t) => trilhaKey(t) === selectedTrilhaKey) : null;
-        const video = trail ? trail.videos.find((v) => v.id === videoId) : null;
+      function openMove(trail, videoId) {
+        const video = trail.videos.find((v) => v.id === videoId);
         if (!video) return;
 
-        movingVideo = videoId;
+        movingVideo = { trilhaId: trail.id, videoId };
         document.getElementById("moveVideoLabel").textContent = `Vídeo: ${video.nome_do_arquivo}`;
 
         const perfilSelect = document.getElementById("moveTargetPerfil");
-        perfilSelect.innerHTML = allPerfis().map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-        perfilSelect.value = trail.perfil_da_jornada;
+        perfilSelect.innerHTML = TRAIL_PROFILES.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+        perfilSelect.value = (trail.perfis && trail.perfis[0]) || TRAIL_PROFILES[0];
 
         renderMoveMacrotemaSelect(trail.macrotema);
-        renderMoveTrilhaSelect(trail.trilha);
 
         document.getElementById("moveStatus").textContent = "";
         document.getElementById("moveStatus").className = "status-line";
@@ -602,25 +763,23 @@
       document.getElementById("confirmMoveButton").addEventListener("click", async () => {
         const button = document.getElementById("confirmMoveButton");
         const status = document.getElementById("moveStatus");
-        const perfil_da_jornada = document.getElementById("moveTargetPerfil").value;
-        const macrotema = document.getElementById("moveTargetMacrotema").value;
-        const trilha = document.getElementById("moveTargetTrilha").value;
+        const toTrilhaId = document.getElementById("moveTargetTrilha").value;
 
-        if (!perfil_da_jornada || !macrotema || !trilha) {
-          status.textContent = "Preencha perfil, macrotema e trilha de destino.";
+        if (!toTrilhaId) {
+          status.textContent = "Selecione a trilha de destino.";
           status.className = "status-line error";
           return;
         }
 
         button.disabled = true;
-        status.textContent = "Movendo vídeo...";
+        status.textContent = "Adicionando vídeo...";
         status.className = "status-line";
 
         try {
-          await requestJson(`/video-catalog/${encodeURIComponent(movingVideo)}/move-trail`, {
-            method: "PATCH",
+          await requestJson(`/trilhas/${encodeURIComponent(movingVideo.trilhaId)}/videos/${encodeURIComponent(movingVideo.videoId)}/move`, {
+            method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ perfil_da_jornada, macrotema, trilha }),
+            body: JSON.stringify({ to_trilha_id: toTrilhaId }),
           });
 
           moveOverlay.hidden = true;
@@ -638,14 +797,119 @@
           <div class="empty-state"><strong>Falha ao carregar trilhas</strong><span>${escapeHtml(error.message)}</span></div>`;
       }
 
+      // Editar nome (macrotema/trilha)
+      const renameOverlay = document.getElementById("renameOverlay");
+
+      function openRenameMacrotema(macrotema) {
+        renameContext = { type: "macrotema", macrotema };
+        document.getElementById("renameModalTitle").textContent = "Editar nome do macrotema";
+        document.getElementById("renameNome").value = macrotema;
+        document.getElementById("renameStatus").textContent = "";
+        document.getElementById("renameStatus").className = "status-line";
+        renameOverlay.hidden = false;
+      }
+
+      function openRenameTrilha(trilhaId) {
+        const trail = state.trails.find((t) => t.id === trilhaId);
+        if (!trail) return;
+
+        renameContext = { type: "trilha", trilhaId, trilha: trail.trilha };
+        document.getElementById("renameModalTitle").textContent = "Editar nome da trilha";
+        document.getElementById("renameNome").value = trail.trilha;
+        document.getElementById("renameStatus").textContent = "";
+        document.getElementById("renameStatus").className = "status-line";
+        renameOverlay.hidden = false;
+      }
+
+      document.querySelectorAll("[data-close-rename]").forEach((el) =>
+        el.addEventListener("click", () => {
+          renameOverlay.hidden = true;
+          renameContext = null;
+        })
+      );
+
+      document.getElementById("confirmRenameButton").addEventListener("click", async () => {
+        if (!renameContext) return;
+
+        const button = document.getElementById("confirmRenameButton");
+        const status = document.getElementById("renameStatus");
+        const novoNome = document.getElementById("renameNome").value.trim();
+
+        if (!novoNome) {
+          status.textContent = "Informe o novo nome.";
+          status.className = "status-line error";
+          return;
+        }
+
+        button.disabled = true;
+        status.textContent = "Salvando...";
+        status.className = "status-line";
+
+        try {
+          if (renameContext.type === "macrotema") {
+            const trailsToUpdate = state.trails.filter((t) => t.macrotema === renameContext.macrotema);
+
+            for (const trail of trailsToUpdate) {
+              await requestJson(`/trilhas/${encodeURIComponent(trail.id)}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ macrotema: novoNome }),
+              });
+            }
+
+            selectedMacrotemaKey = novoNome;
+            selectedTrilhaKey = null;
+          } else {
+            await requestJson(`/trilhas/${encodeURIComponent(renameContext.trilhaId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ trilha: novoNome }),
+            });
+            selectedTrilhaKey = renameContext.trilhaId;
+          }
+
+          renameOverlay.hidden = true;
+          renameContext = null;
+          await initialize();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          button.disabled = false;
+        }
+      });
+
       async function initialize() {
         try {
-          const trails = await requestJson("/video-catalog/trails-overview");
+          if (!state.organizations.length) {
+            state.organizations = await requestJson("/organizations");
+            renderOrganizationSelect();
+
+            const lastOrganizationId = localStorage.getItem(LAST_ORGANIZATION_KEY);
+            const hasLastOrganization = state.organizations.some((org) => org.id === lastOrganizationId);
+
+            state.organizationId =
+              (hasLastOrganization && lastOrganizationId) ||
+              (state.organizations[0] && state.organizations[0].id) ||
+              null;
+
+            renderOrganizationSelect();
+          }
+
+          if (!state.organizationId) {
+            state.trails = [];
+            renderPerfilTabs();
+            renderMacrotemaGrid();
+            renderTrailDetail();
+            return;
+          }
+
+          const trails = await requestJson(`/trilhas/overview?organization_id=${encodeURIComponent(state.organizationId)}`);
           state.trails = Array.isArray(trails) ? trails : [];
 
           if (!selectedMacrotemaKey) {
             const macrotemas = macrotemasForActivePerfil();
-            selectedMacrotemaKey = macrotemas.length ? `${macrotemas[0].perfil_da_jornada}␟${macrotemas[0].macrotema}` : null;
+            selectedMacrotemaKey = macrotemas.length ? macrotemaKey(macrotemas[0]) : null;
             selectedTrilhaKey = macrotemas.length && macrotemas[0].trails.length ? trilhaKey(macrotemas[0].trails[0]) : null;
           }
 
