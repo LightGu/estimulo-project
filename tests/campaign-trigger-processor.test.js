@@ -30,6 +30,7 @@ function createGroup(overrides = {}) {
     id: "group-1",
     evolution_group_id: "120363@g.us",
     segmento: "Pre infancia",
+    trilha_id: "trilha-1",
     envia_video: true,
     ...overrides,
   };
@@ -40,7 +41,6 @@ function createVideo(overrides = {}) {
     id: "video-1",
     drive_file_id: "drive-1",
     etapa: 1,
-    trilha_segmento: "Pre infancia",
     status: true,
     legenda: "Legenda do video",
     ...overrides,
@@ -49,6 +49,10 @@ function createVideo(overrides = {}) {
 
 const fakeCampaignsRepository = {
   findById: async (id) => ({ id, nome: "Pre infancia" }),
+};
+
+const noCaptionsRepository = {
+  listByCampaign: async () => [],
 };
 
 async function testVideoFlowRepositoryUsesGroupProgress() {
@@ -66,6 +70,16 @@ async function testVideoFlowRepositoryUsesGroupProgress() {
         return [{ video_id: "video-1" }];
       },
     },
+    trilhasRepository: {
+      listVideoLinksByTrilha: async (trilhaId) => {
+        assert.equal(trilhaId, "trilha-1");
+
+        return [
+          { trilha_id: trilhaId, video_id: "video-1", ordem: 1 },
+          { trilha_id: trilhaId, video_id: "video-2", ordem: 2 },
+        ];
+      },
+    },
   });
 
   const nextVideo = await repository.findNextApprovedUnsentVideoForGroup(createGroup());
@@ -78,6 +92,7 @@ async function testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch() {
   const processor = createCampaignTriggerProcessor({
     logger: {},
     campaigns: fakeCampaignsRepository,
+    campaignVideoCaptionsRepository: noCaptionsRepository,
     dispatchLogs: null,
     campaignGroups: {
       listGroups: async (campaignId) => {
@@ -120,6 +135,49 @@ async function testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch() {
   assert.equal(job.updates[1].status, "completed");
 }
 
+async function testProcessorPrefersGeneratedCaptionOverManualText() {
+  const dispatchJobs = [];
+  const processor = createCampaignTriggerProcessor({
+    logger: {},
+    campaigns: fakeCampaignsRepository,
+    campaignVideoCaptionsRepository: {
+      listByCampaign: async (campaignId) => {
+        assert.equal(campaignId, "campaign-1");
+
+        return [
+          {
+            group_id: "group-1",
+            video_id: "video-1",
+            status: "gerado",
+            caption_id: "caption-1",
+            caption_text: "Legenda gerada pelo agente",
+          },
+        ];
+      },
+    },
+    dispatchLogs: null,
+    campaignGroups: {
+      listGroups: async () => [
+        { groups: createGroup({ id: "group-1", evolution_group_id: "enabled@g.us", envia_video: true }) },
+      ],
+    },
+    videoFlowRepository: {
+      findNextApprovedUnsentVideoForGroup: async () => createVideo({ id: "video-1", drive_file_id: "drive-1" }),
+    },
+    addDispatchJob: async (payload) => {
+      dispatchJobs.push(payload);
+
+      return { id: `dispatch-${dispatchJobs.length}`, data: payload };
+    },
+  });
+
+  await processor(createJob());
+
+  assert.equal(dispatchJobs.length, 1);
+  assert.equal(dispatchJobs[0].legenda, "Legenda gerada pelo agente");
+  assert.equal(dispatchJobs[0].caption_id, "caption-1");
+}
+
 async function testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent() {
   const jitterCalls = [];
   const campaignUpdates = [];
@@ -132,6 +190,7 @@ async function testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent() 
         return { id, ...payload };
       },
     },
+    campaignVideoCaptionsRepository: noCaptionsRepository,
     dispatchLogs: null,
     campaignGroups: {
       listGroups: async () => [
@@ -178,17 +237,78 @@ async function testProcessorUsesCampaignNameAsTrailFallback() {
     campaigns: {
       findById: async () => ({ id: "campaign-1", nome: "Trilha Campanha" }),
     },
+    campaignVideoCaptionsRepository: noCaptionsRepository,
     dispatchLogs: null,
+    trilhasRepository: {
+      // Nenhuma trilha cadastrada com esse nome: fallback cai no comportamento legado
+      // (trilha_override em texto), mantendo o teste original sem tocar rede/banco real.
+      findByTrilhaName: async () => null,
+    },
     campaignGroups: {
       listGroups: async () => [
-        { groups: createGroup({ id: "group-1", evolution_group_id: "group-1@g.us", segmento: "Outro" }) },
+        {
+          groups: createGroup({
+            id: "group-1",
+            evolution_group_id: "group-1@g.us",
+            segmento: "Outro",
+            trilha_id: undefined,
+          }),
+        },
       ],
     },
     videoFlowRepository: {
       findNextApprovedUnsentVideoForGroup: async (group) => {
         assert.equal(group.trilha_override, "Trilha Campanha");
 
-        return createVideo({ trilha: "Trilha Campanha" });
+        return createVideo();
+      },
+    },
+    addDispatchJob: async (payload) => {
+      dispatchJobs.push(payload);
+
+      return { id: "dispatch-1", data: payload };
+    },
+  });
+
+  await processor(createJob());
+
+  assert.equal(dispatchJobs.length, 1);
+}
+
+async function testProcessorResolvesTrilhaIdFromCampaignNameFallback() {
+  const dispatchJobs = [];
+  const processor = createCampaignTriggerProcessor({
+    logger: {},
+    campaigns: {
+      findById: async () => ({ id: "campaign-1", nome: "Trilha Campanha" }),
+    },
+    campaignVideoCaptionsRepository: noCaptionsRepository,
+    dispatchLogs: null,
+    trilhasRepository: {
+      findByTrilhaName: async (nome) => {
+        assert.equal(nome, "Trilha Campanha");
+
+        return { id: "trilha-1", trilha: "Trilha Campanha" };
+      },
+    },
+    campaignGroups: {
+      listGroups: async () => [
+        {
+          groups: createGroup({
+            id: "group-1",
+            evolution_group_id: "group-1@g.us",
+            segmento: "Outro",
+            trilha_id: undefined,
+          }),
+        },
+      ],
+    },
+    videoFlowRepository: {
+      findNextApprovedUnsentVideoForGroup: async (group) => {
+        assert.equal(group.trilha_id, "trilha-1");
+        assert.equal(group.trilha_override, undefined);
+
+        return createVideo();
       },
     },
     addDispatchJob: async (payload) => {
@@ -208,6 +328,7 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
   const processor = createCampaignTriggerProcessor({
     logger: {},
     campaigns: fakeCampaignsRepository,
+    campaignVideoCaptionsRepository: noCaptionsRepository,
     dispatchLogs: {
       listByCampaign: async (campaignId) => {
         assert.equal(campaignId, "campaign-1");
@@ -249,8 +370,10 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
 async function main() {
   await testVideoFlowRepositoryUsesGroupProgress();
   await testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch();
+  await testProcessorPrefersGeneratedCaptionOverManualText();
   await testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent();
   await testProcessorUsesCampaignNameAsTrailFallback();
+  await testProcessorResolvesTrilhaIdFromCampaignNameFallback();
   await testProcessorCreatesPendingDispatchLogAfterEnqueue();
 
   console.log("campaign-trigger-processor tests OK");

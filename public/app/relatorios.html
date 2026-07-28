@@ -28,7 +28,7 @@
         <header class="topbar">
           <div class="topbar-titles">
             <h1>Relatório operacional</h1>
-            <p>Conteúdos enviados, filtráveis por período, organização, grupo, campanha e trilha.</p>
+            <p>Conteúdos enviados, filtráveis por período, organização e grupo.</p>
           </div>
           <div class="topbar-actions">
             <div class="user-chip"><span class="avatar">LC</span> Lina Chaim</div>
@@ -51,25 +51,23 @@
                 <select id="orgFilter"><option value="todas">Todas</option></select>
               </div>
               <div class="field" style="min-width:200px;">
-                <label for="campanhaFilter">Campanha</label>
-                <select id="campanhaFilter"><option value="todas">Todas</option></select>
-              </div>
-              <div class="field" style="min-width:200px;">
-                <label for="trilhaFilter">Trilha</label>
-                <select id="trilhaFilter"><option value="todas">Todas</option></select>
+                <label for="groupFilter">Grupo</label>
+                <select id="groupFilter"><option value="todos">Todos</option></select>
               </div>
               <div class="field" style="min-width:160px;">
                 <label for="statusFilter">Status</label>
                 <select id="statusFilter">
                   <option value="todos">Todos</option>
-                  <option value="enviado">Enviado</option>
+                  <option value="pendente">Pendente</option>
                   <option value="processando">Processando</option>
+                  <option value="enviado">Enviado</option>
                   <option value="erro">Erro</option>
+                  <option value="falhou">Falhou</option>
                 </select>
               </div>
               <div class="toolbar-spacer"></div>
               <button class="btn btn-secondary" id="clearFiltersButton" type="button">Limpar filtros</button>
-              <button class="btn" id="exportCsvButton" type="button">Exportar CSV</button>
+              <button class="btn" id="applyFiltersButton" type="button">Aplicar filtro</button>
             </div>
           </section>
 
@@ -85,7 +83,8 @@
               <table>
                 <thead>
                   <tr>
-                    <th>Data</th>
+                    <th>Data/Hora</th>
+                    <th>Horário de envio planejado</th>
                     <th>Organização</th>
                     <th>Grupo</th>
                     <th>Campanha</th>
@@ -96,60 +95,131 @@
                 <tbody id="reportBody"></tbody>
               </table>
             </div>
+            <div class="actions-bar-end">
+              <button class="btn" id="exportCsvButton" type="button">Exportar CSV</button>
+            </div>
           </section>
         </main>
       </div>
     </div>
 
-    <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
-      const STATUS_BADGE = { enviado: "badge-success", processando: "badge-warning", erro: "badge-danger" };
-      const STATUS_TONE = { enviado: "success", processando: "warning", erro: "danger" };
+      const STATUS_LABEL = {
+        pendente: "Pendente",
+        processando: "Processando",
+        enviado: "Enviado",
+        erro: "Erro",
+        falhou: "Falhou",
+      };
+      const STATUS_BADGE = {
+        pendente: "badge-neutral",
+        processando: "badge-warning",
+        enviado: "badge-success",
+        erro: "badge-danger",
+        falhou: "badge-danger",
+      };
+
+      const todayIso = new Date().toISOString().slice(0, 10);
+
+      const state = {
+        organizations: [],
+        groups: [],
+        logs: [],
+      };
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        }[char]));
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
+      }
+
+      function renderLoadError(error) {
+        document.getElementById("summaryCards").innerHTML = "";
+        document.getElementById("resultCount").textContent = "";
+        document.getElementById("reportBody").innerHTML = `
+          <tr><td colspan="7"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
+      }
+
+      function campaignLabel(campaign) {
+        if (!campaign) return "—";
+        if (!campaign.data_envio) return campaign.trilha || "—";
+        const [, m, d] = campaign.data_envio.split("-");
+        return `Disparo no dia ${d}/${m}`;
+      }
+
+      function formatDateTime(isoString) {
+        if (!isoString) return "—";
+        const date = new Date(isoString);
+        if (Number.isNaN(date.getTime())) return "—";
+        return date.toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
 
       function populateFilters() {
         document.getElementById("orgFilter").innerHTML =
-          '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.nome}">${o.nome}</option>`).join("");
+          '<option value="todas">Todas</option>' +
+          state.organizations.map((o) => `<option value="${o.id}">${escapeHtml(o.nome)}</option>`).join("");
 
-        const campanhas = Array.from(new Set(MOCK.reportRows.map((r) => r.campanha)));
-        document.getElementById("campanhaFilter").innerHTML =
-          '<option value="todas">Todas</option>' + campanhas.map((c) => `<option value="${c}">${c}</option>`).join("");
-
-        const trilhas = Array.from(new Set(MOCK.reportRows.map((r) => r.trilha)));
-        document.getElementById("trilhaFilter").innerHTML =
-          '<option value="todas">Todas</option>' + trilhas.map((t) => `<option value="${t}">${t}</option>`).join("");
+        document.getElementById("groupFilter").innerHTML =
+          '<option value="todos">Todos</option>' +
+          state.groups.map((g) => `<option value="${g.id}">${escapeHtml(g.nome)}</option>`).join("");
       }
 
-      function matchesFilters(row) {
+      function clampToToday(inputEl) {
+        if (inputEl.value && inputEl.value > todayIso) {
+          inputEl.value = todayIso;
+        }
+      }
+
+      async function fetchLogs() {
         const dataInicio = document.getElementById("dataInicio").value;
         const dataFim = document.getElementById("dataFim").value;
         const org = document.getElementById("orgFilter").value;
-        const campanha = document.getElementById("campanhaFilter").value;
-        const trilha = document.getElementById("trilhaFilter").value;
+        const group = document.getElementById("groupFilter").value;
         const status = document.getElementById("statusFilter").value;
 
-        if (dataInicio && row.data < dataInicio) return false;
-        if (dataFim && row.data > dataFim) return false;
-        if (org !== "todas" && row.organizacao !== org) return false;
-        if (campanha !== "todas" && row.campanha !== campanha) return false;
-        if (trilha !== "todas" && row.trilha !== trilha) return false;
-        if (status !== "todos" && row.status !== status) return false;
-        return true;
-      }
+        const params = new URLSearchParams();
+        if (dataInicio) params.set("start_date", dataInicio);
+        if (dataFim) params.set("end_date", dataFim);
+        if (org !== "todas") params.set("organization_id", org);
+        if (group !== "todos") params.set("group_id", group);
+        if (status !== "todos") params.set("status", status);
 
-      function getFilteredRows() {
-        return MOCK.reportRows.filter(matchesFilters);
+        state.logs = await requestJson(`/reports/dispatches?${params.toString()}`);
       }
 
       function renderSummary(rows) {
-        const counts = { enviado: 0, processando: 0, erro: 0 };
-        rows.forEach((r) => counts[r.status]++);
+        const counts = { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0 };
+        rows.forEach((r) => {
+          if (counts[r.status] !== undefined) counts[r.status]++;
+        });
         const cards = [
           { label: "Total no período", value: rows.length, bar: "var(--brand-blue)" },
           { label: "Enviados", value: counts.enviado, bar: "var(--success)" },
-          { label: "Processando", value: counts.processando, bar: "var(--warning)" },
-          { label: "Erros", value: counts.erro, bar: "var(--danger)" },
+          { label: "Processando", value: counts.processando + counts.pendente, bar: "var(--warning)" },
+          { label: "Erros", value: counts.erro + counts.falhou, bar: "var(--danger)" },
         ];
         document.getElementById("summaryCards").innerHTML = cards
           .map(
@@ -165,40 +235,54 @@
       function renderTable(rows) {
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
         if (!rows.length) {
-          document.getElementById("reportBody").innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
+          document.getElementById("reportBody").innerHTML = `<tr><td colspan="7"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
         document.getElementById("reportBody").innerHTML = rows
-          .map(
-            (r) => `
+          .map((r) => {
+            const organizacao = r.groups?.organizations?.nome || "—";
+            const grupo = r.groups?.nome || "—";
+            const campanha = campaignLabel(r.campaigns);
+            const conteudo = r.video_catalog?.nome_do_arquivo || "—";
+            const statusLabel = STATUS_LABEL[r.status] || r.status;
+            const badgeClass = STATUS_BADGE[r.status] || "badge-neutral";
+            return `
             <tr>
-              <td class="mono">${r.data}</td>
-              <td>${r.organizacao}</td>
-              <td class="strong">${r.grupo}</td>
-              <td>${r.campanha}</td>
-              <td>${r.conteudo}</td>
-              <td><span class="badge has-tip ${STATUS_BADGE[r.status]}" data-tip="${r.motivo || ""}" data-tip-tone="${STATUS_TONE[r.status]}">${r.status}</span></td>
-            </tr>`
-          )
+              <td class="mono">${formatDateTime(r.criado_em)}</td>
+              <td class="mono">${formatDateTime(r.horario_envio_planejado)}</td>
+              <td>${escapeHtml(organizacao)}</td>
+              <td class="strong">${escapeHtml(grupo)}</td>
+              <td>${escapeHtml(campanha)}</td>
+              <td>${escapeHtml(conteudo)}</td>
+              <td><span class="badge ${badgeClass}" title="${escapeHtml(r.mensagem_erro || "")}">${statusLabel}</span></td>
+            </tr>`;
+          })
           .join("");
       }
 
-      function renderAll() {
-        const rows = getFilteredRows();
-        renderSummary(rows);
-        renderTable(rows);
+      async function renderAll() {
+        try {
+          await fetchLogs();
+          renderSummary(state.logs);
+          renderTable(state.logs);
+        } catch (error) {
+          renderLoadError(error);
+        }
       }
 
-      ["dataInicio", "dataFim", "orgFilter", "campanhaFilter", "trilhaFilter", "statusFilter"].forEach((id) =>
-        document.getElementById(id).addEventListener("input", renderAll)
+      ["dataInicio", "dataFim"].forEach((id) =>
+        document.getElementById(id).addEventListener("change", () => {
+          clampToToday(document.getElementById(id));
+        })
       );
+
+      document.getElementById("applyFiltersButton").addEventListener("click", renderAll);
 
       document.getElementById("clearFiltersButton").addEventListener("click", () => {
         document.getElementById("dataInicio").value = "";
         document.getElementById("dataFim").value = "";
         document.getElementById("orgFilter").value = "todas";
-        document.getElementById("campanhaFilter").value = "todas";
-        document.getElementById("trilhaFilter").value = "todas";
+        document.getElementById("groupFilter").value = "todos";
         document.getElementById("statusFilter").value = "todos";
         renderAll();
       });
@@ -209,25 +293,53 @@
       }
 
       document.getElementById("exportCsvButton").addEventListener("click", () => {
-        const rows = getFilteredRows();
-        const headers = ["Data", "Organização", "Grupo", "Campanha", "Trilha", "Conteúdo", "Status"];
+        const headers = ["Data/Hora", "Horário de envio planejado", "Organização", "Grupo", "Campanha", "Conteúdo", "Status"];
         const lines = [headers.join(";")].concat(
-          rows.map((r) => [r.data, r.organizacao, r.grupo, r.campanha, r.trilha, r.conteudo, r.status].map(toCsvValue).join(";"))
+          state.logs.map((r) =>
+            [
+              formatDateTime(r.criado_em),
+              formatDateTime(r.horario_envio_planejado),
+              r.groups?.organizations?.nome || "",
+              r.groups?.nome || "",
+              campaignLabel(r.campaigns),
+              r.video_catalog?.nome_do_arquivo || "",
+              STATUS_LABEL[r.status] || r.status,
+            ]
+              .map(toCsvValue)
+              .join(";")
+          )
         );
         const csv = "﻿" + lines.join("\n");
         const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `relatorio-estimulo-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.download = `relatorio-estimulo-${todayIso}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
       });
 
-      populateFilters();
-      renderAll();
+      async function initialize() {
+        document.getElementById("dataInicio").max = todayIso;
+        document.getElementById("dataFim").max = todayIso;
+
+        try {
+          const [organizations, groups] = await Promise.all([
+            requestJson("/organizations"),
+            requestJson("/groups/search"),
+          ]);
+          state.organizations = Array.isArray(organizations) ? organizations : [];
+          state.groups = Array.isArray(groups) ? groups : [];
+          populateFilters();
+          await renderAll();
+        } catch (error) {
+          renderLoadError(error);
+        }
+      }
+
+      initialize();
     </script>
   </body>
 </html>

@@ -46,9 +46,28 @@ async function testReturnsEmptyScheduleWhenAllGroupsAreDisabled() {
   assert.deepEqual(schedule, []);
 }
 
+async function testPreservesCaptionIdAndGeneratedFlagPerGroup() {
+  const schedule = buildJitteredDispatchSchedule(createBaseParams({
+    groups: [
+      {
+        group_id: "group-1@g.us",
+        legenda: "Legenda gerada pelo agente",
+        caption_id: "caption-1",
+        caption_generated: true,
+      },
+      { group_id: "group-2@g.us" },
+    ],
+  }));
+
+  assert.equal(schedule[0].caption_id, "caption-1");
+  assert.equal(schedule[0].caption_generated, true);
+  assert.equal(schedule[1].caption_id, undefined);
+}
+
 async function main() {
   await testSkipsDisabledGroupsBeforeBuildingSchedule();
   await testReturnsEmptyScheduleWhenAllGroupsAreDisabled();
+  await testPreservesCaptionIdAndGeneratedFlagPerGroup();
 
   console.log("dispatch-jitter tests OK");
 }

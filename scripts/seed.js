@@ -98,7 +98,6 @@ async function main() {
     const { data, error } = await client
       .from("campaigns")
       .insert({
-        organization_id: organizationId,
         nome: campaignName,
         cron_expression: cronExpression,
         ativo: true,

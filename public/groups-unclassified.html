@@ -302,14 +302,14 @@
       function buildPayload(row) {
         const organizationId = row.querySelector("[data-field='organization_id']").value;
         const segmento = row.querySelector("[data-field='segmento']").value.trim();
-        const trilhaOverride = row.querySelector("[data-field='trilha_override']").value.trim();
+        const trilhaId = row.querySelector("[data-field='trilha_id']").value.trim();
         const enviaVideo = row.querySelector("[data-field='envia_video']").checked;
 
         return {
           organization_id: organizationId || null,
           segmento: segmento || null,
           envia_video: enviaVideo,
-          trilha_override: trilhaOverride || null,
+          trilha_id: trilhaId || null,
         };
       }
 
@@ -394,7 +394,7 @@
               <input data-field="envia_video" type="checkbox" aria-label="Envia video">
             </td>
             <td>
-              <select data-field="trilha_override">
+              <select data-field="trilha_id">
                 <option value="">Selecione o perfil</option>
               </select>
             </td>
@@ -402,6 +402,7 @@
             <td>
               <div class="actions">
                 <button type="button" data-action="save">Salvar</button>
+                <button type="button" data-action="transcribe" class="secondary">Transcrever</button>
                 <button type="button" data-action="dispatch" class="secondary">Enfileirar</button>
               </div>
             </td>
@@ -420,23 +421,24 @@
           });
           organizationField.value = textOrEmpty(group.organization_id);
           const segmentField = row.querySelector("[data-field='segmento']");
-          const trailField = row.querySelector("[data-field='trilha_override']");
+          const trailField = row.querySelector("[data-field='trilha_id']");
           segmentField.value = textOrEmpty(group.segmento);
           row.querySelector("[data-field='envia_video']").checked = group.envia_video === true;
           segmentField.addEventListener("change", () => loadTrailsForRow(row));
           segmentField.addEventListener("blur", () => loadTrailsForRow(row));
           trailField.addEventListener("change", () => updateVideoPreview(row));
           row.querySelector("[data-action='save']").addEventListener("click", () => saveGroup(row, group.id));
+          row.querySelector("[data-action='transcribe']").addEventListener("click", () => transcribeSelectedVideo(row));
           row.querySelector("[data-action='dispatch']").addEventListener("click", () => dispatchGroup(row, group.id));
 
           tbody.appendChild(row);
-          loadTrailsForRow(row, textOrEmpty(group.trilha_override));
+          loadTrailsForRow(row, textOrEmpty(group.trilha_id));
         });
       }
 
-      async function loadTrailsForRow(row, selectedTrail) {
+      async function loadTrailsForRow(row, selectedTrilhaId) {
         const segment = row.querySelector("[data-field='segmento']").value.trim();
-        const trailField = row.querySelector("[data-field='trilha_override']");
+        const trailField = row.querySelector("[data-field='trilha_id']");
         const preview = row.querySelector("[data-video-preview]");
 
         trailField.innerHTML = '<option value="">Selecione o perfil</option>';
@@ -449,7 +451,7 @@
         trailField.innerHTML = '<option value="">Carregando...</option>';
 
         try {
-          const response = await fetch(`/video-catalog/trails?perfil=${encodeURIComponent(segment)}`);
+          const response = await fetch(`/trilhas/by-perfil?perfil=${encodeURIComponent(segment)}`);
           const trails = await response.json();
 
           if (!response.ok) {
@@ -460,14 +462,15 @@
 
           (Array.isArray(trails) ? trails : []).forEach((trail) => {
             const option = document.createElement("option");
-            option.value = trail.trilha;
-            option.textContent = `${trail.trilha} (${trail.videos_count})`;
+            option.value = trail.id;
+            option.textContent = `${trail.macrotema} - ${trail.trilha} (${trail.videos_count})`;
             option.dataset.video = JSON.stringify(trail.first_video || {});
+            option.dataset.trilhaNome = `${trail.macrotema} - ${trail.trilha}`;
             trailField.appendChild(option);
           });
 
-          if (selectedTrail) {
-            trailField.value = selectedTrail;
+          if (selectedTrilhaId) {
+            trailField.value = selectedTrilhaId;
           }
 
           updateVideoPreview(row);
@@ -478,7 +481,8 @@
       }
 
       function updateVideoPreview(row) {
-        const trailField = row.querySelector("[data-field='trilha_override']");
+        row.dataset.selectedVideoId = "";
+        const trailField = row.querySelector("[data-field='trilha_id']");
         const preview = row.querySelector("[data-video-preview]");
         const selectedOption = trailField.selectedOptions[0];
         const video = selectedOption && selectedOption.dataset.video ? JSON.parse(selectedOption.dataset.video) : null;
@@ -488,7 +492,42 @@
           return;
         }
 
-        preview.textContent = `${video.ordem_geral || video.ordem || 1} - ${video.nome_do_arquivo || video.trilha || video.id}`;
+        row.dataset.selectedVideoId = video.id;
+        preview.textContent = `${video.ordem_geral || 1} - ${video.nome_do_arquivo || video.id}`;
+      }
+
+      async function transcribeSelectedVideo(row) {
+        const button = row.querySelector("[data-action='transcribe']");
+        const videoId = row.dataset.selectedVideoId;
+
+        if (!videoId) {
+          setRowStatus(row, "Selecione uma trilha com video", "error");
+          return;
+        }
+
+        button.disabled = true;
+        setRowStatus(row, "Transcrevendo video selecionado...");
+
+        try {
+          const response = await fetch(`/video-catalog/${encodeURIComponent(videoId)}/transcript`, {
+            method: "POST",
+          });
+          const payload = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Falha ao transcrever video");
+          }
+
+          setRowStatus(
+            row,
+            payload.skipped ? "Transcricao ja existia" : "Transcricao gerada",
+            "success"
+          );
+        } catch (error) {
+          setRowStatus(row, error.message, "error");
+        } finally {
+          button.disabled = false;
+        }
       }
 
       function padTimePart(value) {
@@ -515,9 +554,12 @@
             throw new Error("Organizacao e obrigatoria");
           }
 
-          if (!groupPayload.trilha_override) {
+          if (!groupPayload.trilha_id) {
             throw new Error("Trilha e obrigatoria");
           }
+
+          const trilhaField = row.querySelector("[data-field='trilha_id']");
+          const trilhaNome = trilhaField.selectedOptions[0]?.dataset.trilhaNome || "Trilha selecionada";
 
           const updateResponse = await fetch(`/groups/${encodeURIComponent(groupId)}`, {
             method: "PATCH",
@@ -535,7 +577,7 @@
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              nome: groupPayload.trilha_override,
+              nome: trilhaNome,
               organization_id: groupPayload.organization_id,
               group_ids: [groupId],
               ativo: true,

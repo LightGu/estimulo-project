@@ -5,6 +5,8 @@ const {
   createGoogleDriveVideoIndexStateStore,
 } = require("../services/google-drive-video-index-state");
 const { indexGoogleDriveVideos } = require("../services/google-drive-video-indexer");
+const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const videoTranscriptionService = require("../services/video-transcription.service");
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const {
   GOOGLE_DRIVE_VIDEO_INDEX_SCHEDULE_KEY,
@@ -21,6 +23,60 @@ const GOOGLE_DRIVE_VIDEO_INDEX_FAILED_STATUS = "failed";
 
 const googleDriveVideoIndexQueue = createQueue(queueNames.googleDriveVideoIndex);
 
+function buildVideoCatalogPayload(video) {
+  return Object.fromEntries(
+    Object.entries({
+      drive_file_id: video.drive_file_id,
+      nome_do_arquivo: video.nome_do_arquivo || video.name,
+      pasta_atual: video.pasta_atual,
+      status: video.status === undefined ? false : video.status,
+      link_video: video.web_view_link || video.link_video,
+      google_drive_created_at: video.google_drive_created_at,
+    }).filter(([, value]) => value !== undefined)
+  );
+}
+
+function createDefaultVideoUpsert(repository = videoCatalogRepository) {
+  let nextOrdemGeral;
+
+  return async function upsertVideo(video) {
+    const existingVideo = await repository.findByDriveFileId(video.drive_file_id);
+    const payload = buildVideoCatalogPayload(video);
+
+    if (existingVideo) {
+      const updatedVideo = await repository.update(existingVideo.id, payload);
+
+      return {
+        created: false,
+        video: updatedVideo,
+      };
+    }
+
+    if (nextOrdemGeral === undefined) {
+      const existingVideos = await repository.findAll();
+      nextOrdemGeral = existingVideos.reduce((max, item) => Math.max(max, Number(item.ordem_geral) || 0), 0) + 1;
+    }
+
+    const createdVideo = await repository.create({ ...payload, ordem_geral: nextOrdemGeral });
+    nextOrdemGeral += 1;
+
+    return {
+      created: true,
+      video: createdVideo,
+    };
+  };
+}
+
+function createDefaultVideoTranscriptionStarter(transcriptionService = videoTranscriptionService) {
+  return async function transcribeVideo(videoCatalogRecord) {
+    if (typeof transcriptionService.transcribeVideo === "function") {
+      return transcriptionService.transcribeVideo(videoCatalogRecord);
+    }
+
+    return transcriptionService.transcribeById(videoCatalogRecord.id);
+  };
+}
+
 function buildGoogleDriveVideoIndexJobData(params = {}) {
   const rootFolderId = params.root_folder_id || params.rootFolderId || process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
 
@@ -33,6 +89,7 @@ function buildGoogleDriveVideoIndexJobData(params = {}) {
     root_folder_name: params.root_folder_name || params.rootFolderName || "root",
     status: params.status || GOOGLE_DRIVE_VIDEO_INDEX_INITIAL_STATUS,
     requested_at: (params.requested_at ? new Date(params.requested_at) : new Date()).toISOString(),
+    force_full_index: Boolean(params.force_full_index || params.forceFullIndex),
   };
 }
 
@@ -62,7 +119,8 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
     drive: providedDrive,
     indexer = indexGoogleDriveVideos,
     stateStore = createGoogleDriveVideoIndexStateStore(),
-    upsertVideo,
+    upsertVideo = createDefaultVideoUpsert(),
+    transcribeVideo = createDefaultVideoTranscriptionStarter(),
     logger = console,
   } = options;
   let drive = providedDrive;
@@ -107,6 +165,7 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
         modifiedTimeAfter,
         modifiedTimeBefore,
         upsertVideo,
+        transcribeVideo,
         logger,
       });
       const completedAt = new Date().toISOString();
@@ -186,11 +245,11 @@ function createGoogleDriveVideoIndexProcessor(options = {}) {
 }
 
 function createGoogleDriveVideoIndexWorker(options = {}) {
-  const { drive, indexer, stateStore, upsertVideo, logger, ...workerOptions } = options;
+  const { drive, indexer, stateStore, upsertVideo, transcribeVideo, logger, ...workerOptions } = options;
 
   return createWorker(
     queueNames.googleDriveVideoIndex,
-    createGoogleDriveVideoIndexProcessor({ drive, indexer, stateStore, upsertVideo, logger }),
+    createGoogleDriveVideoIndexProcessor({ drive, indexer, stateStore, upsertVideo, transcribeVideo, logger }),
     workerOptions
   );
 }
@@ -213,6 +272,8 @@ module.exports = {
   createGoogleDriveVideoIndexEvents,
   createGoogleDriveVideoIndexProcessor,
   createGoogleDriveVideoIndexWorker,
+  createDefaultVideoTranscriptionStarter,
+  createDefaultVideoUpsert,
   googleDriveVideoIndexQueue,
   scheduleGoogleDriveVideoIndexJob,
 };
