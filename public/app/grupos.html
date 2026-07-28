@@ -3,7 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Grupos &middot; Est&iacute;mulo</title>
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        } catch (e) {}
+      })();
+    </script>
+    <title>Grupos · Estímulo</title>
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -31,7 +38,7 @@
             <p>Classifique, habilite envios e defina trilhas por grupo.</p>
           </div>
           <div class="topbar-actions">
-            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+            <div class="user-chip"><span class="avatar">LC</span> Lina Chaim</div>
           </div>
         </header>
 

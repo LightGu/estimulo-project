@@ -90,5 +90,90 @@
     `;
   }
 
-  document.addEventListener("DOMContentLoaded", render);
+  // ---------- Dark mode toggle ----------
+  // Applying data-theme happens as early as possible via the inline snippet in each
+  // page's <head> (see THEME_INIT_SNIPPET below) so there's no flash on load; this
+  // just injects the button and wires the click once the topbar exists.
+  const THEME_KEY = "estimulo-theme";
+  const THEME_ICONS = {
+    sun: '<circle cx="12" cy="12" r="4.5" /><path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.55 1.55M18.25 18.25l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.55-1.55M18.25 5.75l1.55-1.55" />',
+    moon: '<path d="M20 14.3A8.1 8.1 0 0 1 9.7 4a6.6 6.6 0 1 0 10.3 10.3Z" />',
+  };
+
+  function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  }
+
+  function themeToggleSvg(theme) {
+    const iconName = theme === "dark" ? "sun" : "moon";
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${THEME_ICONS[iconName]}</svg>`;
+  }
+
+  function applyTheme(theme) {
+    document.documentElement.setAttribute("data-theme", theme);
+    try {
+      localStorage.setItem(THEME_KEY, theme);
+    } catch (e) {
+      /* localStorage unavailable (e.g. file:// in some browsers) — theme just won't persist */
+    }
+    const btn = document.getElementById("themeToggleButton");
+    if (btn) {
+      btn.innerHTML = themeToggleSvg(theme);
+      btn.setAttribute("aria-label", theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro");
+    }
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  // Bubble/ripple reveal: expands a circle clip-path from the button outward until it
+  // covers the screen, using the View Transitions API (Chrome/Edge). Falls back to the
+  // plain CSS color fade (already in base.css) on browsers without support, or when the
+  // user prefers reduced motion.
+  function toggleThemeWithTransition(event) {
+    const newTheme = currentTheme() === "dark" ? "light" : "dark";
+
+    if (!document.startViewTransition || prefersReducedMotion()) {
+      applyTheme(newTheme);
+      return;
+    }
+
+    const x = event.clientX;
+    const y = event.clientY;
+    const endRadius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+
+    const transition = document.startViewTransition(() => applyTheme(newTheme));
+
+    transition.ready
+      .then(() => {
+        document.documentElement.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${endRadius}px at ${x}px ${y}px)`] },
+          { duration: 500, easing: "ease-in-out", pseudoElement: "::view-transition-new(root)" }
+        );
+      })
+      .catch(() => {
+        /* transition skipped (e.g. tab hidden mid-click) — theme is already applied above */
+      });
+  }
+
+  function initThemeToggle() {
+    const actions = document.querySelector(".topbar-actions");
+    if (!actions || document.getElementById("themeToggleButton")) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "themeToggleButton";
+    btn.className = "theme-toggle";
+    btn.innerHTML = themeToggleSvg(currentTheme());
+    btn.setAttribute("aria-label", currentTheme() === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro");
+    btn.addEventListener("click", toggleThemeWithTransition);
+
+    actions.insertBefore(btn, actions.firstChild);
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    render();
+    initThemeToggle();
+  });
 })();
