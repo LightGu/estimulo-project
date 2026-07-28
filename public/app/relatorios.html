@@ -157,6 +157,19 @@
           <tr><td colspan="7"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
       }
 
+      const DISPATCH_STATUS_TIP = {
+        pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
+        processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
+        enviado: "Entregue com sucesso ao grupo via Evolution API.",
+      };
+
+      function dispatchStatusTip(row) {
+        if (row.status === "erro" || row.status === "falhou") {
+          return row.mensagem_erro || "Falha no envio — motivo não informado.";
+        }
+        return DISPATCH_STATUS_TIP[row.status] || "";
+      }
+
       function campaignLabel(campaign) {
         if (!campaign) return "—";
         if (!campaign.data_envio) return campaign.trilha || "—";
@@ -254,7 +267,7 @@
               <td class="strong">${escapeHtml(grupo)}</td>
               <td>${escapeHtml(campanha)}</td>
               <td>${escapeHtml(conteudo)}</td>
-              <td><span class="badge ${badgeClass}" title="${escapeHtml(r.mensagem_erro || "")}">${statusLabel}</span></td>
+              <td><span class="badge has-tip ${badgeClass}" data-tip="${escapeHtml(dispatchStatusTip(r))}" data-tip-tone="${badgeClass.replace("badge-", "")}">${statusLabel}</span></td>
             </tr>`;
           })
           .join("");

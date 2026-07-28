@@ -58,6 +58,16 @@
   --callout-success-text: #0f6b56;
   --callout-danger-text: #7a1626;
 
+  /* Tooltip bubble backgrounds — deliberately separate from --success-bg etc.
+     Those are low-alpha by design for badges sitting on a card; a floating tooltip
+     needs a near-opaque background (+ backdrop-filter blur) so text underneath
+     doesn't show through and clash with the tooltip's own label. */
+  --tooltip-neutral-bg: rgba(238, 240, 251, 0.97);
+  --tooltip-success-bg: rgba(214, 245, 231, 0.97);
+  --tooltip-warning-bg: rgba(253, 238, 202, 0.97);
+  --tooltip-danger-bg: rgba(250, 218, 224, 0.97);
+  --tooltip-info-bg: rgba(213, 236, 253, 0.97);
+
   /* Shape & elevation */
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -102,6 +112,12 @@
   --callout-warning-text: #fcd34d;
   --callout-success-text: #6ee7b7;
   --callout-danger-text: #fca5a5;
+
+  --tooltip-neutral-bg: rgba(32, 34, 63, 0.94);
+  --tooltip-success-bg: rgba(15, 56, 45, 0.94);
+  --tooltip-warning-bg: rgba(61, 46, 12, 0.94);
+  --tooltip-danger-bg: rgba(64, 22, 28, 0.94);
+  --tooltip-info-bg: rgba(12, 42, 63, 0.94);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);

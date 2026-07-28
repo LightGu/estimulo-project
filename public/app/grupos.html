@@ -133,6 +133,7 @@
     </div>
 
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const state = {
         groups: [],
@@ -172,14 +173,14 @@
 
       function classificationBadge(group) {
         return group.segmento
-          ? '<span class="badge badge-success">Classificado</span>'
-          : '<span class="badge badge-warning">N&atilde;o classificado</span>';
+          ? '<span class="badge has-tip badge-success" data-tip="Este grupo j&aacute; tem perfil e organiza&ccedil;&atilde;o definidos." data-tip-tone="success">Classificado</span>'
+          : '<span class="badge has-tip badge-warning" data-tip="Faltam informa&ccedil;&otilde;es &mdash; defina o perfil deste grupo em Editar." data-tip-tone="warning">N&atilde;o classificado</span>';
       }
 
       function enviaVideoBadge(group) {
         return group.envia_video === true
-          ? '<span class="badge badge-info">Habilitado</span>'
-          : '<span class="badge badge-danger">N&atilde;o envia v&iacute;deo</span>';
+          ? '<span class="badge has-tip badge-info" data-tip="Este grupo recebe v&iacute;deos normalmente nos envios autom&aacute;ticos." data-tip-tone="info">Habilitado</span>'
+          : '<span class="badge has-tip badge-danger" data-tip="Este grupo n&atilde;o recebe v&iacute;deos &mdash; n&atilde;o entra nos fluxos de envio autom&aacute;tico." data-tip-tone="danger">N&atilde;o envia v&iacute;deo</span>';
       }
 
       function normalizeSegmentoOption(value) {

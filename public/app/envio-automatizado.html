@@ -306,6 +306,7 @@
     </div>
 
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const ICONS = {
         chevron: '<path d="M9 6l6 6-6 6" />',
@@ -477,7 +478,7 @@
             return `
             <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}">
               <td class="strong group-name-cell">
-                <div class="ellipsis" title="${escapeHtml(g.nome)}">${escapeHtml(g.nome)}${blockReason ? `<span class="block-flag" title="${escapeHtml(blockReason)}">${icon("warning")}</span>` : ""}</div>
+                <div class="ellipsis" title="${escapeHtml(g.nome)}">${escapeHtml(g.nome)}${blockReason ? `<span class="block-flag has-tip" data-tip="${escapeHtml(blockReason)}" data-tip-tone="danger">${icon("warning")}</span>` : ""}</div>
                 <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
               </td>
               <td><span class="badge badge-wrap ${SEGMENT_BADGE[g.segmento] || "badge-neutral"}">${wrapSegmento(g.segmento) || "Sem perfil"}</span></td>
@@ -548,7 +549,7 @@
                       <tr>
                         <td class="strong">${escapeHtml(h.trilha)}</td>
                         <td>${h.enviados}/${h.total} vídeos</td>
-                        <td>${h.concluida ? '<span class="badge badge-success">Concluída</span>' : '<span class="badge badge-warning">Parcial</span>'}</td>
+                        <td>${h.concluida ? '<span class="badge has-tip badge-success" data-tip="Todos os vídeos aprovados desta trilha já foram enviados a este grupo." data-tip-tone="success">Concluída</span>' : '<span class="badge has-tip badge-warning" data-tip="Ainda há vídeos aprovados desta trilha que não foram enviados a este grupo." data-tip-tone="warning">Parcial</span>'}</td>
                         <td class="mono">${escapeHtml(h.ultima_atividade || "—")}</td>
                       </tr>`
                       )
@@ -612,10 +613,10 @@
                         <td class="${v.status === "proximo" ? "strong" : ""}">${escapeHtml(v.nome_do_arquivo)}</td>
                         <td>${
                           v.status === "enviado"
-                            ? '<span class="badge badge-success">Enviado</span>'
+                            ? '<span class="badge has-tip badge-success" data-tip="Já foi entregue a este grupo." data-tip-tone="success">Enviado</span>'
                             : v.status === "proximo"
-                            ? '<span class="badge badge-success">Próximo a enviar</span>'
-                            : '<span class="badge badge-neutral">Pendente</span>'
+                            ? '<span class="badge has-tip badge-success" data-tip="Próximo vídeo aprovado da trilha a ser enviado a este grupo." data-tip-tone="success">Próximo a enviar</span>'
+                            : '<span class="badge has-tip badge-neutral" data-tip="Ainda não é a vez deste vídeo — está na fila após o próximo a enviar." data-tip-tone="neutral">Pendente</span>'
                         }</td>
                         <td class="mono">${escapeHtml(v.enviado_em || "—")}</td>
                       </tr>`
@@ -883,9 +884,13 @@
       }
 
       function captionStatusBadge(item) {
-        if (item.status === "gerado") return '<span class="badge badge-success">Gerado</span>';
-        if (item.status === "erro") return '<span class="badge badge-danger">Erro</span>';
-        return '<span class="badge badge-warning">Processando</span>';
+        if (item.status === "gerado") {
+          return '<span class="badge has-tip badge-success" data-tip="Legenda pronta para uso no envio." data-tip-tone="success">Gerado</span>';
+        }
+        if (item.status === "erro") {
+          return '<span class="badge has-tip badge-danger" data-tip="Falha ao gerar a legenda automaticamente — edite manualmente antes de enviar." data-tip-tone="danger">Erro</span>';
+        }
+        return '<span class="badge has-tip badge-warning" data-tip="Legenda sendo gerada por IA — aguarde a conclusão." data-tip-tone="warning">Processando</span>';
       }
 
       function renderCaptions() {

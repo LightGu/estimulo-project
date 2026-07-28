@@ -4,6 +4,65 @@
   Pure DOM injection (no fetch) so pages also work opened directly via file://.
 */
 (function () {
+  const LOCAL_API_BASE_URL = "http://127.0.0.1:3000";
+  const API_PATH_PREFIXES = [
+    "/campaigns",
+    "/groups",
+    "/health",
+    "/organizations",
+    "/reports",
+    "/trilhas",
+    "/video-catalog",
+  ];
+
+  function isLocalHost(hostname) {
+    return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+  }
+
+  function isApiPath(pathname) {
+    return API_PATH_PREFIXES.some(
+      (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+    );
+  }
+
+  function resolveLocalApiInput(input) {
+    if (typeof input !== "string") {
+      return input;
+    }
+
+    if (!input.startsWith("/")) {
+      return input;
+    }
+
+    const url = new URL(input, window.location.href);
+
+    if (!isApiPath(url.pathname)) {
+      return input;
+    }
+
+    const current = window.location;
+    const alreadyOnApi = current.protocol.startsWith("http") && isLocalHost(current.hostname) && current.port === "3000";
+    const localStaticServer = current.protocol === "file:" || (current.protocol.startsWith("http") && isLocalHost(current.hostname));
+
+    if (alreadyOnApi || !localStaticServer) {
+      return input;
+    }
+
+    return `${LOCAL_API_BASE_URL}${url.pathname}${url.search}${url.hash}`;
+  }
+
+  function installLocalApiFetchFallback() {
+    if (window.__estimuloLocalApiFetchFallbackInstalled || typeof window.fetch !== "function") {
+      return;
+    }
+
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (input, options) => nativeFetch(resolveLocalApiInput(input), options);
+    window.__estimuloLocalApiFetchFallbackInstalled = true;
+  }
+
+  installLocalApiFetchFallback();
+
   const ICONS = {
     home: '<path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5" />',
     groups: '<circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.6" /><path d="M3.5 19c.6-3 3-5 5.5-5s4.9 2 5.5 5" /><path d="M14.7 14.2c2.1.3 3.9 2 4.4 4.6" />',
@@ -45,7 +104,6 @@
         { key: "envio-automatizado", label: "Envio automatizado", href: "envio-automatizado.html", icon: "auto" },
         { key: "campanhas", label: "Campanhas", href: "campanhas.html", icon: "campaigns" },
         { key: "envio-manual", label: "Envio manual", href: "envio-manual.html", icon: "manual" },
-        { key: "mensagens", label: "Disparador Pontual", href: "mensagens.html", icon: "megaphone" },
         { key: "calendario", label: "Calendário editorial", href: "calendario.html", icon: "calendar" },
       ],
     },

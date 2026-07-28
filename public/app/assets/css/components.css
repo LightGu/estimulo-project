@@ -238,7 +238,9 @@
   line-height: 1.4;
   white-space: normal;
   box-shadow: var(--shadow-md);
-  background: var(--neutral-bg);
+  background: var(--tooltip-neutral-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   color: var(--text-muted);
   opacity: 0;
   pointer-events: none;
@@ -258,24 +260,24 @@
   top: 100%;
   transform: translateX(-50%);
   border: 5px solid transparent;
-  border-top-color: var(--neutral-bg);
+  border-top-color: var(--tooltip-neutral-bg);
   border-bottom-width: 0;
 }
 
-.tooltip-bubble--success { background: var(--success-bg); color: var(--success); }
-.tooltip-bubble--success::after { border-top-color: var(--success-bg); }
+.tooltip-bubble--success { background: var(--tooltip-success-bg); color: var(--success); }
+.tooltip-bubble--success::after { border-top-color: var(--tooltip-success-bg); }
 
-.tooltip-bubble--warning { background: var(--warning-bg); color: var(--warning); }
-.tooltip-bubble--warning::after { border-top-color: var(--warning-bg); }
+.tooltip-bubble--warning { background: var(--tooltip-warning-bg); color: var(--warning); }
+.tooltip-bubble--warning::after { border-top-color: var(--tooltip-warning-bg); }
 
-.tooltip-bubble--danger { background: var(--danger-bg); color: var(--danger); }
-.tooltip-bubble--danger::after { border-top-color: var(--danger-bg); }
+.tooltip-bubble--danger { background: var(--tooltip-danger-bg); color: var(--danger); }
+.tooltip-bubble--danger::after { border-top-color: var(--tooltip-danger-bg); }
 
-.tooltip-bubble--info { background: var(--info-bg); color: var(--info); }
-.tooltip-bubble--info::after { border-top-color: var(--info-bg); }
+.tooltip-bubble--info { background: var(--tooltip-info-bg); color: var(--info); }
+.tooltip-bubble--info::after { border-top-color: var(--tooltip-info-bg); }
 
-.tooltip-bubble--neutral { background: var(--neutral-bg); color: var(--text-muted); }
-.tooltip-bubble--neutral::after { border-top-color: var(--neutral-bg); }
+.tooltip-bubble--neutral { background: var(--tooltip-neutral-bg); color: var(--text-muted); }
+.tooltip-bubble--neutral::after { border-top-color: var(--tooltip-neutral-bg); }
 
 /* Tables */
 .table-wrap {
