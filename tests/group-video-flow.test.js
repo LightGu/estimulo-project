@@ -23,6 +23,7 @@ function createGroup(overrides = {}) {
     id: "group-1",
     evolution_group_id: "120363000000000000@g.us",
     segmento: "Pre infancia",
+    trilha_id: "trilha-1",
     envia_video: true,
     ...overrides,
   };
@@ -33,7 +34,6 @@ function createVideo(overrides = {}) {
     id: "video-1",
     drive_file_id: "drive-file-1",
     etapa: 1,
-    trilha_segmento: "Pre infancia",
     status: true,
     data_aprovacao: "2026-07-14T10:00:00.000Z",
     ...overrides,
@@ -41,15 +41,16 @@ function createVideo(overrides = {}) {
 }
 
 async function testSelectsFirstApprovedUnsentVideoForGroupTrail() {
+  // Quem chama ja filtra params.videos para conter apenas os vinculos da trilha (via
+  // trilha_videos), com ordem injetada a partir de trilha_videos.ordem.
   const video = selectNextApprovedUnsentVideo({
     group: createGroup(),
     sentVideoIds: ["video-1"],
     videos: [
-      createVideo({ id: "video-1", etapa: 1 }),
-      createVideo({ id: "video-2", etapa: 2, status: false }),
-      createVideo({ id: "video-3", etapa: 3, trilha_segmento: "Infancia" }),
-      createVideo({ id: "video-4", etapa: 4 }),
-      createVideo({ id: "video-5", etapa: 2 }),
+      createVideo({ id: "video-1", ordem: 1, etapa: 1 }),
+      createVideo({ id: "video-2", ordem: 2, etapa: 2, status: false }),
+      createVideo({ id: "video-4", ordem: 4, etapa: 4 }),
+      createVideo({ id: "video-5", ordem: 2, etapa: 2 }),
     ],
   });
 
@@ -152,15 +153,45 @@ async function testSkipsManuallyDisabledGroup() {
   assert.equal(result.reason, "group_video_disabled");
 }
 
+async function testSelectsFirstApprovedUnsentVideoForGroupTrailId() {
+  // Grupo ja migrado para o modelo relacional: quem chama ja filtra/decora os videos
+  // pertencentes a trilha (via trilha_videos.ordem), a funcao pura so ordena/filtra
+  // por aprovacao e ja-enviado (ver group-video-flow.js Fase 3).
+  const video = selectNextApprovedUnsentVideo({
+    group: createGroup({ trilha_id: "trilha-1", trilha_override: undefined, segmento: undefined }),
+    sentVideoIds: ["video-1"],
+    videos: [
+      createVideo({ id: "video-1", ordem: 1 }),
+      createVideo({ id: "video-2", ordem: 3, status: false }),
+      createVideo({ id: "video-3", ordem: 2 }),
+    ],
+  });
+
+  assert.equal(video.id, "video-3");
+}
+
+async function testResolvesGroupEligibleForDispatchByTrilhaId() {
+  const result = await resolveGroupVideoFlow({
+    campaign_id: "campaign-1",
+    group: createGroup({ trilha_id: "trilha-1", trilha_override: undefined, segmento: undefined }),
+    sentVideoIds: [],
+    videos: [createVideo({ id: "video-1", ordem: 1 })],
+  });
+
+  assert.equal(result.status, "eligible");
+  assert.equal(result.trilha_id, "trilha-1");
+  assert.equal(result.video_id, "video-1");
+}
+
 async function testResolvesMultipleGroupsForDispatch() {
   const result = await resolveGroupsVideoFlow({
     campaign_id: "campaign-1",
     groups: [
       createGroup({ id: "group-1", evolution_group_id: "group-1@g.us" }),
-      createGroup({ id: "group-2", evolution_group_id: "group-2@g.us", segmento: "Infancia" }),
+      createGroup({ id: "group-2", evolution_group_id: "group-2@g.us", trilha_id: undefined }),
     ],
     sentVideoIds: [],
-    videos: [createVideo({ id: "video-1", trilha_segmento: "Pre infancia" })],
+    videos: [createVideo({ id: "video-1", ordem: 1 })],
     logger: createLogger(),
   });
 
@@ -177,6 +208,8 @@ async function main() {
   await testSkipsDisabledGroupEvenWhenItWasAlreadyPausedByEndOfQueue();
   await testDoesNotResumeDisabledPausedGroupWhenNewEligibleVideoExists();
   await testSkipsManuallyDisabledGroup();
+  await testSelectsFirstApprovedUnsentVideoForGroupTrailId();
+  await testResolvesGroupEligibleForDispatchByTrilhaId();
   await testResolvesMultipleGroupsForDispatch();
 
   console.log("group-video-flow tests OK");

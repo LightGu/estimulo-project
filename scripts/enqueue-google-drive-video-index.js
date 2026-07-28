@@ -18,6 +18,8 @@ function parseArgs(argv) {
     } else if (value === "--root-folder-name") {
       args.root_folder_name = argv[index + 1];
       index += 1;
+    } else if (value === "--force-full-index") {
+      args.force_full_index = true;
     } else {
       args.positional.push(value);
     }
@@ -32,6 +34,7 @@ async function main() {
   const job = await addGoogleDriveVideoIndexJob({
     root_folder_id: args.root_folder_id || rootFolderId,
     root_folder_name: args.root_folder_name,
+    force_full_index: args.force_full_index,
   });
 
   console.log(

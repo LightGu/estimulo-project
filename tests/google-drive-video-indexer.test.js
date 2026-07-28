@@ -3,11 +3,12 @@ const assert = require("node:assert/strict");
 const {
   buildFolderChildrenQuery,
   FOLDER_MIME_TYPE,
+  SHORTCUT_MIME_TYPE,
   indexGoogleDriveVideos,
   isValidVideoFile,
 } = require("../src/services/google-drive-video-indexer");
 
-function createFakeDrive(tree, failures = new Set()) {
+function createFakeDrive(tree, failures = new Set(), filesById = {}) {
   return {
     files: {
       async list(params) {
@@ -23,11 +24,20 @@ function createFakeDrive(tree, failures = new Set()) {
           },
         };
       },
+      async get(params) {
+        const file = filesById[params.fileId];
+
+        if (!file) {
+          throw new Error(`Arquivo simulado nao encontrado: ${params.fileId}`);
+        }
+
+        return { data: file };
+      },
     },
   };
 }
 
-async function testRecursiveIndexingMapsEtapaAndTrilha() {
+async function testRecursiveIndexingMapsBasicCatalogFields() {
   const drive = createFakeDrive({
     root: [
       { id: "step-1", name: "Etapa 01", mimeType: FOLDER_MIME_TYPE },
@@ -41,6 +51,7 @@ async function testRecursiveIndexingMapsEtapaAndTrilha() {
         mimeType: "video/mp4",
         fileExtension: "mp4",
         webViewLink: "https://drive.google.com/file/d/video-1/view",
+        createdTime: "2026-07-01T00:00:00.000Z",
         parents: ["persona-p"],
       },
     ],
@@ -59,9 +70,10 @@ async function testRecursiveIndexingMapsEtapaAndTrilha() {
   assert.equal(result.skipped_count, 1);
   assert.equal(result.error_count, 0);
   assert.equal(result.videos[0].drive_file_id, "video-1");
-  assert.equal(result.videos[0].etapa, 1);
-  assert.equal(result.videos[0].trilha_segmento, "Empreendedores na pre infancia");
-  assert.equal(result.videos[0].persona_hashtag, "#P01");
+  assert.equal(result.videos[0].nome_do_arquivo, "intro.mp4");
+  assert.equal(result.videos[0].pasta_atual, "#P01 - Persona Paulo");
+  assert.equal(result.videos[0].google_drive_created_at, "2026-07-01T00:00:00.000Z");
+  assert.equal(result.videos[0].status, true);
   assert.deepEqual(result.videos[0].drive_path, ["Conteudos", "Etapa 01", "#P01 - Persona Paulo"]);
   assert.equal(persisted.length, 1);
 }
@@ -95,8 +107,8 @@ async function testFolderErrorsDoNotStopIndexing() {
   assert.equal(result.indexed_count, 1);
   assert.equal(result.error_count, 1);
   assert.equal(result.errors[0].folder_id, "bad");
-  assert.equal(result.videos[0].etapa, 2);
-  assert.equal(result.videos[0].persona_code, "M01");
+  assert.equal(result.videos[0].drive_file_id, "video-2");
+  assert.equal(result.videos[0].pasta_atual, "Maria M01");
 }
 
 async function testInvalidVideosAreIgnored() {
@@ -164,12 +176,138 @@ async function testIncrementalIndexingReportsProcessedCountAndPeriod() {
   assert.equal(result.videos[0].modified_time, "2026-07-14T10:30:00.000Z");
 }
 
+async function testStartsTranscriptionOnlyForNewVideosWithoutBlockingIndexing() {
+  const drive = createFakeDrive({
+    root: [{ id: "step-1", name: "Etapa 01", mimeType: FOLDER_MIME_TYPE }],
+    "step-1": [{ id: "persona-p", name: "#P01", mimeType: FOLDER_MIME_TYPE }],
+    "persona-p": [
+      {
+        id: "video-new",
+        name: "novo.mp4",
+        mimeType: "video/mp4",
+        fileExtension: "mp4",
+      },
+      {
+        id: "video-existing",
+        name: "existente.mp4",
+        mimeType: "video/mp4",
+        fileExtension: "mp4",
+      },
+    ],
+  });
+  const transcriptionCalls = [];
+
+  const result = await indexGoogleDriveVideos({
+    drive,
+    rootFolderId: "root",
+    upsertVideo: async (video) => ({
+      created: video.drive_file_id === "video-new",
+      video: {
+        id: `catalog-${video.drive_file_id}`,
+        ...video,
+      },
+    }),
+    transcribeVideo: async (video) => {
+      transcriptionCalls.push(video.drive_file_id);
+      await new Promise(() => {});
+    },
+    logger: {},
+  });
+
+  await Promise.resolve();
+
+  assert.equal(result.indexed_count, 2);
+  assert.deepEqual(transcriptionCalls, ["video-new"]);
+}
+
+async function testFollowsShortcutToFolderAndIndexesVideosInside() {
+  const drive = createFakeDrive({
+    root: [
+      {
+        id: "shortcut-1",
+        name: "Vídeos Razonet",
+        mimeType: SHORTCUT_MIME_TYPE,
+        shortcutDetails: { targetId: "real-folder-1", targetMimeType: FOLDER_MIME_TYPE },
+      },
+    ],
+    "real-folder-1": [
+      {
+        id: "video-in-shortcut",
+        name: "aula.mp4",
+        mimeType: "video/mp4",
+        fileExtension: "mp4",
+      },
+    ],
+  });
+
+  const result = await indexGoogleDriveVideos({ drive, rootFolderId: "root", logger: {} });
+
+  assert.equal(result.indexed_count, 1);
+  assert.equal(result.error_count, 0);
+  assert.equal(result.videos[0].drive_file_id, "video-in-shortcut");
+  assert.equal(result.videos[0].pasta_atual, "Vídeos Razonet");
+}
+
+async function testFollowsShortcutToVideoFileDirectly() {
+  const drive = createFakeDrive(
+    {
+      root: [
+        {
+          id: "shortcut-2",
+          name: "Aula Atalho",
+          mimeType: SHORTCUT_MIME_TYPE,
+          shortcutDetails: { targetId: "real-video-1", targetMimeType: "video/mp4" },
+        },
+      ],
+    },
+    new Set(),
+    {
+      "real-video-1": {
+        id: "real-video-1",
+        name: "aula-real.mp4",
+        mimeType: "video/mp4",
+        fileExtension: "mp4",
+        webViewLink: "https://drive.google.com/file/d/real-video-1/view",
+      },
+    }
+  );
+
+  const result = await indexGoogleDriveVideos({ drive, rootFolderId: "root", logger: {} });
+
+  assert.equal(result.indexed_count, 1);
+  assert.equal(result.error_count, 0);
+  assert.equal(result.videos[0].drive_file_id, "real-video-1");
+  assert.equal(result.videos[0].nome_do_arquivo, "aula-real.mp4");
+}
+
+async function testShortcutWithoutTargetIsSkippedNotErrored() {
+  const drive = createFakeDrive({
+    root: [
+      {
+        id: "shortcut-3",
+        name: "Atalho quebrado",
+        mimeType: SHORTCUT_MIME_TYPE,
+      },
+    ],
+  });
+
+  const result = await indexGoogleDriveVideos({ drive, rootFolderId: "root", logger: {} });
+
+  assert.equal(result.indexed_count, 0);
+  assert.equal(result.error_count, 0);
+  assert.equal(result.skipped[0].reason, "shortcut_without_target");
+}
+
 async function main() {
-  await testRecursiveIndexingMapsEtapaAndTrilha();
+  await testRecursiveIndexingMapsBasicCatalogFields();
   await testFolderErrorsDoNotStopIndexing();
   await testInvalidVideosAreIgnored();
   await testIncrementalQueryKeepsFoldersAndFiltersFilesByModifiedTime();
   await testIncrementalIndexingReportsProcessedCountAndPeriod();
+  await testStartsTranscriptionOnlyForNewVideosWithoutBlockingIndexing();
+  await testFollowsShortcutToFolderAndIndexesVideosInside();
+  await testFollowsShortcutToVideoFileDirectly();
+  await testShortcutWithoutTargetIsSkippedNotErrored();
 
   console.log("google-drive-video-indexer tests OK");
 }

@@ -75,10 +75,44 @@ async function listRecent(limit = 10, client) {
   return data || [];
 }
 
+async function listWithFilters(filters = {}, client) {
+  let query = getClient(client)
+    .from(LOGS_TABLE)
+    .select(
+      "*, campaigns(id, trilha, data_envio, horario_envio), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo)"
+    )
+    .order("criado_em", { ascending: false });
+
+  if (filters.startDate) {
+    query = query.gte("criado_em", filters.startDate);
+  }
+
+  if (filters.endDate) {
+    query = query.lte("criado_em", filters.endDate);
+  }
+
+  if (filters.groupId) {
+    query = query.eq("group_id", filters.groupId);
+  }
+
+  if (filters.status) {
+    query = query.eq("status", filters.status);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 module.exports = {
   createLog,
   listByCampaign,
   listByGroup,
   listRecent,
+  listWithFilters,
   updateStatus,
 };

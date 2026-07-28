@@ -41,17 +41,18 @@ async function listActive(client) {
   return data || [];
 }
 
-async function listByOrganization(organizationId, client) {
+async function findByData(dataEnvio, client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
     .select("*")
-    .eq("organization_id", organizationId);
+    .eq("data_envio", dataEnvio)
+    .maybeSingle();
 
   if (error) {
     throw error;
   }
 
-  return data || [];
+  return data || null;
 }
 
 async function create(payload, client) {
@@ -102,9 +103,9 @@ module.exports = {
   create,
   delete: remove,
   findAll,
+  findByData,
   findById,
   listActive,
-  listByOrganization,
   remove,
   update,
 };

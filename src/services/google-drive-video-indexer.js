@@ -1,4 +1,5 @@
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+const SHORTCUT_MIME_TYPE = "application/vnd.google-apps.shortcut";
 
 const DEFAULT_VIDEO_EXTENSIONS = new Set([
   "3g2",
@@ -14,30 +15,6 @@ const DEFAULT_VIDEO_EXTENSIONS = new Set([
   "wmv",
 ]);
 
-const DEFAULT_PERSONA_MAPPINGS = [
-  {
-    code: "P01",
-    hashtag: "#P01",
-    persona: "Paulo",
-    trilha: "Empreendedores na pre infancia",
-    aliases: ["p01", "#p01", "paulo", "pre infancia", "pre-infancia", "preinfancia"],
-  },
-  {
-    code: "M01",
-    hashtag: "#M01",
-    persona: "Maria",
-    trilha: "Empreendedores na infancia",
-    aliases: ["m01", "#m01", "maria", "infancia"],
-  },
-  {
-    code: "E01",
-    hashtag: "#E01",
-    persona: "Eufrasio",
-    trilha: "Empreendedores na adolescencia e maturidade",
-    aliases: ["e01", "#e01", "eufrasio", "adolescencia", "maturidade"],
-  },
-];
-
 function normalizeText(value) {
   return String(value || "")
     .normalize("NFD")
@@ -46,12 +23,27 @@ function normalizeText(value) {
     .trim();
 }
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function isFolder(file) {
   return file && file.mimeType === FOLDER_MIME_TYPE;
+}
+
+function isShortcut(file) {
+  return file && file.mimeType === SHORTCUT_MIME_TYPE;
+}
+
+function resolveShortcutTarget(file) {
+  const targetId = file.shortcutDetails && file.shortcutDetails.targetId;
+
+  if (!targetId) {
+    return undefined;
+  }
+
+  return {
+    id: targetId,
+    name: file.name,
+    mimeType: file.shortcutDetails.targetMimeType,
+    parents: file.parents,
+  };
 }
 
 function getFileExtension(file) {
@@ -76,67 +68,6 @@ function isValidVideoFile(file, videoExtensions = DEFAULT_VIDEO_EXTENSIONS) {
   }
 
   return videoExtensions.has(getFileExtension(file));
-}
-
-function extractEtapaFromFolderName(folderName) {
-  const normalized = normalizeText(folderName);
-
-  if (!normalized || /#?[pme]01\b/.test(normalized)) {
-    return undefined;
-  }
-
-  const labelledMatch = normalized.match(/\b(?:etapa|fase|modulo|semana|aula)\s*0*(\d{1,3})\b/);
-
-  if (labelledMatch) {
-    return Number(labelledMatch[1]);
-  }
-
-  const leadingNumberMatch = normalized.match(/^\s*0*(\d{1,3})(?:\b|[\s._-])/);
-
-  if (leadingNumberMatch) {
-    return Number(leadingNumberMatch[1]);
-  }
-
-  return undefined;
-}
-
-function findEtapa(pathSegments) {
-  for (let index = pathSegments.length - 1; index >= 0; index -= 1) {
-    const etapa = extractEtapaFromFolderName(pathSegments[index].name);
-
-    if (Number.isInteger(etapa) && etapa >= 1) {
-      return etapa;
-    }
-  }
-
-  return undefined;
-}
-
-function matchAliasInText(normalizedText, alias) {
-  const normalizedAlias = normalizeText(alias);
-
-  if (!normalizedAlias) {
-    return false;
-  }
-
-  return new RegExp(`(^|[^a-z0-9])${escapeRegExp(normalizedAlias)}([^a-z0-9]|$)`).test(normalizedText);
-}
-
-function findPersona(pathSegments, personaMappings = DEFAULT_PERSONA_MAPPINGS) {
-  for (let index = pathSegments.length - 1; index >= 0; index -= 1) {
-    const normalizedFolderName = normalizeText(pathSegments[index].name);
-    const persona = personaMappings.find((mapping) =>
-      [mapping.code, mapping.hashtag, mapping.persona, ...(mapping.aliases || [])].some((alias) =>
-        matchAliasInText(normalizedFolderName, alias)
-      )
-    );
-
-    if (persona) {
-      return persona;
-    }
-  }
-
-  return undefined;
 }
 
 function buildDriveWebViewLink(fileId) {
@@ -183,26 +114,7 @@ function buildFolderChildrenQuery(folderId, options = {}) {
 }
 
 function mapVideoFile(file, pathSegments, options = {}) {
-  const etapa = findEtapa(pathSegments);
-  const persona = findPersona(pathSegments, options.personaMappings);
-
-  if (!Number.isInteger(etapa)) {
-    return {
-      skipped: true,
-      reason: "etapa_not_found",
-      file,
-      path: pathSegments.map((segment) => segment.name),
-    };
-  }
-
-  if (!persona) {
-    return {
-      skipped: true,
-      reason: "trilha_not_found",
-      file,
-      path: pathSegments.map((segment) => segment.name),
-    };
-  }
+  const parentFolder = pathSegments[pathSegments.length - 1];
 
   return {
     skipped: false,
@@ -210,19 +122,27 @@ function mapVideoFile(file, pathSegments, options = {}) {
       drive_file_id: file.id,
       drive_parent_id: file.parents && file.parents[0],
       name: file.name,
+      nome_do_arquivo: file.name,
+      pasta_atual: parentFolder && parentFolder.name,
       mime_type: file.mimeType,
       file_extension: getFileExtension(file) || undefined,
       modified_time: file.modifiedTime,
       web_view_link: file.webViewLink || buildDriveWebViewLink(file.id),
-      etapa,
-      trilha_segmento: persona.trilha,
-      persona_code: persona.code,
-      persona_hashtag: persona.hashtag,
-      persona_name: persona.persona,
+      google_drive_created_at: file.createdTime,
       drive_path: pathSegments.map((segment) => segment.name),
-      status: options.defaultStatus === undefined ? false : options.defaultStatus,
+      status: options.defaultStatus === undefined ? true : options.defaultStatus,
     },
   };
+}
+
+async function fetchShortcutTargetFile(drive, targetId, shortcutName) {
+  const response = await drive.files.get({
+    fileId: targetId,
+    fields: "id, name, mimeType, fileExtension, modifiedTime, createdTime, webViewLink, parents, size, videoMediaMetadata",
+    supportsAllDrives: true,
+  });
+
+  return { ...response.data, name: response.data.name || shortcutName };
 }
 
 async function listFolderChildren(drive, folderId, options = {}) {
@@ -233,7 +153,7 @@ async function listFolderChildren(drive, folderId, options = {}) {
     const response = await drive.files.list({
       q: buildFolderChildrenQuery(folderId, options),
       fields:
-        "nextPageToken, files(id, name, mimeType, fileExtension, modifiedTime, webViewLink, parents, size, videoMediaMetadata)",
+        "nextPageToken, files(id, name, mimeType, fileExtension, modifiedTime, createdTime, webViewLink, parents, size, videoMediaMetadata, shortcutDetails)",
       pageSize: options.pageSize || 1000,
       pageToken,
       supportsAllDrives: true,
@@ -252,6 +172,7 @@ async function indexGoogleDriveVideos(params) {
     drive,
     rootFolderId,
     rootFolderName = "root",
+    transcribeVideo,
     upsertVideo,
     logger = console,
     maxDepth = 50,
@@ -272,6 +193,41 @@ async function indexGoogleDriveVideos(params) {
   const errors = [];
   const visitedFolderIds = new Set();
   let processedCount = 0;
+
+  function startTranscriptionForNewVideo(upsertResult, mappedVideo) {
+    if (!transcribeVideo || !upsertResult || upsertResult.created !== true) {
+      return;
+    }
+
+    const videoCatalogRecord = upsertResult.video || upsertResult.record || mappedVideo;
+    const transcriptionPromise = Promise.resolve()
+      .then(() => transcribeVideo(videoCatalogRecord))
+      .then(() => {
+        logger.info &&
+          logger.info(
+            JSON.stringify({
+              event: "google_drive_video_index.transcription_completed",
+              video_id: videoCatalogRecord && videoCatalogRecord.id,
+              drive_file_id: videoCatalogRecord && videoCatalogRecord.drive_file_id,
+            })
+          );
+      })
+      .catch((error) => {
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "google_drive_video_index.transcription_failed",
+              video_id: videoCatalogRecord && videoCatalogRecord.id,
+              drive_file_id: videoCatalogRecord && videoCatalogRecord.drive_file_id,
+              error_message: error.message,
+            })
+          );
+      });
+
+    if (typeof transcriptionPromise.unref === "function") {
+      transcriptionPromise.unref();
+    }
+  }
 
   async function walk(folderId, pathSegments, depth) {
     if (depth > maxDepth) {
@@ -310,8 +266,32 @@ async function indexGoogleDriveVideos(params) {
       return;
     }
 
-    for (const child of children) {
+    for (const rawChild of children) {
+      let child = rawChild;
+
       try {
+        if (isShortcut(rawChild)) {
+          const target = resolveShortcutTarget(rawChild);
+
+          if (!target) {
+            skipped.push({
+              reason: "shortcut_without_target",
+              file_id: rawChild.id,
+              name: rawChild.name,
+              mime_type: rawChild.mimeType,
+              path: pathSegments.map((segment) => segment.name),
+            });
+            continue;
+          }
+
+          if (isFolder(target)) {
+            await walk(target.id, [...pathSegments, { id: target.id, name: rawChild.name }], depth + 1);
+            continue;
+          }
+
+          child = await fetchShortcutTargetFile(drive, target.id, rawChild.name);
+        }
+
         if (isFolder(child)) {
           await walk(child.id, [...pathSegments, { id: child.id, name: child.name }], depth + 1);
           continue;
@@ -344,7 +324,8 @@ async function indexGoogleDriveVideos(params) {
         }
 
         if (upsertVideo) {
-          await upsertVideo(mapped.video);
+          const upsertResult = await upsertVideo(mapped.video);
+          startTranscriptionForNewVideo(upsertResult, mapped.video);
         }
 
         videos.push(mapped.video);
@@ -384,15 +365,13 @@ async function indexGoogleDriveVideos(params) {
 }
 
 module.exports = {
-  DEFAULT_PERSONA_MAPPINGS,
   DEFAULT_VIDEO_EXTENSIONS,
   FOLDER_MIME_TYPE,
+  SHORTCUT_MIME_TYPE,
   buildFolderChildrenQuery,
-  extractEtapaFromFolderName,
-  findEtapa,
-  findPersona,
   indexGoogleDriveVideos,
   isValidVideoFile,
   mapVideoFile,
   normalizeText,
+  resolveShortcutTarget,
 };

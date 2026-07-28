@@ -1,4 +1,5 @@
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const videoTranscriptionService = require("./video-transcription.service");
 
 function normalizeStatus(value, defaultValue = false) {
   if (value === undefined || value === null || value === "") {
@@ -26,6 +27,12 @@ function normalizeStatus(value, defaultValue = false) {
 
 function createVideoCatalogService(dependencies = {}) {
   const repository = dependencies.repository || videoCatalogRepository;
+  const transcriptionService =
+    dependencies.transcriptionService ||
+    videoTranscriptionService.createVideoTranscriptionService({
+      repository,
+      ...(dependencies.videoTranscription || {}),
+    });
 
   async function create(payload) {
     const driveFileId = payload?.drive_file_id?.trim();
@@ -127,48 +134,12 @@ function createVideoCatalogService(dependencies = {}) {
     return repository.listApproved();
   }
 
-  async function listBySegmento(trilhaSegmento) {
-    if (!trilhaSegmento) {
-      throw new Error("Segment is required");
-    }
-
-    return repository.listBySegmento(trilhaSegmento);
-  }
-
-  async function listByEtapa(etapa) {
-    if (!Number.isInteger(Number(etapa)) || Number(etapa) < 1) {
-      throw new Error("Etapa must be a positive integer");
-    }
-
-    return repository.listByEtapa(Number(etapa));
-  }
-
   async function listByStatus(status) {
     if (status === undefined || status === null || status === "") {
       throw new Error("Status is required");
     }
 
     return repository.listByStatus(normalizeStatus(status));
-  }
-
-  async function listTrailsByProfile(profile) {
-    if (!profile) {
-      throw new Error("Profile is required");
-    }
-
-    return repository.listTrailsByProfile(profile);
-  }
-
-  async function getFirstApprovedByProfileAndTrail(profile, trail) {
-    if (!profile) {
-      throw new Error("Profile is required");
-    }
-
-    if (!trail) {
-      throw new Error("Trail is required");
-    }
-
-    return repository.findFirstApprovedByProfileAndTrail(profile, trail);
   }
 
   async function getByDriveFileId(driveFileId) {
@@ -179,6 +150,22 @@ function createVideoCatalogService(dependencies = {}) {
     return repository.findByDriveFileId(driveFileId);
   }
 
+  async function transcribeById(id, options = {}) {
+    if (!id) {
+      throw new Error("Video id is required");
+    }
+
+    return transcriptionService.transcribeById(id, options);
+  }
+
+  async function transcribeByDriveFileId(driveFileId, options = {}) {
+    if (!driveFileId) {
+      throw new Error("Drive file id is required");
+    }
+
+    return transcriptionService.transcribeByDriveFileId(driveFileId, options);
+  }
+
   return {
     create,
     delete: remove,
@@ -186,11 +173,9 @@ function createVideoCatalogService(dependencies = {}) {
     getById,
     list,
     listApproved,
-    listByEtapa,
-    listBySegmento,
     listByStatus,
-    listTrailsByProfile,
-    getFirstApprovedByProfileAndTrail,
+    transcribeByDriveFileId,
+    transcribeById,
     update,
   };
 }
