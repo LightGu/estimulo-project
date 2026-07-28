@@ -48,6 +48,16 @@
   --sidebar-text: #c6c9ec;
   --sidebar-text-active: #ffffff;
 
+  /* Chrome that doesn't map 1:1 to a surface token */
+  --topbar-bg: rgba(244, 245, 250, 0.9);
+
+  /* Callout text — separate from badge text so contrast can be tuned per-theme
+     independently of the badge's foreground color */
+  --callout-info-text: #0a4f78;
+  --callout-warning-text: #6b4a10;
+  --callout-success-text: #0f6b56;
+  --callout-danger-text: #7a1626;
+
   /* Shape & elevation */
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -57,4 +67,43 @@
   --shadow-lg: 0 12px 32px rgba(17, 20, 45, 0.14);
 
   --font-sans: "Poppins", "Segoe UI", Arial, Helvetica, sans-serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --bg: #0d0e1a;
+  --surface: #171933;
+  --surface-strong: #20223f;
+  --surface-sunken: #101120;
+  --line: #2a2d52;
+  --line-strong: #3b3e70;
+
+  /* Text */
+  --text: #eef0fb;
+  --text-muted: #a7acd1;
+  --text-faint: #7b80a8;
+
+  /* Status semantics — brighter so they read against dark, low-alpha tinted backgrounds */
+  --success: #34d399;
+  --success-bg: rgba(52, 211, 153, 0.16);
+  --warning: #fbbf24;
+  --warning-bg: rgba(251, 191, 36, 0.16);
+  --danger: #f87171;
+  --danger-bg: rgba(248, 113, 113, 0.16);
+  --info: #38bdf8;
+  --info-bg: rgba(56, 189, 248, 0.16);
+  --neutral-bg: rgba(255, 255, 255, 0.07);
+
+  --topbar-bg: rgba(13, 14, 26, 0.82);
+
+  --callout-info-text: #7dd3fc;
+  --callout-warning-text: #fcd34d;
+  --callout-success-text: #6ee7b7;
+  --callout-danger-text: #fca5a5;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
 }

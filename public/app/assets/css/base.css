@@ -4,6 +4,26 @@
   box-sizing: border-box;
 }
 
+/* Low-specificity theme-switch fade. Any element with its own transition
+   (buttons, tooltip, inputs, nav links, switch knob) keeps that instead —
+   class selectors win over this universal rule, so nothing here is clobbered.
+   This is the fallback for browsers without the View Transitions API below. */
+*,
+*::before,
+*::after {
+  transition: background-color 0.25s ease, color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Dark-mode bubble reveal (see assets/js/nav.js toggleThemeWithTransition).
+   The browser's default cross-fade is disabled so the only visible motion is the
+   expanding circle clip-path animated on ::view-transition-new(root); the "old"
+   snapshot just sits still underneath while the new one wipes in over it. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
 html,
 body {
   height: 100%;
