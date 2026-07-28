@@ -3,6 +3,13 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        } catch (e) {}
+      })();
+    </script>
     <title>Pausas · Estímulo</title>
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
@@ -24,7 +31,7 @@
             <p>Pause envios automáticos de um grupo ou de uma organização inteira, por um período determinado.</p>
           </div>
           <div class="topbar-actions">
-            <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
+            <div class="user-chip"><span class="avatar">LC</span> Lina Chaim</div>
           </div>
         </header>
 
