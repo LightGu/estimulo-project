@@ -128,18 +128,16 @@ async function main() {
       }),
     },
     trilhasService: {
-      listByOrganization: async (organizationId) => [
+      listAll: async () => [
         {
           id: "trilha-1",
-          organization_id: organizationId,
           macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
           trilha: "2.3 Como Cuidar das Finanças para Sobreviver e Crescer",
         },
       ],
-      listOverview: async (organizationId) => [
+      listOverview: async () => [
         {
           id: "trilha-1",
-          organization_id: organizationId,
           perfis: ["Infância", "Adolescência"],
           macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
           trilha: "2.3 Como Cuidar das Finanças para Sobreviver e Crescer",
@@ -149,6 +147,22 @@ async function main() {
           ],
         },
       ],
+      listByPerfil: async (perfil) => {
+        if (!["Pré-infância", "Infância", "Adolescência", "Maturidade"].includes(perfil)) {
+          throw new Error(`Invalid perfil: ${perfil}`);
+        }
+
+        return [
+          {
+            id: "trilha-1",
+            macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
+            trilha: "2.3 Como Cuidar das Finanças para Sobreviver e Crescer",
+            videos_count: 1,
+            first_video: { id: "video-1", ordem: 1, nome_do_arquivo: "1) Principais erros financeiros.mp4" },
+            perfil,
+          },
+        ];
+      },
       listSelectableVideos: async () => [
         {
           id: "video-1",
@@ -160,7 +174,6 @@ async function main() {
       ],
       createTrilha: async (payload) => ({
         id: "trilha-2",
-        organization_id: payload.organization_id,
         macrotema: payload.macrotema,
         trilha: payload.trilha,
         perfis: payload.perfis,
@@ -209,6 +222,7 @@ async function main() {
         segmento: payload.segmento,
         envia_video: payload.envia_video,
         trilha_override: payload.trilha_override,
+        trilha_id: payload.trilha_id,
       }),
       dispatchTestVideo: async (id, payload) => ({
         group: { id, ...payload, evolution_group_id: "120363@g.us" },
@@ -479,13 +493,13 @@ async function main() {
     assert.match(organizacoesAppPage, /requestJson\(`\/organizations\/\$\{encodeURIComponent\(editingOrgId\)\}`/);
     assert.match(organizacoesAppPage, /requestJson\("\/organizations", \{/);
 
-    const trilhasResponse = await fetch(`http://127.0.0.1:${port}/trilhas?organization_id=org-1`);
+    const trilhasResponse = await fetch(`http://127.0.0.1:${port}/trilhas`);
     assert.equal(trilhasResponse.status, 200);
     const trilhasPayload = await trilhasResponse.json();
     assert.equal(trilhasPayload.length, 1);
     assert.equal(trilhasPayload[0].id, "trilha-1");
 
-    const trailsOverviewResponse = await fetch(`http://127.0.0.1:${port}/trilhas/overview?organization_id=org-1`);
+    const trailsOverviewResponse = await fetch(`http://127.0.0.1:${port}/trilhas/overview`);
     assert.equal(trailsOverviewResponse.status, 200);
     const trailsOverviewPayload = await trailsOverviewResponse.json();
     assert.equal(trailsOverviewPayload.length, 1);
@@ -493,32 +507,43 @@ async function main() {
     assert.equal(trailsOverviewPayload[0].videos.length, 2);
     assert.equal(trailsOverviewPayload[0].videos[0].nome_do_arquivo, "1) Principais erros financeiros.mp4");
 
+    const trilhasByPerfilResponse = await fetch(`http://127.0.0.1:${port}/trilhas/by-perfil?perfil=${encodeURIComponent("Infância")}`);
+    assert.equal(trilhasByPerfilResponse.status, 200);
+    const trilhasByPerfilPayload = await trilhasByPerfilResponse.json();
+    assert.equal(trilhasByPerfilPayload.length, 1);
+    assert.equal(trilhasByPerfilPayload[0].id, "trilha-1");
+    assert.equal(trilhasByPerfilPayload[0].videos_count, 1);
+
+    const trilhasByPerfilInvalidResponse = await fetch(`http://127.0.0.1:${port}/trilhas/by-perfil?perfil=Invalido`);
+    assert.equal(trilhasByPerfilInvalidResponse.status, 400);
+
     const trilhasAppPageResponse = await fetch(`http://127.0.0.1:${port}/app/trilhas.html`);
     assert.equal(trilhasAppPageResponse.status, 200);
     const trilhasAppPage = await trilhasAppPageResponse.text();
     assert.doesNotMatch(trilhasAppPage, /mock-data\.js/);
     assert.doesNotMatch(trilhasAppPage, /helpers\.js/);
     assert.doesNotMatch(trilhasAppPage, /MOCK\./);
-    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/overview\?organization_id=/);
+    assert.match(trilhasAppPage, /requestJson\("\/trilhas\/overview"\)/);
     assert.match(trilhasAppPage, /nome_do_arquivo/);
     assert.match(trilhasAppPage, /id="newTrailButton" type="button">\+ Nova trilha<\/button>/);
     assert.doesNotMatch(trilhasAppPage, /id="newTrailButton"[^>]*disabled/);
     assert.match(trilhasAppPage, /requestJson\("\/trilhas", \{/);
-    assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/selectable-videos\?organization_id=/);
+    assert.match(trilhasAppPage, /requestJson\("\/trilhas\/selectable-videos"\)/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(movingVideo\.trilhaId\)\}\/videos\/\$\{encodeURIComponent\(movingVideo\.videoId\)\}\/move`/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(trail\.id\)\}\/reorder`, \{/);
     assert.match(trilhasAppPage, /draggable="true"/);
     assert.match(trilhasAppPage, /id="newTrailPerfil"><\/div>/);
     assert.match(trilhasAppPage, /id="newTrailMacrotema"><\/select>/);
     assert.match(trilhasAppPage, /Criar novo macrotema/);
-    assert.match(trilhasAppPage, /id="organizationSelect"/);
+    assert.doesNotMatch(trilhasAppPage, /id="organizationSelect"/);
+    assert.doesNotMatch(trilhasAppPage, /organization_id/);
     assert.match(trilhasAppPage, /id="moveTargetTrilha"><\/select>/);
     assert.doesNotMatch(trilhasAppPage, /id="newTrailVideos"/);
     assert.match(trilhasAppPage, /TRAIL_PROFILES = \["Pré-infância", "Infância", "Adolescência", "Maturidade"\]/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(renameContext\.trilhaId\)\}`/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(trail\.id\)\}\/perfis`/);
 
-    const selectableVideosResponse = await fetch(`http://127.0.0.1:${port}/trilhas/selectable-videos?organization_id=org-1`);
+    const selectableVideosResponse = await fetch(`http://127.0.0.1:${port}/trilhas/selectable-videos`);
     assert.equal(selectableVideosResponse.status, 200);
     const selectableVideosPayload = await selectableVideosResponse.json();
     assert.equal(selectableVideosPayload.length, 2);
@@ -531,7 +556,6 @@ async function main() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        organization_id: "org-1",
         perfis: ["Infância", "Adolescência"],
         macrotema: "GESTÃO FINANCEIRA: Dinheiro Organizado",
         trilha: "Nova trilha teste",
@@ -642,6 +666,16 @@ async function main() {
       trilha_override: "Trilha A",
     });
 
+    const trilhaIdOperationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trilha_id: "trilha-1" }),
+    });
+
+    assert.equal(trilhaIdOperationalSettingsResponse.status, 200);
+    const trilhaIdOperationalSettingsPayload = await trilhaIdOperationalSettingsResponse.json();
+    assert.equal(trilhaIdOperationalSettingsPayload.trilha_id, "trilha-1");
+
     const legacyOperationalSettingsResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/operational-settings`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -664,6 +698,20 @@ async function main() {
     assert.equal(testDispatchResponse.status, 202);
     const testDispatchPayload = await testDispatchResponse.json();
     assert.equal(testDispatchPayload.dispatch_job.id, "dispatch-1");
+
+    const testDispatchByTrilhaIdResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/test-dispatch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        segmento: "Pre infancia",
+        envia_video: true,
+        trilha_id: "trilha-1",
+      }),
+    });
+
+    assert.equal(testDispatchByTrilhaIdResponse.status, 202);
+    const testDispatchByTrilhaIdPayload = await testDispatchByTrilhaIdResponse.json();
+    assert.equal(testDispatchByTrilhaIdPayload.group.trilha_id, "trilha-1");
 
     const groupProgressResponse = await fetch(`http://127.0.0.1:${port}/groups/group-1/video-progress`);
     assert.equal(groupProgressResponse.status, 200);

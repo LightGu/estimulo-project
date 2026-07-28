@@ -280,7 +280,7 @@ async function testDispatchRegistersProgressAfterConfirmedSend() {
 
   assert.deepEqual(progressCalls, [
     { type: "hasDuplicate", groupId: "group-uuid-1", videoId: "video-1" },
-    { type: "registerDelivery", payload: { group_id: "group-uuid-1", video_id: "video-1" } },
+    { type: "registerDelivery", payload: { group_id: "group-uuid-1", video_id: "video-1", trilha_id: null } },
   ]);
   assert.equal(result.progress.duplicate, false);
   assert.equal(job.updates[1].progress_registered, true);
@@ -341,6 +341,7 @@ async function testManualDispatchBypassesCampaignConsistency() {
       payload: {
         group_id: "68ce77b5-b48e-4a41-8097-42be9002c09d",
         video_id: "74cc60eb-67f8-4a05-8839-d7dff4d512ce",
+        trilha_id: null,
       },
     },
   ]);
@@ -566,6 +567,49 @@ async function testRejectedCaptionDoesNotReachSender() {
   assert.equal(sentPayloads.length, 0);
 }
 
+async function testDispatchFallsBackToManualCaptionWhenGenerationFails() {
+  const sentPayloads = [];
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+    },
+    legenda: "Legenda escrita manualmente",
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    videoCaptionsService: {
+      async selectCaptionForVideo() {
+        throw new Error(
+          "Falha ao iniciar upload do video no Gemini: Quota exceeded for metric: generativelanguage.googleapis.com/file_storage_bytes"
+        );
+      },
+      async markCaptionUsed() {
+        throw new Error("nao deveria marcar legenda gerada como usada quando geracao falhou");
+      },
+    },
+    sender: async (payload) => {
+      sentPayloads.push(payload);
+      return { provider: "fake", status: 200 };
+    },
+  });
+
+  const result = await processor(createFakeJob(jobData));
+
+  assert.equal(result.status, DISPATCH_SUCCESS_STATUS);
+  assert.equal(sentPayloads.length, 1);
+  assert.equal(sentPayloads[0].message, "Legenda escrita manualmente");
+}
+
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
   await testDispatchSelectsUnusedCaptionForVideo();
@@ -581,6 +625,7 @@ async function main() {
   await testDispatchRejectsDisabledVideoGroupBeforeJobData();
   await testPreparesReviewedCaptionBeforeQueueCreation();
   await testRejectedCaptionDoesNotReachSender();
+  await testDispatchFallsBackToManualCaptionWhenGenerationFails();
 
   console.log("dispatch-google-drive-video tests OK");
 }

@@ -55,12 +55,14 @@ function createApp(dependencies = {}) {
   app.patch("/campaigns/:id/captions/:captionRowId", campaignVideoCaptionsController.updateCaption);
   app.post("/campaigns/:id/dispatch/confirm", campaignsController.confirmDispatch);
   app.get("/campaigns/:id", campaignsController.getById);
+  app.delete("/campaigns/:id", campaignsController.remove);
   app.get("/organizations", organizationsController.list);
   app.post("/organizations", organizationsController.create);
   app.patch("/organizations/:id", organizationsController.update);
   app.get("/reports/dispatches", reportController.listDispatches);
-  app.get("/trilhas", trilhasController.listByOrganization);
+  app.get("/trilhas", trilhasController.listAll);
   app.get("/trilhas/overview", trilhasController.listOverview);
+  app.get("/trilhas/by-perfil", trilhasController.listByPerfil);
   app.get("/trilhas/selectable-videos", trilhasController.listSelectableVideos);
   app.post("/trilhas", trilhasController.createTrilha);
   app.patch("/trilhas/:id", trilhasController.renameTrilha);

@@ -111,7 +111,7 @@ async function main() {
 
   assert.equal(sendFailure.message, "Falha no provedor");
   const failedLog = createdLogs.find((entry) => entry.video_id === "video-2");
-  assert.equal(failedLog.status, "erro");
+  assert.equal(failedLog.status, "falhou");
   assert.equal(failedLog.mensagem_erro, "Falha no provedor");
   assert.equal(createdProgress.length, 1);
   assert.deepEqual(campaignUpdates.at(-1), { id: "campaign-1", payload: { ativo: false } });

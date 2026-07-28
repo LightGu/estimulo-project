@@ -1,6 +1,6 @@
 const groupsRepository = require("../repositories/groups.repository");
 const organizationsRepository = require("../repositories/organizations.repository");
-const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const trilhasRepository = require("../repositories/trilhas.repository");
 const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
 
@@ -96,7 +96,7 @@ function normalizeNullableText(value, fieldName) {
 function createGroupsService(dependencies = {}) {
   const repository = dependencies.repository || groupsRepository;
   const organizationRepository = dependencies.organizationRepository || organizationsRepository;
-  const videoRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
+  const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
   const fetchEvolutionGroups = dependencies.fetchEvolutionGroups || fetchAllGroupsFromEvolution;
   const enqueueDispatch = dependencies.addDispatchJob || addDispatchJob;
 
@@ -191,7 +191,7 @@ function createGroupsService(dependencies = {}) {
       throw new Error("Group id is required");
     }
 
-    const allowedFields = ["organization_id", "segmento", "envia_video", "trilha_override"];
+    const allowedFields = ["organization_id", "segmento", "envia_video", "trilha_override", "trilha_id"];
     const hasAllowedField = allowedFields.some((field) => Object.prototype.hasOwnProperty.call(payload, field));
 
     if (!hasAllowedField) {
@@ -226,6 +226,20 @@ function createGroupsService(dependencies = {}) {
 
     if (Object.prototype.hasOwnProperty.call(payload, "trilha_override")) {
       nextPayload.trilha_override = normalizeNullableText(payload.trilha_override, "Trilha override");
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "trilha_id")) {
+      const trilhaId = normalizeNullableText(payload.trilha_id, "Trilha id");
+
+      if (trilhaId) {
+        const trilha = await trilhasRepositoryDependency.findById(trilhaId);
+
+        if (!trilha) {
+          throw new Error("Trilha not found");
+        }
+      }
+
+      nextPayload.trilha_id = trilhaId;
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, "envia_video")) {
@@ -395,17 +409,17 @@ function createGroupsService(dependencies = {}) {
     }
 
     const profile = group.segmento;
-    const trail = group.trilha_override;
+    const trilhaId = group.trilha_id;
 
     if (!profile) {
       throw new Error("Segmento is required");
     }
 
-    if (!trail) {
-      throw new Error("Trilha override is required");
+    if (!trilhaId) {
+      throw new Error("Trilha id is required");
     }
 
-    const video = await videoRepository.findFirstApprovedByProfileAndTrail(profile, trail);
+    const video = await trilhasRepositoryDependency.findFirstApprovedVideoByTrilhaAndProfile(trilhaId, profile);
 
     if (!video) {
       throw new Error("No approved video found for trail");
@@ -430,7 +444,7 @@ function createGroupsService(dependencies = {}) {
             }
           : undefined,
         link_video: video.drive_file_id ? undefined : video.link_video,
-        legenda: payload.legenda || `Teste: ${video.nome_do_arquivo || video.trilha || "video"}`,
+        legenda: payload.legenda || `Teste: ${video.nome_do_arquivo || "video"}`,
         scheduled_at: new Date(),
       },
       {

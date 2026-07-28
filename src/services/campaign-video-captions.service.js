@@ -4,6 +4,8 @@ const campaignGroupsRepository = require("../repositories/campaign-groups.reposi
 const defaultVideoCaptionsService = require("./video-captions.service");
 const defaultCaptionReviewService = require("./caption-review.service");
 const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
+const defaultTrilhasRepository = require("../repositories/trilhas.repository");
+const defaultGroupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const { resolveGroupsVideoFlow } = require("./group-video-flow");
 const {
   applyCampaignTrailFallback,
@@ -20,8 +22,28 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
   const videoCaptionsService = dependencies.videoCaptionsService || defaultVideoCaptionsService;
   const captionReviewService = dependencies.captionReviewService || defaultCaptionReviewService;
   const videoCatalogRepository = dependencies.videoCatalogRepository || defaultVideoCatalogRepository;
+  const trilhasRepository = dependencies.trilhasRepository || defaultTrilhasRepository;
   const videoFlowRepository = dependencies.videoFlowRepository || buildCampaignVideoFlowRepository(dependencies);
+  const groupVideoProgressRepository = dependencies.groupVideoProgressRepository || defaultGroupVideoProgressRepository;
   const logger = dependencies.logger || console;
+
+  async function filterOutDeliveredRows(rows) {
+    if (!rows.length) {
+      return rows;
+    }
+
+    const groupIds = [...new Set(rows.map((row) => row.group_id))];
+    const deliveredByGroupId = new Map(
+      await Promise.all(
+        groupIds.map(async (groupId) => [
+          groupId,
+          new Set((await groupVideoProgressRepository.listDelivered(groupId)).map((delivery) => delivery.video_id)),
+        ])
+      )
+    );
+
+    return rows.filter((row) => !deliveredByGroupId.get(row.group_id)?.has(row.video_id));
+  }
 
   async function resolveCampaignDispatchGroups(campaignId) {
     const campaign = await campaigns.findById(campaignId);
@@ -31,10 +53,12 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
     }
 
     const campaignGroupRows = await campaignGroups.listGroups(campaignId);
-    const groups = campaignGroupRows
-      .map(extractCampaignGroup)
-      .map((group) => applyCampaignTrailFallback(group, campaign))
-      .filter(isVideoEnabledGroup);
+    const groupsWithFallback = await Promise.all(
+      campaignGroupRows
+        .map(extractCampaignGroup)
+        .map((group) => applyCampaignTrailFallback(group, campaign, { trilhasRepository }))
+    );
+    const groups = groupsWithFallback.filter(isVideoEnabledGroup);
 
     const flow = await resolveGroupsVideoFlow({
       campaign_id: campaignId,
@@ -135,7 +159,8 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
       throw new Error("Campaign id is required");
     }
 
-    const rows = await repository.listByCampaign(campaignId);
+    const allRows = await repository.listByCampaign(campaignId);
+    const rows = await filterOutDeliveredRows(allRows);
     const total = rows.length;
     const gerado = rows.filter((row) => row.status === "gerado").length;
     const erro = rows.filter((row) => row.status === "erro").length;

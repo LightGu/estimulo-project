@@ -79,7 +79,7 @@ async function listWithFilters(filters = {}, client) {
   let query = getClient(client)
     .from(LOGS_TABLE)
     .select(
-      "*, campaigns(id, trilha, data_envio, horario_envio), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo, trilha)"
+      "*, campaigns(id, trilha, data_envio, horario_envio), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo)"
     )
     .order("criado_em", { ascending: false });
 

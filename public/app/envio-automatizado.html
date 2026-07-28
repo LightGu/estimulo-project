@@ -256,6 +256,22 @@
       </div>
     </div>
 
+    <div class="overlay" id="backToConfigOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Voltar para grupos?</h3>
+          <button class="icon-btn-close" id="closeBackToConfigModal" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted">Ao voltar, este disparo e todas as legendas geradas para ele serão <strong>apagados do banco de dados</strong> e não poderão ser recuperados. Você precisará configurar o disparo novamente.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancelBackToConfigModal" type="button">Cancelar</button>
+          <button class="btn btn-danger" id="confirmBackToConfigModal" type="button">Voltar e apagar disparo</button>
+        </div>
+      </div>
+    </div>
+
     <div class="overlay" id="captionOverlay" hidden>
       <div class="modal">
         <div class="modal-header">
@@ -294,6 +310,7 @@
         groups: [],
         organizations: [],
         trailsByProfile: new Map(),
+        trilhaNameById: new Map(),
         progressByGroup: new Map(),
         currentCampaignIds: [],
       };
@@ -315,6 +332,13 @@
           .replace(/>/g, "&gt;")
           .replace(/"/g, "&quot;")
           .replace(/'/g, "&#39;");
+      }
+
+      // new Date("YYYY-MM-DDTHH:mm:00") sem fuso e interpretado no horario local do
+      // navegador; convertemos para ISO UTC aqui para o backend (que roda em outro
+      // fuso) nao reinterpretar essa mesma string como horario local dele.
+      function localDateTimeToUtcIso(dataEnvio, horaStr) {
+        return new Date(`${dataEnvio}T${horaStr}:00`).toISOString();
       }
 
       async function requestJson(url, options) {
@@ -360,14 +384,26 @@
 
         let list = [];
         try {
-          const trails = await requestJson(`/video-catalog/trails?perfil=${encodeURIComponent(profile)}`);
+          const trails = await requestJson(`/trilhas/by-perfil?perfil=${encodeURIComponent(profile)}`);
           list = Array.isArray(trails) ? trails : [];
         } catch (error) {
           list = [];
         }
 
+        list.forEach((trail) => {
+          state.trilhaNameById.set(trail.id, `${trail.macrotema} - ${trail.trilha}`);
+        });
+
         state.trailsByProfile.set(segmento, list);
         return list;
+      }
+
+      function resolveTrilhaLabel(g) {
+        if (g.trilha_id) {
+          return state.trilhaNameById.get(g.trilha_id) || g.trilha_override || null;
+        }
+
+        return g.trilha_override || null;
       }
 
       async function loadProgressForGroup(groupId) {
@@ -379,10 +415,11 @@
       }
 
       function dispatchBlockReason(g, progress) {
-        if (!g.trilha_override) return "Nenhuma trilha selecionada para este grupo.";
+        const trilhaLabel = resolveTrilhaLabel(g);
+        if (!g.trilha_id && !g.trilha_override) return "Nenhuma trilha selecionada para este grupo.";
         if (!progress || !progress.current) return "Nenhuma trilha selecionada para este grupo.";
-        if (progress.current.total === 0) return `A trilha '${g.trilha_override}' ainda não tem vídeos aprovados disponíveis.`;
-        if (progress.current.concluida) return `A trilha '${g.trilha_override}' já foi concluída para este grupo — escolha uma nova trilha.`;
+        if (progress.current.total === 0) return `A trilha '${trilhaLabel}' ainda não tem vídeos aprovados disponíveis.`;
+        if (progress.current.concluida) return `A trilha '${trilhaLabel}' já foi concluída para este grupo — escolha uma nova trilha.`;
         return null;
       }
 
@@ -431,7 +468,7 @@
                 <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
               </td>
               <td><span class="badge badge-wrap ${SEGMENT_BADGE[g.segmento] || "badge-neutral"}">${wrapSegmento(g.segmento) || "Sem perfil"}</span></td>
-              <td class="group-name-cell"><div class="ellipsis" title="${escapeHtml(g.trilha_override || "")}">${g.trilha_override ? escapeHtml(g.trilha_override) : '<span class="text-faint">Sem trilha</span>'}</div></td>
+              <td class="group-name-cell"><div class="ellipsis" title="${escapeHtml(resolveTrilhaLabel(g) || "")}">${resolveTrilhaLabel(g) ? escapeHtml(resolveTrilhaLabel(g)) : '<span class="text-faint">Sem trilha</span>'}</div></td>
               <td class="chevron-cell">${icon("chevron")}</td>
             </tr>`;
           })
@@ -514,26 +551,28 @@
           trilhaOptions = await loadTrailsForProfile(group.segmento);
         }
 
+        const currentTrilhaLabel = resolveTrilhaLabel(group);
+
         const trilhaSelectHtml = editingThis
           ? `
             <div class="trilha-select-row">
               <select id="trilhaChangeSelect" style="max-width:260px;">
                 <option value="">Selecionar trilha</option>
-                ${trilhaOptions.map((t) => `<option value="${escapeHtml(t.trilha)}"${t.trilha === group.trilha_override ? " selected" : ""}>${escapeHtml(t.trilha)}</option>`).join("")}
+                ${trilhaOptions.map((t) => `<option value="${escapeHtml(t.id)}"${t.id === group.trilha_id ? " selected" : ""}>${escapeHtml(t.macrotema)} - ${escapeHtml(t.trilha)}</option>`).join("")}
               </select>
               <button class="btn btn-sm" id="confirmTrilhaChange" type="button">Confirmar</button>
               <button class="btn btn-ghost btn-sm" id="cancelTrilhaChange" type="button">Cancelar</button>
             </div>`
           : `
             <div class="trilha-select-row">
-              <strong style="font-size:14px;">${group.trilha_override ? escapeHtml(group.trilha_override) : "Nenhuma trilha selecionada"}</strong>
-              <button class="btn btn-secondary btn-sm" id="toggleTrilhaChange" type="button">${icon("refresh")} ${group.trilha_override ? "Alterar trilha" : "Selecionar trilha"}</button>
+              <strong style="font-size:14px;">${currentTrilhaLabel ? escapeHtml(currentTrilhaLabel) : "Nenhuma trilha selecionada"}</strong>
+              <button class="btn btn-secondary btn-sm" id="toggleTrilhaChange" type="button">${icon("refresh")} ${currentTrilhaLabel ? "Alterar trilha" : "Selecionar trilha"}</button>
             </div>`;
 
         let progressHtml = "";
         let videosTableHtml = "";
 
-        if (group.trilha_override && status) {
+        if ((group.trilha_id || group.trilha_override) && status) {
           if (status.total === 0) {
             progressHtml = `<div class="callout callout-warning" style="margin-top:12px;">Esta trilha ainda não tem vídeos aprovados disponíveis para envio.</div>`;
           } else {
@@ -595,7 +634,7 @@
 
         if (editingThis) {
           document.getElementById("confirmTrilhaChange").addEventListener("click", async () => {
-            const novaTrilha = document.getElementById("trilhaChangeSelect").value || null;
+            const novaTrilhaId = document.getElementById("trilhaChangeSelect").value || null;
             const confirmButton = document.getElementById("confirmTrilhaChange");
             confirmButton.disabled = true;
 
@@ -603,7 +642,7 @@
               const updatedGroup = await requestJson(`/groups/${encodeURIComponent(group.id)}`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ trilha_override: novaTrilha }),
+                body: JSON.stringify({ trilha_id: novaTrilhaId }),
               });
 
               const index = state.groups.findIndex((item) => item.id === group.id);
@@ -654,14 +693,14 @@
           if (dispatchDate < today) {
             errors.push("A data do disparo não pode ser anterior à data atual.");
           } else if (dispatchDate.getTime() === today.getTime()) {
-            const minStart = new Date(now.getTime() + 15 * 60000);
+            const minStart = new Date(now.getTime() + 5 * 60000);
 
             periods.forEach((p) => {
               const [h, m] = p.inicio.split(":").map(Number);
               const periodStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), h, m);
 
               if (periodStart < minStart) {
-                errors.push(`Período ${p.inicio}–${p.fim}: horário de início deve ser pelo menos 15 minutos a partir de agora.`);
+                errors.push(`Período ${p.inicio}–${p.fim}: horário de início deve ser pelo menos 5 minutos a partir de agora.`);
               }
             });
           }
@@ -692,7 +731,7 @@
           const progress = state.progressByGroup.get(g.id) || null;
           const nextVideo = progress && progress.current ? progress.current.next_video : null;
           const video = nextVideo
-            ? { ...nextVideo, arquivo: nextVideo.nome_do_arquivo, subtemaNome: nextVideo.trilha || "Conteúdo" }
+            ? { ...nextVideo, arquivo: nextVideo.nome_do_arquivo, subtemaNome: state.trilhaNameById.get(g.trilha_id) || "Conteúdo" }
             : null;
           return { group: g, video };
         });
@@ -714,8 +753,8 @@
               execution_at: executionAt.toISOString(),
               group_ids: groups.map((g) => g.id),
               time_window: {
-                start: `${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`,
-                end: `${dataEnvio}T${(periods[periods.length - 1] || firstPeriod).fim || "17:00"}:00`,
+                start: localDateTimeToUtcIso(dataEnvio, firstPeriod.inicio || "07:00"),
+                end: localDateTimeToUtcIso(dataEnvio, (periods[periods.length - 1] || firstPeriod).fim || "17:00"),
               },
               jitter_delay_min_ms: delayMinMin * 60000,
               jitter_delay_max_ms: delayMaxMin * 60000,
@@ -740,12 +779,14 @@
       function mapCaptionRowToItem(row, campaignId) {
         const group = row.groups || {};
         const video = row.video_catalog || {};
+        const trilhaNome = group.trilhas?.trilha || "";
+        const driveLink = video.drive_file_id ? `https://drive.google.com/file/d/${video.drive_file_id}/view` : null;
         return {
           id: row.id,
           campaignId,
           groupNome: group.nome || "—",
-          trilha: video.trilha || "",
-          video: { arquivo: video.nome_do_arquivo || "—", subtemaNome: video.trilha || "Conteúdo" },
+          trilha: trilhaNome,
+          video: { arquivo: video.nome_do_arquivo || "—", link: driveLink },
           legenda: row.caption_text || null,
           status: row.status === "gerado" ? "gerado" : row.status === "erro" ? "erro" : "pendente",
         };
@@ -824,7 +865,7 @@
         const q = document.getElementById("captionSearch").value.trim().toLowerCase();
         if (captionFilter === "gerado" && item.status !== "gerado") return false;
         if (captionFilter === "pendente" && item.status === "gerado") return false;
-        if (q && !(item.groupNome.toLowerCase().includes(q) || item.video.arquivo.toLowerCase().includes(q) || item.video.subtemaNome.toLowerCase().includes(q))) return false;
+        if (q && !(item.groupNome.toLowerCase().includes(q) || item.video.arquivo.toLowerCase().includes(q))) return false;
         return true;
       }
 
@@ -856,7 +897,11 @@
             return `
             <tr>
               <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size:11.5px;">${item.trilha}</span></td>
-              <td>${item.video.subtemaNome}<br><span class="mono text-faint" style="font-size:11.5px;">${item.video.arquivo}</span></td>
+              <td>${
+                item.video.link
+                  ? `<a href="${escapeHtml(item.video.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.video.arquivo)}</a>`
+                  : escapeHtml(item.video.arquivo)
+              }</td>
               <td style="max-width:280px;">${legendaCell}</td>
               <td>${captionStatusBadge(item)}</td>
               <td>${
@@ -888,7 +933,7 @@
         editingCaptionId = itemId;
         editingCaptionCampaignId = item.campaignId;
         document.getElementById("captionModalTitle").textContent = "Editar legenda";
-        document.getElementById("captionModalMeta").textContent = `${item.groupNome} · ${item.video.subtemaNome} — ${item.video.arquivo}`;
+        document.getElementById("captionModalMeta").textContent = `${item.groupNome} — ${item.video.arquivo}`;
         document.getElementById("captionModalText").value = item.legenda || "";
         document.getElementById("captionOverlay").hidden = false;
       }
@@ -952,8 +997,8 @@
                 body: JSON.stringify({
                   execution_at: executionAt.toISOString(),
                   time_window: {
-                    start: `${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`,
-                    end: `${dataEnvio}T${(periods[periods.length - 1] || firstPeriod).fim || "17:00"}:00`,
+                    start: localDateTimeToUtcIso(dataEnvio, firstPeriod.inicio || "07:00"),
+                    end: localDateTimeToUtcIso(dataEnvio, (periods[periods.length - 1] || firstPeriod).fim || "17:00"),
                   },
                   jitter_delay_min_ms: delayMinMin * 60000,
                   jitter_delay_max_ms: delayMaxMin * 60000,
@@ -979,8 +1024,34 @@
       }
 
       document.getElementById("backToConfigButton").addEventListener("click", () => {
-        stopCaptionPolling();
-        goToStep(1);
+        document.getElementById("backToConfigOverlay").hidden = false;
+      });
+
+      function closeBackToConfigModal() {
+        document.getElementById("backToConfigOverlay").hidden = true;
+      }
+      document.getElementById("closeBackToConfigModal").addEventListener("click", closeBackToConfigModal);
+      document.getElementById("cancelBackToConfigModal").addEventListener("click", closeBackToConfigModal);
+      document.getElementById("confirmBackToConfigModal").addEventListener("click", async () => {
+        const confirmButton = document.getElementById("confirmBackToConfigModal");
+        confirmButton.disabled = true;
+
+        try {
+          await Promise.all(
+            state.currentCampaignIds.map((campaignId) =>
+              requestJson(`/campaigns/${encodeURIComponent(campaignId)}`, { method: "DELETE" })
+            )
+          );
+          state.currentCampaignIds = [];
+          captionItems = [];
+          stopCaptionPolling();
+          closeBackToConfigModal();
+          goToStep(1);
+        } catch (error) {
+          alert(`Falha ao apagar o disparo: ${error.message}`);
+        } finally {
+          confirmButton.disabled = false;
+        }
       });
 
       function goToStep(step) {

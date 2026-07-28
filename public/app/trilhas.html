@@ -39,7 +39,6 @@
       .perfil-checkboxes label { display:flex; align-items:center; gap:6px; font-size:12.5px; }
       .perfis-panel { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0 16px; flex-wrap:wrap; }
       .already-in-trilha { margin-left:auto; font-size:11px; white-space:nowrap; }
-      #organizationSelect { min-width:220px; }
     </style>
   </head>
   <body data-page="trilhas">
@@ -53,7 +52,6 @@
             <p>Catálogo de vídeos por perfil de jornada, macrotema e trilha.</p>
           </div>
           <div class="topbar-actions">
-            <select id="organizationSelect"></select>
             <button class="btn" id="newTrailButton" type="button">+ Nova trilha</button>
             <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
           </div>
@@ -191,11 +189,8 @@
     <script src="assets/js/nav.js"></script>
     <script>
       const TRAIL_PROFILES = ["Pré-infância", "Infância", "Adolescência", "Maturidade"];
-      const LAST_ORGANIZATION_KEY = "estimulo:trilhas:lastOrganizationId";
 
       const state = {
-        organizations: [],
-        organizationId: null,
         trails: [],
         selectableVideos: [],
       };
@@ -557,27 +552,6 @@
         renderTrailDetail();
       });
 
-      // Organizacao
-      function renderOrganizationSelect() {
-        const select = document.getElementById("organizationSelect");
-
-        select.innerHTML = state.organizations
-          .map((org) => `<option value="${escapeHtml(org.id)}">${escapeHtml(org.nome)}</option>`)
-          .join("");
-
-        if (state.organizationId) {
-          select.value = state.organizationId;
-        }
-      }
-
-      document.getElementById("organizationSelect").addEventListener("change", async (event) => {
-        state.organizationId = event.target.value;
-        localStorage.setItem(LAST_ORGANIZATION_KEY, state.organizationId);
-        selectedMacrotemaKey = null;
-        selectedTrilhaKey = null;
-        await initialize();
-      });
-
       // Nova trilha
       const newTrailOverlay = document.getElementById("newTrailOverlay");
 
@@ -660,7 +634,7 @@
         newTrailOverlay.hidden = false;
 
         try {
-          state.selectableVideos = await requestJson(`/trilhas/selectable-videos?organization_id=${encodeURIComponent(state.organizationId)}`);
+          state.selectableVideos = await requestJson("/trilhas/selectable-videos");
         } catch (error) {
           state.selectableVideos = [];
         }
@@ -700,7 +674,7 @@
           await requestJson("/trilhas", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ organization_id: state.organizationId, perfis, macrotema, trilha, video_ids }),
+            body: JSON.stringify({ perfis, macrotema, trilha, video_ids }),
           });
 
           newTrailOverlay.hidden = true;
@@ -881,30 +855,7 @@
 
       async function initialize() {
         try {
-          if (!state.organizations.length) {
-            state.organizations = await requestJson("/organizations");
-            renderOrganizationSelect();
-
-            const lastOrganizationId = localStorage.getItem(LAST_ORGANIZATION_KEY);
-            const hasLastOrganization = state.organizations.some((org) => org.id === lastOrganizationId);
-
-            state.organizationId =
-              (hasLastOrganization && lastOrganizationId) ||
-              (state.organizations[0] && state.organizations[0].id) ||
-              null;
-
-            renderOrganizationSelect();
-          }
-
-          if (!state.organizationId) {
-            state.trails = [];
-            renderPerfilTabs();
-            renderMacrotemaGrid();
-            renderTrailDetail();
-            return;
-          }
-
-          const trails = await requestJson(`/trilhas/overview?organization_id=${encodeURIComponent(state.organizationId)}`);
+          const trails = await requestJson("/trilhas/overview");
           state.trails = Array.isArray(trails) ? trails : [];
 
           if (!selectedMacrotemaKey) {

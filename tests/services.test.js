@@ -40,7 +40,7 @@ async function main() {
           id,
           nome: "Grupo com progresso",
           evolution_group_id: "evo-progress",
-          trilha_override: "Trilha A",
+          trilha_id: "trilha-1",
           organization_id: "org-1",
         };
       }
@@ -82,11 +82,9 @@ async function main() {
     findById: async (id) => (id === "video-1" ? { id, drive_file_id: "drive-1", status: true } : null),
     findByDriveFileId: async (driveFileId) => (driveFileId === "drive-1" ? { id: "video-1" } : null),
     listApproved: async () => [
-      { id: "video-a1", trilha: "Trilha A", perfil_da_jornada: "Pre infancia", ordem_geral: 1, nome_do_arquivo: "a1.mp4", status: true },
-      { id: "video-a2", trilha: "Trilha A", perfil_da_jornada: "Pre infancia", ordem_geral: 2, nome_do_arquivo: "a2.mp4", status: true },
+      { id: "video-a1", ordem_geral: 1, nome_do_arquivo: "a1.mp4", status: true },
+      { id: "video-a2", ordem_geral: 2, nome_do_arquivo: "a2.mp4", status: true },
     ],
-    listByEtapa: async () => [{ id: "video-1" }],
-    listBySegmento: async () => [{ id: "video-1" }],
     listByStatus: async () => [{ id: "video-1" }],
     update: async (id, payload) => ({ id, ...payload }),
   };
@@ -102,7 +100,8 @@ async function main() {
               group_id: groupId,
               video_id: "video-a1",
               enviado_em: "2026-07-17T10:00:00.000Z",
-              video_catalog: { id: "video-a1", trilha: "Trilha A", perfil_da_jornada: "Pre infancia", nome_do_arquivo: "a1.mp4" },
+              trilha_id: "trilha-1",
+              video_catalog: { id: "video-a1", perfil_da_jornada: "Pre infancia", nome_do_arquivo: "a1.mp4" },
             },
           ]
         : [],
@@ -218,6 +217,7 @@ async function main() {
     campaignGroups: campaignGroupsRepository,
     campaigns: campaignRepository,
     captionReviewService: captionReviewServiceStub,
+    groupVideoProgressRepository: progressRepository,
     repository: campaignVideoCaptionsRepository,
     videoCaptionsService: videoCaptionsServiceStub,
     videoCatalogRepository,
@@ -231,8 +231,27 @@ async function main() {
     },
   });
 
+  const trilhasFakeRepository = {
+    findById: async (id) => (id === "trilha-1" ? { id, macrotema: "Macrotema A", trilha: "Trilha A" } : null),
+    findFirstApprovedVideoByTrilhaAndProfile: async (trilhaId, perfil) => {
+      if (trilhaId === "trilha-1" && perfil === "Pre infancia") {
+        return { id: "video-trilha-1", drive_file_id: "drive-trilha-1", nome_do_arquivo: "aula-trilha.mp4" };
+      }
+      return null;
+    },
+    listVideoLinksByTrilha: async (trilhaId) =>
+      trilhaId === "trilha-1"
+        ? [
+            { trilha_id: "trilha-1", video_id: "video-a1", ordem: 1 },
+            { trilha_id: "trilha-1", video_id: "video-a2", ordem: 2 },
+          ]
+        : [],
+  };
+
   const orgService = organizationsService.createOrganizationsService({ repository: orgRepository });
   const groupService = groupsService.createGroupsService({
+    trilhasRepository: trilhasFakeRepository,
+    addDispatchJob: async (payload) => ({ id: "dispatch-test-1", name: "dispatch-content", queueName: "dispatch", data: payload }),
     fetchEvolutionGroups: async () => ({
       data: [
         {
@@ -282,6 +301,7 @@ async function main() {
   const progressService = groupVideoProgressService.createGroupVideoProgressService({
     groupsRepository: groupRepository,
     repository: progressRepository,
+    trilhasRepository: trilhasFakeRepository,
     videoCatalogRepository,
   });
   const dispatchService = dispatchLogsService.createDispatchLogsService({
@@ -335,6 +355,23 @@ async function main() {
     () => groupService.updateOperationalSettings(insertedGroup.id, { envia_video: "true" }),
     /boolean/,
   );
+
+  const updatedWithTrilhaId = await groupService.updateOperationalSettings(insertedGroup.id, {
+    trilha_id: "trilha-1",
+  });
+  assert.equal(updatedWithTrilhaId.trilha_id, "trilha-1");
+  await assert.rejects(
+    () => groupService.updateOperationalSettings(insertedGroup.id, { trilha_id: "trilha-inexistente" }),
+    /Trilha not found/,
+  );
+
+  const dispatchByTrilhaId = await groupService.dispatchTestVideo(insertedGroup.id, {
+    trilha_id: "trilha-1",
+    segmento: "Pre infancia",
+    envia_video: true,
+  });
+  assert.equal(dispatchByTrilhaId.video.id, "video-trilha-1");
+  assert.equal(dispatchByTrilhaId.group.trilha_id, "trilha-1");
 
   const createdCampaign = await campaignService.create({
     nome: "Campanha",
@@ -395,7 +432,6 @@ async function main() {
   const createdVideo = await videoService.create({ drive_file_id: "drive-service-1", etapa: 1, status: true });
   assert.ok(createdVideo.id);
   await assert.rejects(() => videoService.create({ drive_file_id: "", etapa: 1 }), /required/);
-  await assert.rejects(() => videoService.listByEtapa(0), /positive/);
 
   await assert.rejects(() => progressService.recordDelivery({ group_id: "group-1", video_id: "video-1" }), /already registered/);
   const history = await progressService.listDelivered("group-1");
@@ -403,12 +439,14 @@ async function main() {
 
   const progressSummary = await progressService.getGroupProgressSummary("group-with-progress");
   assert.equal(progressSummary.current.trilha, "Trilha A");
+  assert.equal(progressSummary.current.trilha_id, "trilha-1");
   assert.equal(progressSummary.current.total, 2);
   assert.equal(progressSummary.current.enviados, 1);
   assert.equal(progressSummary.current.concluida, false);
   assert.equal(progressSummary.current.next_video.id, "video-a2");
   assert.equal(progressSummary.history.length, 1);
   assert.equal(progressSummary.history[0].trilha, "Trilha A");
+  assert.equal(progressSummary.history[0].trilha_id, "trilha-1");
   assert.equal(progressSummary.history[0].enviados, 1);
   await assert.rejects(() => progressService.getGroupProgressSummary(""), /required/);
   await assert.rejects(() => progressService.getGroupProgressSummary("group-missing"), /not found/);

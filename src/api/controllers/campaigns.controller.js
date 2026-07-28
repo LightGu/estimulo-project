@@ -168,6 +168,26 @@ function createCampaignsController(dependencies = {}) {
     }
   }
 
+  async function remove(req, res) {
+    try {
+      await campaignService.remove(req.params.id);
+
+      return res.status(204).send();
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Campaign id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Campaign not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   return {
     confirmDispatch,
     create,
@@ -175,6 +195,7 @@ function createCampaignsController(dependencies = {}) {
     getById,
     list,
     listGroups,
+    remove,
   };
 }
 
