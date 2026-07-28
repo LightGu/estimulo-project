@@ -125,7 +125,7 @@ function createDispatchConsistencyService(dependencies = {}) {
     return { log, created: true, skipSend: false };
   }
 
-  async function registerProgress(groupId, videoId) {
+  async function registerProgress(groupId, videoId, trilhaId) {
     if (!groupId || !videoId) {
       return null;
     }
@@ -139,6 +139,7 @@ function createDispatchConsistencyService(dependencies = {}) {
     const record = await groupVideoProgressRepositoryDependency.registerDelivery({
       group_id: groupId,
       video_id: videoId,
+      trilha_id: trilhaId || null,
     });
 
     return { duplicate: false, record };
@@ -155,6 +156,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       campaignId,
       groupId,
       videoId,
+      trilhaId,
       sender,
       deliveryPayload,
     } = options;
@@ -270,7 +272,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         video_id: videoId,
         log_id: log.id,
       });
-      const progress = await registerProgress(groupId, videoId);
+      const progress = await registerProgress(groupId, videoId, trilhaId);
       writeStageLog(logger, "info", "dispatch_consistency.progress.completed", {
         campaign_id: campaignId,
         group_id: groupId,
@@ -296,7 +298,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         error_message: error.message || String(error),
       });
       await markCampaignFailed(campaignId);
-      await dispatchLogsRepositoryDependency.updateStatus(log.id, "erro", error.message || String(error));
+      await dispatchLogsRepositoryDependency.updateStatus(log.id, "falhou", error.message || String(error));
       throw error;
     }
   }

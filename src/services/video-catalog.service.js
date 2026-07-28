@@ -134,40 +134,12 @@ function createVideoCatalogService(dependencies = {}) {
     return repository.listApproved();
   }
 
-  async function listBySegmento(trilhaSegmento) {
-    if (!trilhaSegmento) {
-      throw new Error("Segment is required");
-    }
-
-    return repository.listBySegmento(trilhaSegmento);
-  }
-
-  async function listByEtapa(etapa) {
-    if (!Number.isInteger(Number(etapa)) || Number(etapa) < 1) {
-      throw new Error("Etapa must be a positive integer");
-    }
-
-    return repository.listByEtapa(Number(etapa));
-  }
-
   async function listByStatus(status) {
     if (status === undefined || status === null || status === "") {
       throw new Error("Status is required");
     }
 
     return repository.listByStatus(normalizeStatus(status));
-  }
-
-  async function getFirstApprovedByProfileAndTrail(profile, trail) {
-    if (!profile) {
-      throw new Error("Profile is required");
-    }
-
-    if (!trail) {
-      throw new Error("Trail is required");
-    }
-
-    return repository.findFirstApprovedByProfileAndTrail(profile, trail);
   }
 
   async function getByDriveFileId(driveFileId) {
@@ -201,10 +173,7 @@ function createVideoCatalogService(dependencies = {}) {
     getById,
     list,
     listApproved,
-    listByEtapa,
-    listBySegmento,
     listByStatus,
-    getFirstApprovedByProfileAndTrail,
     transcribeByDriveFileId,
     transcribeById,
     update,

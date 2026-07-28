@@ -2,12 +2,14 @@ const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { addDispatchJob, addJitteredDispatchJobs } = require("./dispatch");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
+const campaignVideoCaptionsRepository = require("../repositories/campaign-video-captions.repository");
 const campaignsRepository = require("../repositories/campaigns.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
+const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const {
-  resolveGroupTrail,
+  resolveGroupTrailId,
   resolveGroupsVideoFlow,
   selectNextApprovedUnsentVideo,
 } = require("../services/group-video-flow");
@@ -365,11 +367,29 @@ function isVideoEnabledGroup(group = {}) {
   return group.envia_video === true;
 }
 
-function applyCampaignTrailFallback(group, campaign) {
+async function applyCampaignTrailFallback(group, campaign, dependencies = {}) {
+  if (resolveGroupTrailId(group)) {
+    return group;
+  }
+
   const campaignTrail = campaign && (campaign.trilha || campaign.nome);
 
   if (!campaignTrail || group.trilha_override || group.trilhaOverride) {
     return group;
+  }
+
+  const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
+
+  // campaigns.trilha/nome continuam texto livre (fora do escopo desta migracao) -- o
+  // fallback so consegue resolver trilha_id fazendo um lookup por nome, que pode ser
+  // ambiguo se o mesmo nome de trilha existir em mais de um macrotema; nesse caso
+  // findByTrilhaName ja escolhe um resultado deterministico (o mais antigo).
+  const trilha = typeof trilhasRepositoryDependency.findByTrilhaName === "function"
+    ? await trilhasRepositoryDependency.findByTrilhaName(campaignTrail)
+    : null;
+
+  if (trilha) {
+    return { ...group, trilha_id: trilha.id };
   }
 
   return {
@@ -381,19 +401,31 @@ function applyCampaignTrailFallback(group, campaign) {
 function buildCampaignVideoFlowRepository(dependencies = {}) {
   const videosRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
   const progressRepository = dependencies.groupVideoProgressRepository || groupVideoProgressRepository;
+  const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
 
   return {
     async findNextApprovedUnsentVideoForGroup(group) {
-      const trail = resolveGroupTrail(group);
+      const trailId = resolveGroupTrailId(group);
 
-      if (!trail) {
+      if (!trailId) {
         return undefined;
       }
 
-      const [videos, delivered] = await Promise.all([
-        typeof videosRepository.listApproved === "function" ? videosRepository.listApproved() : [],
+      const [delivered, links] = await Promise.all([
         typeof progressRepository.listDelivered === "function" ? progressRepository.listDelivered(group.id) : [],
+        trilhasRepositoryDependency.listVideoLinksByTrilha(trailId),
       ]);
+
+      const videos = links.length
+        ? await (async () => {
+            const approved = typeof videosRepository.listApproved === "function" ? await videosRepository.listApproved() : [];
+            const approvedById = new Map(approved.map((video) => [video.id, video]));
+
+            return links
+              .filter((link) => approvedById.has(link.video_id))
+              .map((link) => ({ ...approvedById.get(link.video_id), ordem: link.ordem }));
+          })()
+        : [];
       const sentVideoIds = delivered.map((item) => item.video_id || item.videoId).filter(Boolean);
 
       return selectNextApprovedUnsentVideo({
@@ -403,6 +435,44 @@ function buildCampaignVideoFlowRepository(dependencies = {}) {
       });
     },
   };
+}
+
+// Prioriza a legenda ja gerada/revisada na Etapa 2 (tela envio-automatizado.html,
+// tabela campaign_video_captions); so mantem o texto manual (group.legenda, ja
+// preenchido pelo caminho legado) quando nao houver legenda gerada para o par
+// group_id+video_id.
+async function applyGeneratedCaptions(campaignId, dispatchGroups, dependencies = {}) {
+  if (!dispatchGroups.length) {
+    return dispatchGroups;
+  }
+
+  const campaignVideoCaptions = dependencies.campaignVideoCaptionsRepository || campaignVideoCaptionsRepository;
+
+  if (typeof campaignVideoCaptions.listByCampaign !== "function") {
+    return dispatchGroups;
+  }
+
+  const captionRows = await campaignVideoCaptions.listByCampaign(campaignId);
+  const generatedByKey = new Map(
+    captionRows
+      .filter((row) => row.status === "gerado" && row.caption_text)
+      .map((row) => [`${row.group_id}::${row.video_id}`, row])
+  );
+
+  return dispatchGroups.map((group) => {
+    const generated = generatedByKey.get(`${group.progress_group_id}::${group.video_id}`);
+
+    if (!generated) {
+      return group;
+    }
+
+    return {
+      ...group,
+      legenda: generated.caption_text,
+      caption_id: generated.caption_id || undefined,
+      caption_generated: true,
+    };
+  });
 }
 
 function buildDispatchParams(jobData, dispatchGroups) {
@@ -592,6 +662,7 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     campaignGroups = campaignGroupsRepository,
     campaigns = campaignsRepository,
     dispatchLogs = dispatchLogsRepository,
+    trilhasRepository: trilhasRepositoryOption = trilhasRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     logger = console,
   } = options;
@@ -604,10 +675,12 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     ? await campaigns.findById(campaignId)
     : null;
   const campaignGroupRows = await campaignGroups.listGroups(campaignId);
-  const groups = campaignGroupRows
-    .map(extractCampaignGroup)
-    .map((group) => applyCampaignTrailFallback(group, campaign))
-    .filter(isVideoEnabledGroup);
+  const groupsWithFallback = await Promise.all(
+    campaignGroupRows
+      .map(extractCampaignGroup)
+      .map((group) => applyCampaignTrailFallback(group, campaign, { trilhasRepository: trilhasRepositoryOption }))
+  );
+  const groups = groupsWithFallback.filter(isVideoEnabledGroup);
   const flow = await resolveGroupsVideoFlow({
     campaign_id: campaignId,
     groups,
@@ -675,8 +748,10 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
 function createCampaignTriggerProcessor(options = {}) {
   const {
     campaignGroups = campaignGroupsRepository,
+    campaignVideoCaptionsRepository: campaignVideoCaptionsRepositoryOption = campaignVideoCaptionsRepository,
     campaigns = campaignsRepository,
     dispatchLogs = dispatchLogsRepository,
+    trilhasRepository: trilhasRepositoryOption = trilhasRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     logger = console,
   } = options;
@@ -726,17 +801,22 @@ function createCampaignTriggerProcessor(options = {}) {
         ? await campaigns.findById(job.data.campaign_id)
         : null;
       const campaignGroupRows = await campaignGroups.listGroups(job.data.campaign_id);
-      const groups = campaignGroupRows
-        .map(extractCampaignGroup)
-        .map((group) => applyCampaignTrailFallback(group, campaign))
-        .filter(isVideoEnabledGroup);
+      const groupsWithFallback = await Promise.all(
+        campaignGroupRows
+          .map(extractCampaignGroup)
+          .map((group) => applyCampaignTrailFallback(group, campaign, { trilhasRepository: trilhasRepositoryOption }))
+      );
+      const groups = groupsWithFallback.filter(isVideoEnabledGroup);
       const flow = await resolveGroupsVideoFlow({
         campaign_id: job.data.campaign_id,
         groups,
         repository: videoFlowRepository,
         logger,
       });
-      const dispatchJobs = await enqueueResolvedDispatchJobs(job.data, flow.dispatchGroups, options);
+      const dispatchGroupsWithCaptions = await applyGeneratedCaptions(job.data.campaign_id, flow.dispatchGroups, {
+        campaignVideoCaptionsRepository: campaignVideoCaptionsRepositoryOption,
+      });
+      const dispatchJobs = await enqueueResolvedDispatchJobs(job.data, dispatchGroupsWithCaptions, options);
       const pendingLogsCreated = await ensurePendingDispatchLogs(dispatchLogs, job.data.campaign_id, dispatchJobs, logger);
       await updateCampaignScheduledDispatch(campaigns, job.data.campaign_id, dispatchJobs);
       const completedAt = new Date().toISOString();
@@ -818,6 +898,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
     dispatchLogs,
     videoCatalogRepository: injectedVideoCatalogRepository,
     groupVideoProgressRepository: injectedGroupVideoProgressRepository,
+    trilhasRepository: injectedTrilhasRepository,
     videoFlowRepository,
     addDispatchJob: injectedAddDispatchJob,
     addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,
@@ -833,6 +914,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
       dispatchLogs,
       videoCatalogRepository: injectedVideoCatalogRepository,
       groupVideoProgressRepository: injectedGroupVideoProgressRepository,
+      trilhasRepository: injectedTrilhasRepository,
       videoFlowRepository,
       addDispatchJob: injectedAddDispatchJob,
       addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,

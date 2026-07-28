@@ -125,13 +125,11 @@ async function main() {
     await campaignGroupsRepository.listGroups("camp-1", client);
     await campaignGroupsRepository.removeGroup("camp-1", "group-1", client);
 
-    await videoCatalogRepository.create({ drive_file_id: "drive-1", etapa: 1, trilha_segmento: "Pré", status: true }, client);
+    await videoCatalogRepository.create({ drive_file_id: "drive-1", etapa: 1, status: true }, client);
     await videoCatalogRepository.update("video-1", { status: false }, client);
     await videoCatalogRepository.findById("video-1", client);
     await videoCatalogRepository.findAll(client);
     await videoCatalogRepository.listApproved(client);
-    await videoCatalogRepository.listBySegmento("Pré", client);
-    await videoCatalogRepository.listByEtapa(1, client);
     await videoCatalogRepository.listByStatus(true, client);
     await videoCatalogRepository.findByDriveFileId("drive-1", client);
     await videoCatalogRepository.delete("video-1", client);

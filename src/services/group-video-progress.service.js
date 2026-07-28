@@ -1,34 +1,36 @@
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const groupsRepository = require("../repositories/groups.repository");
+const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
-const { resolveGroupTrail, selectNextApprovedUnsentVideo } = require("./group-video-flow");
-
-function normalizeComparableText(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .trim()
-    .toLowerCase();
-}
+const { resolveGroupTrailId, selectNextApprovedUnsentVideo } = require("./group-video-flow");
 
 function extractVideoFromDelivery(delivery) {
   return delivery.video_catalog || delivery.video || {};
 }
 
-function buildTrailStatus(trail, approvedVideos, deliveries) {
-  const trailVideos = approvedVideos.filter(
-    (video) => normalizeComparableText(video.trilha || video.trilha_segmento) === normalizeComparableText(trail)
-  );
+async function buildTrailStatusById(trilhaId, deliveries, trilhasRepositoryDependency, videoCatalogRepositoryDependency) {
+  const [trilha, links] = await Promise.all([
+    trilhasRepositoryDependency.findById(trilhaId),
+    trilhasRepositoryDependency.listVideoLinksByTrilha(trilhaId),
+  ]);
+  const videoIds = links.map((link) => link.video_id);
+
+  const approvedVideos = videoIds.length
+    ? (await videoCatalogRepositoryDependency.listApproved()).filter((video) => videoIds.includes(video.id))
+    : [];
+  const ordemByVideoId = new Map(links.map((link) => [link.video_id, link.ordem]));
+  const trailVideos = approvedVideos.map((video) => ({ ...video, ordem: ordemByVideoId.get(video.id) }));
+
   const deliveredByVideoId = new Map(deliveries.map((delivery) => [delivery.video_id, delivery.enviado_em]));
   const sentVideoIds = deliveries.map((delivery) => delivery.video_id);
   const nextVideo = selectNextApprovedUnsentVideo({
-    group: { trilha_override: trail },
+    group: { trilha_id: trilhaId },
     sentVideoIds,
     videos: trailVideos,
   });
 
   const rows = trailVideos
-    .sort((left, right) => Number(left.ordem_geral || left.ordem || 0) - Number(right.ordem_geral || right.ordem || 0))
+    .sort((left, right) => Number(left.ordem ?? Number.MAX_SAFE_INTEGER) - Number(right.ordem ?? Number.MAX_SAFE_INTEGER))
     .map((video) => {
       if (deliveredByVideoId.has(video.id)) {
         return { ...video, status: "enviado", enviado_em: deliveredByVideoId.get(video.id) };
@@ -44,7 +46,8 @@ function buildTrailStatus(trail, approvedVideos, deliveries) {
   const enviados = rows.filter((row) => row.status === "enviado").length;
 
   return {
-    trilha: trail,
+    trilha: trilha ? trilha.trilha : null,
+    trilha_id: trilhaId,
     total: rows.length,
     enviados,
     concluida: rows.length > 0 && enviados >= rows.length,
@@ -56,6 +59,7 @@ function buildTrailStatus(trail, approvedVideos, deliveries) {
 function createGroupVideoProgressService(dependencies = {}) {
   const repository = dependencies.repository || groupVideoProgressRepository;
   const groupsRepositoryDependency = dependencies.groupsRepository || groupsRepository;
+  const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
   const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
 
   async function recordDelivery(payload) {
@@ -129,46 +133,54 @@ function createGroupVideoProgressService(dependencies = {}) {
       throw new Error("Group not found");
     }
 
-    const [deliveries, approvedVideos] = await Promise.all([
-      repository.listDeliveredWithVideo(groupId),
-      videoCatalogRepositoryDependency.listApproved(),
-    ]);
+    const deliveries = await repository.listDeliveredWithVideo(groupId);
 
     const deliveriesWithTrail = deliveries.map((delivery) => {
       const video = extractVideoFromDelivery(delivery);
       return {
         video_id: delivery.video_id,
         enviado_em: delivery.enviado_em,
-        trilha: video.trilha || video.trilha_segmento || null,
-        perfil_da_jornada: video.perfil_da_jornada || null,
+        trilha_id: delivery.trilha_id || null,
         nome_do_arquivo: video.nome_do_arquivo || null,
       };
     });
 
-    const currentTrail = resolveGroupTrail(resolvedGroup);
-    const historyTrails = [...new Set(deliveriesWithTrail.map((d) => d.trilha).filter(Boolean))];
+    const deliveriesById = deliveriesWithTrail.filter((d) => d.trilha_id);
 
-    const history = historyTrails
-      .map((trilha) => {
-        const trailDeliveries = deliveriesWithTrail.filter((d) => d.trilha === trilha);
-        const status = buildTrailStatus(trilha, approvedVideos, trailDeliveries);
-        const dates = trailDeliveries.map((d) => d.enviado_em).sort();
+    const history = await Promise.all(
+      [...new Set(deliveriesById.map((d) => d.trilha_id))]
+        .map((trilhaId) => {
+          const trailDeliveries = deliveriesById.filter((d) => d.trilha_id === trilhaId);
+          const dates = trailDeliveries.map((d) => d.enviado_em).sort();
 
-        return {
-          trilha,
-          enviados: status.enviados,
-          total: status.total,
-          concluida: status.concluida,
-          ultima_atividade: dates[dates.length - 1] || null,
-        };
-      })
-      .sort((left, right) => (left.ultima_atividade < right.ultima_atividade ? 1 : -1));
+          return { trilha_id: trilhaId, trailDeliveries, ultima_atividade: dates[dates.length - 1] || null };
+        })
+        .sort((left, right) => (left.ultima_atividade < right.ultima_atividade ? 1 : -1))
+        .map(async (entry) => {
+          const status = await buildTrailStatusById(
+            entry.trilha_id,
+            entry.trailDeliveries,
+            trilhasRepositoryDependency,
+            videoCatalogRepositoryDependency
+          );
 
+          return {
+            trilha: status.trilha,
+            trilha_id: entry.trilha_id,
+            enviados: status.enviados,
+            total: status.total,
+            concluida: status.concluida,
+            ultima_atividade: entry.ultima_atividade,
+          };
+        })
+    );
+
+    const currentTrailId = resolveGroupTrailId(resolvedGroup);
     let current = null;
 
-    if (currentTrail) {
-      const currentDeliveries = deliveriesWithTrail.filter((d) => d.trilha === currentTrail);
-      current = buildTrailStatus(currentTrail, approvedVideos, currentDeliveries);
+    if (currentTrailId) {
+      const currentDeliveries = deliveriesWithTrail.filter((d) => d.trilha_id === currentTrailId);
+      current = await buildTrailStatusById(currentTrailId, currentDeliveries, trilhasRepositoryDependency, videoCatalogRepositoryDependency);
     }
 
     return { current, history };

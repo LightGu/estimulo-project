@@ -77,6 +77,7 @@ function buildDispatchJobData(params) {
     progress_group_id: params.progress_group_id || params.progressGroupId || (params.group && params.group.id),
     campaign_id: params.campaign_id,
     link_video: params.link_video,
+    trilha_id: params.trilha_id || params.trilhaId,
     video_id: params.video_id || (params.video_catalog && params.video_catalog.id),
     drive_file_id: params.drive_file_id || (params.video_catalog && params.video_catalog.drive_file_id),
     video_catalog: params.video_catalog,
@@ -425,7 +426,7 @@ function createDeliveryExecutor(params = {}) {
           downloadedVideo: shouldDownloadVideo ? downloadPromise : undefined,
           transcript: transcriptPromise,
           requireCaptionReview: Boolean(jobData.video_id && captionReviewService),
-          failOnCaptionError: Boolean(jobData.video_id && videoCaptionsService),
+          failOnCaptionError: Boolean(jobData.video_id && videoCaptionsService && !jobData.legenda),
           campaign_id: jobData.campaign_id,
           group_id: jobData.group_id,
           progress_group_id: jobData.progress_group_id,
@@ -524,6 +525,7 @@ async function registerDispatchProgress(jobData, repository = groupVideoProgress
   const record = await repository.registerDelivery({
     group_id: groupId,
     video_id: videoId,
+    trilha_id: jobData.trilha_id || jobData.trilhaId || null,
   });
 
   return {
@@ -587,6 +589,7 @@ function createDispatchProcessor(options = {}) {
           campaignId: job.data.campaign_id,
           groupId: job.data.progress_group_id,
           videoId: job.data.video_id,
+          trilhaId: job.data.trilha_id,
           sender: executeDelivery,
         });
 

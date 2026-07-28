@@ -1,36 +1,10 @@
 const trilhasRepository = require("../repositories/trilhas.repository");
-const organizationsRepository = require("../repositories/organizations.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const { normalizePerfis } = require("../domain/trail-profiles");
 
-function normalizeComparableText(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .trim()
-    .toLowerCase();
-}
-
 function createTrilhasService(dependencies = {}) {
   const repository = dependencies.repository || trilhasRepository;
-  const organizationRepository = dependencies.organizationRepository || organizationsRepository;
   const videoRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
-
-  async function requireOrganization(organizationId) {
-    const trimmed = String(organizationId || "").trim();
-
-    if (!trimmed) {
-      throw new Error("Organization id is required");
-    }
-
-    const organization = await organizationRepository.findById(trimmed);
-
-    if (!organization) {
-      throw new Error("Organization not found");
-    }
-
-    return trimmed;
-  }
 
   async function requireTrilha(trilhaId) {
     const trimmed = String(trilhaId || "").trim();
@@ -72,8 +46,8 @@ function createTrilhasService(dependencies = {}) {
     }
 
     const [videoLinks, trailPerfis, allVideos] = await Promise.all([
-      repository.listVideoLinksByOrganization(trilhas[0].organization_id),
-      repository.listTrailPerfisByOrganization(trilhas[0].organization_id),
+      repository.listAllVideoLinks(),
+      repository.listAllTrailPerfis(),
       videoRepository.findAll(),
     ]);
 
@@ -105,7 +79,6 @@ function createTrilhasService(dependencies = {}) {
 
         return {
           id: trilha.id,
-          organization_id: trilha.organization_id,
           macrotema: trilha.macrotema,
           trilha: trilha.trilha,
           perfis: perfisByTrilha.get(trilha.id) || [],
@@ -121,29 +94,38 @@ function createTrilhasService(dependencies = {}) {
       });
   }
 
-  async function listByOrganization(organizationId) {
-    const trimmedOrganizationId = await requireOrganization(organizationId);
-
-    return repository.listByOrganization(trimmedOrganizationId);
+  async function listAll() {
+    return repository.listAll();
   }
 
-  async function listOverview(organizationId) {
-    const trimmedOrganizationId = await requireOrganization(organizationId);
-    const trilhas = await repository.listByOrganization(trimmedOrganizationId);
+  async function listOverview() {
+    const trilhas = await repository.listAll();
 
     return buildOverview(trilhas);
   }
 
-  async function listSelectableVideos(organizationId) {
-    const trimmedOrganizationId = await requireOrganization(organizationId);
+  async function listByPerfil(perfil) {
+    const [normalizedPerfil] = normalizePerfis([perfil]);
+    const trilhas = await repository.listTrilhasByPerfil(normalizedPerfil);
+    const overview = await buildOverview(trilhas);
 
+    return overview.map((trilha) => ({
+      id: trilha.id,
+      macrotema: trilha.macrotema,
+      trilha: trilha.trilha,
+      videos_count: trilha.videos.length,
+      first_video: trilha.videos[0] || null,
+    }));
+  }
+
+  async function listSelectableVideos() {
     const [allVideos, trilhas] = await Promise.all([
       videoRepository.findAll(),
-      repository.listByOrganization(trimmedOrganizationId),
+      repository.listAll(),
     ]);
 
     const trilhasById = new Map(trilhas.map((trilha) => [trilha.id, trilha]));
-    const links = await repository.listVideoLinksByOrganization(trimmedOrganizationId);
+    const links = await repository.listAllVideoLinks();
 
     const trilhasByVideo = new Map();
     links.forEach((link) => {
@@ -165,7 +147,6 @@ function createTrilhasService(dependencies = {}) {
   }
 
   async function createTrilha(payload) {
-    const organizationId = await requireOrganization(payload?.organization_id);
     const macrotema = String(payload?.macrotema || "").trim();
     const trilha = String(payload?.trilha || "").trim();
     const videoIds = Array.isArray(payload?.video_ids)
@@ -185,7 +166,7 @@ function createTrilhasService(dependencies = {}) {
       throw new Error("At least one video_id is required");
     }
 
-    const existingTrilha = await repository.findByOrganizationMacrotemaTrilha(organizationId, macrotema, trilha);
+    const existingTrilha = await repository.findByMacrotemaTrilha(macrotema, trilha);
 
     if (existingTrilha) {
       throw new Error("Trilha already exists");
@@ -195,7 +176,7 @@ function createTrilhasService(dependencies = {}) {
       await requireVideo(videoId);
     }
 
-    const createdTrilha = await repository.create({ organization_id: organizationId, macrotema, trilha });
+    const createdTrilha = await repository.create({ macrotema, trilha });
 
     await repository.setTrailPerfis(createdTrilha.id, perfis);
 
@@ -244,15 +225,11 @@ function createTrilhasService(dependencies = {}) {
       throw new Error("Destination trilha id is required");
     }
 
-    const toTrilha = await requireTrilha(toTrilhaId);
+    await requireTrilha(toTrilhaId);
     const fromTrilhaId = payload?.from_trilha_id ? String(payload.from_trilha_id).trim() : null;
 
     if (fromTrilhaId) {
-      const fromTrilha = await requireTrilha(fromTrilhaId);
-
-      if (fromTrilha.organization_id !== toTrilha.organization_id) {
-        throw new Error("Trilhas must belong to the same organization");
-      }
+      await requireTrilha(fromTrilhaId);
 
       const existingLink = await repository.findVideoLink(fromTrilhaId, videoId);
 
@@ -314,7 +291,7 @@ function createTrilhasService(dependencies = {}) {
     const macrotema = nextPayload.macrotema ?? trilha.macrotema;
     const trilhaNome = nextPayload.trilha ?? trilha.trilha;
 
-    const existingTrilha = await repository.findByOrganizationMacrotemaTrilha(trilha.organization_id, macrotema, trilhaNome);
+    const existingTrilha = await repository.findByMacrotemaTrilha(macrotema, trilhaNome);
 
     if (existingTrilha && existingTrilha.id !== trilha.id) {
       throw new Error("Trilha already exists");
@@ -344,23 +321,16 @@ function createTrilhasService(dependencies = {}) {
     }
 
     const trilha = await requireTrilha(trilhaId);
-    const [links, videos] = await Promise.all([repository.listVideoLinksByTrilha(trilha.id), videoRepository.listApproved()]);
 
-    const videoIds = new Set(links.map((link) => link.video_id));
-    const ordemByVideoId = new Map(links.map((link) => [link.video_id, link.ordem]));
-    const normalizedProfile = normalizeComparableText(profile);
-
-    return (
-      videos
-        .filter((video) => videoIds.has(video.id))
-        .filter((video) => normalizeComparableText(video.perfil_da_jornada || video.trilha_segmento) === normalizedProfile)
-        .sort((left, right) => (ordemByVideoId.get(left.id) || 0) - (ordemByVideoId.get(right.id) || 0))[0] || null
-    );
+    // Perfil elegivel para a trilha vem de trilha_perfis, nao de video_catalog.perfil_da_jornada
+    // (coluna de texto legada) - ver trilhas.repository.js::findFirstApprovedVideoByTrilhaAndProfile.
+    return repository.findFirstApprovedVideoByTrilhaAndProfile(trilha.id, profile);
   }
 
   return {
-    listByOrganization,
+    listAll,
     listOverview,
+    listByPerfil,
     listSelectableVideos,
     createTrilha,
     addVideoToTrilha,

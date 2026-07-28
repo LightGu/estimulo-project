@@ -25,6 +25,10 @@ function resolveGroupTrail(group = {}) {
   return group.trilha_override || group.trilhaOverride || group.trilha_segmento || group.segmento;
 }
 
+function resolveGroupTrailId(group = {}) {
+  return group.trilha_id || group.trilhaId || null;
+}
+
 function resolveVideoId(video = {}) {
   return video.id || video.video_id || video.videoId;
 }
@@ -50,10 +54,6 @@ function isApprovedVideo(video = {}) {
   return ["true", "1", "sim", "aprovado"].includes(normalizeComparableText(video.status));
 }
 
-function isVideoForTrail(video = {}, trail) {
-  return normalizeComparableText(video.trilha || video.trilha_segmento || video.trilhaSegmento) === normalizeComparableText(trail);
-}
-
 function isGroupPausedByEndOfQueue(group = {}) {
   const pauseReason =
     group.video_flow_pause_reason ||
@@ -72,21 +72,22 @@ function canEvaluateGroupVideoFlow(group = {}) {
 
 function selectNextApprovedUnsentVideo(params = {}) {
   const group = params.group || {};
-  const trail = resolveGroupTrail(group);
+  const trailId = resolveGroupTrailId(group);
 
-  if (!trail) {
+  if (!trailId) {
     return undefined;
   }
 
   const sentVideoIds = new Set((params.sentVideoIds || []).map(normalizeVideoId).filter(Boolean));
 
+  // Quem chama ja filtra params.videos para conter apenas os vinculos daquela trilha
+  // (via trilha_videos), com ordem injetada a partir de trilha_videos.ordem.
   return (params.videos || [])
     .filter((video) => isApprovedVideo(video))
-    .filter((video) => isVideoForTrail(video, trail))
     .filter((video) => !sentVideoIds.has(normalizeVideoId(resolveVideoId(video))))
     .sort((left, right) => {
-      const orderDifference = Number(left.ordem_geral || left.ordem || Number.MAX_SAFE_INTEGER) -
-        Number(right.ordem_geral || right.ordem || Number.MAX_SAFE_INTEGER);
+      const orderDifference = Number(left.ordem ?? left.ordem_geral ?? Number.MAX_SAFE_INTEGER) -
+        Number(right.ordem ?? right.ordem_geral ?? Number.MAX_SAFE_INTEGER);
 
       if (orderDifference !== 0) {
         return orderDifference;
@@ -222,6 +223,7 @@ async function resolveGroupVideoFlow(params = {}) {
     group_id: resolveDispatchGroupId(group),
     video_catalog: video,
     video_id: resolveVideoId(video),
+    trilha_id: resolveGroupTrailId(group),
     drive_file_id: video.drive_file_id || video.driveFileId,
     legenda: params.legenda || video.legenda || video.caption,
   };
@@ -253,6 +255,7 @@ module.exports = {
   canEvaluateGroupVideoFlow,
   isGroupPausedByEndOfQueue,
   resolveGroupTrail,
+  resolveGroupTrailId,
   resolveGroupVideoFlow,
   resolveGroupsVideoFlow,
   selectNextApprovedUnsentVideo,

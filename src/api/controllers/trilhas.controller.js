@@ -1,13 +1,9 @@
 function createTrilhasController(dependencies = {}) {
   const trilhasService = dependencies.trilhasService;
 
-  function resolveOrganizationId(req) {
-    return req.query?.organization_id;
-  }
-
-  async function listByOrganization(req, res) {
+  async function listAll(req, res) {
     try {
-      const trilhas = await trilhasService.listByOrganization(resolveOrganizationId(req));
+      const trilhas = await trilhasService.listAll();
 
       return res.status(200).json(trilhas);
     } catch (error) {
@@ -17,7 +13,17 @@ function createTrilhasController(dependencies = {}) {
 
   async function listOverview(req, res) {
     try {
-      const trilhas = await trilhasService.listOverview(resolveOrganizationId(req));
+      const trilhas = await trilhasService.listOverview();
+
+      return res.status(200).json(trilhas);
+    } catch (error) {
+      return handleError(error, res);
+    }
+  }
+
+  async function listByPerfil(req, res) {
+    try {
+      const trilhas = await trilhasService.listByPerfil(req.query?.perfil);
 
       return res.status(200).json(trilhas);
     } catch (error) {
@@ -27,7 +33,7 @@ function createTrilhasController(dependencies = {}) {
 
   async function listSelectableVideos(req, res) {
     try {
-      const videos = await trilhasService.listSelectableVideos(resolveOrganizationId(req));
+      const videos = await trilhasService.listSelectableVideos();
 
       return res.status(200).json(videos);
     } catch (error) {
@@ -122,7 +128,6 @@ function createTrilhasController(dependencies = {}) {
     const message = error?.message || "Internal server error";
 
     const badRequestMessages = [
-      "Organization id is required",
       "Trilha id is required",
       "Video id is required",
       "Destination trilha id is required",
@@ -135,14 +140,13 @@ function createTrilhasController(dependencies = {}) {
       "Trilha already exists",
       "Video already in trilha",
       "Video not in trilha",
-      "Trilhas must belong to the same organization",
     ];
 
     if (badRequestMessages.includes(message) || message.startsWith("Invalid perfil:")) {
       return res.status(400).json({ error: message });
     }
 
-    if (["Organization not found", "Trilha not found", "Video not found"].includes(message)) {
+    if (["Trilha not found", "Video not found"].includes(message)) {
       return res.status(404).json({ error: message });
     }
 
@@ -150,8 +154,9 @@ function createTrilhasController(dependencies = {}) {
   }
 
   return {
-    listByOrganization,
+    listAll,
     listOverview,
+    listByPerfil,
     listSelectableVideos,
     createTrilha,
     renameTrilha,

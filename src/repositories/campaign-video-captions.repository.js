@@ -84,7 +84,7 @@ async function updateCaptionText(id, payload, client) {
 async function listByCampaign(campaignId, client) {
   const { data, error } = await getClient(client)
     .from("campaign_video_captions")
-    .select("*, groups(nome), video_catalog(nome_do_arquivo, trilha)")
+    .select("*, groups(nome, trilha_id, trilhas(macrotema, trilha)), video_catalog(nome_do_arquivo, drive_file_id)")
     .eq("campaign_id", campaignId)
     .order("criado_em", { ascending: true });
 

@@ -8,7 +8,7 @@ const {
   createPendingDispatchLogsForCampaign: defaultCreatePendingDispatchLogsForCampaign,
 } = require("../queues/campaign-trigger");
 
-const TERMINAL_LOG_STATUSES = ["enviado", "erro", "falhou"];
+const TERMINAL_LOG_STATUSES = ["enviado", "falhou"];
 const TRIGGER_ENQUEUE_TIMEOUT_MS = Number(process.env.CAMPAIGN_TRIGGER_ENQUEUE_TIMEOUT_MS) || 5000;
 
 function withTimeout(promise, timeoutMs, timeoutMessage) {
