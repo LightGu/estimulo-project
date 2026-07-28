@@ -62,7 +62,7 @@
                 <div class="field-row" style="grid-template-columns:1fr 1fr;">
                   <div class="field">
                     <label>Status da conexão</label>
-                    <div><span class="badge badge-success" id="driveStatusBadge">Conectado</span></div>
+                    <div><span class="badge has-tip badge-success" id="driveStatusBadge" data-tip="Conexão ativa e funcionando normalmente." data-tip-tone="success">Conectado</span></div>
                   </div>
                   <div class="field">
                     <label for="driveIndexFreq">Frequência de indexação</label>
@@ -212,7 +212,7 @@
               <div class="card-body">
                 <div class="field">
                   <label>Status</label>
-                  <div><span class="badge badge-success" id="dbStatusBadge">Conectado</span> <span class="text-faint" style="font-size:12px;">PostgreSQL · latência 8ms</span></div>
+                  <div><span class="badge has-tip badge-success" id="dbStatusBadge" data-tip="Conexão ativa e funcionando normalmente." data-tip-tone="success">Conectado</span> <span class="text-faint" style="font-size:12px;">PostgreSQL · latência 8ms</span></div>
                 </div>
               </div>
               <div class="modal-footer">
@@ -237,6 +237,7 @@
 
     <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       document.getElementById("segmentChips").innerHTML = MOCK.segments.map((s) => `<span class="chip">${s}</span>`).join("");
 

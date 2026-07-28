@@ -140,6 +140,7 @@
     <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/helpers.js"></script>
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
       const MONTH_NAMES = [
@@ -240,7 +241,7 @@
                 <strong>${c.nome}</strong>
                 <span>${trilhaShortName(c.trilha)} · ${c.janelaInicio}–${c.janelaFim}</span>
               </div>
-              <span class="badge ${campaignStatusBadgeClass(c.status)}">${campaignStatusLabel(c.status)}</span>
+              <span class="badge has-tip ${campaignStatusBadgeClass(c.status)}" data-tip="${c.status === "concluida" ? "Todos os grupos já tiveram o envio finalizado." : "Aguardando o horário de disparo programado."}" data-tip-tone="${campaignStatusBadgeClass(c.status).replace("badge-", "")}">${campaignStatusLabel(c.status)}</span>
             </a>`
           )
           .join("");

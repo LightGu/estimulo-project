@@ -107,6 +107,7 @@
     </div>
 
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const state = {
         campaigns: [],
@@ -146,6 +147,11 @@
         return status === "concluido" ? "badge-success" : "badge-info";
       }
 
+      function statusTip(status) {
+        if (status === "concluido") return "Todos os grupos já tiveram o envio finalizado (com sucesso ou erro definitivo).";
+        return "Aguardando o horário de disparo programado.";
+      }
+
       function dispatchStatusLabel(status) {
         const labels = {
           pendente: "Pendente",
@@ -162,6 +168,17 @@
         if (status === "erro" || status === "falhou") return "badge-danger";
         if (status === "processando") return "badge-info";
         return "badge-warning";
+      }
+
+      function dispatchStatusTip(status) {
+        const tips = {
+          pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
+          processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
+          enviado: "Entregue com sucesso ao grupo via Evolution API.",
+          erro: "Falha no envio. Veja o relatório operacional para mais detalhes.",
+          falhou: "Falha no envio. Veja o relatório operacional para mais detalhes.",
+        };
+        return tips[status] || "";
       }
 
       function captionStatusLabel(status) {
@@ -186,7 +203,7 @@
               <tr class="campaign-row" data-campaign-id="${escapeHtml(c.id)}">
                 <td class="strong">${escapeHtml(campaignName(c))}</td>
                 <td>${Number(c.grupos_total || 0)}</td>
-                <td><span class="badge ${statusBadgeClass(c.status)}">${statusLabel(c.status)}</span></td>
+                <td><span class="badge has-tip ${statusBadgeClass(c.status)}" data-tip="${escapeHtml(statusTip(c.status))}" data-tip-tone="${statusBadgeClass(c.status).replace("badge-", "")}">${statusLabel(c.status)}</span></td>
                 <td class="mono">${escapeHtml(c.data_envio || "—")}</td>
               </tr>`
           )
@@ -241,7 +258,7 @@
                 <tr class="group-row" data-group-id="${escapeHtml(g.group_id)}" data-video-id="${escapeHtml(g.video_id || "")}">
                   <td class="strong">${escapeHtml(g.nome || g.group_id)}</td>
                   <td class="mono">${escapeHtml(g.video_id || "—")}</td>
-                  <td><span class="badge ${dispatchStatusBadgeClass(g.status)}">${dispatchStatusLabel(g.status)}</span></td>
+                  <td><span class="badge has-tip ${dispatchStatusBadgeClass(g.status)}" data-tip="${escapeHtml(dispatchStatusTip(g.status))}" data-tip-tone="${dispatchStatusBadgeClass(g.status).replace("badge-", "")}">${dispatchStatusLabel(g.status)}</span></td>
                   <td class="mono">${escapeHtml(g.criado_em || "—")}</td>
                 </tr>`
             )
