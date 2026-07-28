@@ -142,6 +142,10 @@ function createDispatchConsistencyService(dependencies = {}) {
       trilha_id: trilhaId || null,
     });
 
+    if (trilhaId) {
+      await groupsRepositoryDependency.update(groupId, { trilha_id: trilhaId });
+    }
+
     return { duplicate: false, record };
   }
 

@@ -64,3 +64,27 @@ process.on("SIGTERM", () => {
 process.on("SIGINT", () => {
   shutdown().finally(() => process.exit(0));
 });
+
+process.on("unhandledRejection", (reason) => {
+  console.error(
+    JSON.stringify({
+      event: "dispatch.worker.unhandled_rejection",
+      error_message: reason && reason.message,
+      stack: reason && reason.stack,
+    })
+  );
+
+  shutdown().finally(() => process.exit(1));
+});
+
+process.on("uncaughtException", (error) => {
+  console.error(
+    JSON.stringify({
+      event: "dispatch.worker.uncaught_exception",
+      error_message: error && error.message,
+      stack: error && error.stack,
+    })
+  );
+
+  shutdown().finally(() => process.exit(1));
+});

@@ -149,6 +149,21 @@ function randomIntegerBetween(min, max, random = Math.random) {
   return min + Math.floor(random() * (max - min + 1));
 }
 
+// Resolve qual instancia (numero) deve enviar o grupo de ordem `order`, dado
+// um numero global de grupos por rodizio (N) e a lista de instancias ativas
+// ordenada por prioridade. Sem instancias (ou apenas uma), sempre retorna a
+// unica opcao disponivel - preserva o comportamento atual de numero unico.
+function resolveInstanceForOrder(order, instances, rotationGroupCount) {
+  if (!Array.isArray(instances) || instances.length === 0) {
+    return null;
+  }
+
+  const n = Math.max(1, Number(rotationGroupCount) || 1);
+  const bucketIndex = Math.floor((order - 1) / n) % instances.length;
+
+  return instances[bucketIndex].id;
+}
+
 function buildJitteredDispatchSchedule(params = {}) {
   const groups = normalizeDispatchGroups(params.groups);
 
@@ -209,6 +224,7 @@ function buildJitteredDispatchSchedule(params = {}) {
       dispatch_order: group.order,
       jitter_delay_ms: jitterDelayMs,
       cumulative_delay_ms: cumulativeDelayMs,
+      whatsapp_instance_id: resolveInstanceForOrder(group.order, params.whatsapp_instances, params.rotation_group_count),
     };
   });
 }
@@ -217,4 +233,5 @@ module.exports = {
   buildJitteredDispatchSchedule,
   normalizeDispatchWindow,
   normalizeJitterRange,
+  resolveInstanceForOrder,
 };

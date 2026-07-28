@@ -81,6 +81,15 @@ async function main() {
           trigger_job: { id: "trigger-confirm-1", data: { campaign_id: campaignId } },
         };
       },
+      remove: async (campaignId) => {
+        if (campaignId === "campaign-delivered") {
+          const error = new Error("Campaign already has delivered dispatches");
+          error.code = "CAMPAIGN_HAS_DELIVERIES";
+          throw error;
+        }
+
+        return { id: campaignId };
+      },
     },
     campaignVideoCaptionsService: {
       getCaptionProgress: async (campaignId) => ({
@@ -109,6 +118,17 @@ async function main() {
         ],
       }),
       updateCaptionText: async (id, captionText) => ({ id, caption_text: captionText, status: "gerado" }),
+      regenerateCaption: async (id) => {
+        if (id === "cvc-missing") {
+          throw new Error("Campaign video caption not found");
+        }
+
+        if (id === "cvc-still-failing") {
+          throw new Error("Falha ao gerar legenda via IA");
+        }
+
+        return { id, caption_text: "Legenda regenerada", status: "gerado" };
+      },
     },
     organizationService: {
       list: async () => [{ id: "org-1", nome: "AMBEV" }],
@@ -318,6 +338,29 @@ async function main() {
     const updateCaptionPayload = await updateCaptionResponse.json();
     assert.equal(updateCaptionPayload.caption_text, "Legenda editada manualmente");
 
+    const regenerateCaptionResponse = await fetch(
+      `http://127.0.0.1:${port}/campaigns/campaign-dispatch-1/captions/cvc-2/regenerate`,
+      { method: "POST" }
+    );
+    assert.equal(regenerateCaptionResponse.status, 200);
+    const regenerateCaptionPayload = await regenerateCaptionResponse.json();
+    assert.equal(regenerateCaptionPayload.status, "gerado");
+    assert.equal(regenerateCaptionPayload.caption_text, "Legenda regenerada");
+
+    const regenerateMissingResponse = await fetch(
+      `http://127.0.0.1:${port}/campaigns/campaign-dispatch-1/captions/cvc-missing/regenerate`,
+      { method: "POST" }
+    );
+    assert.equal(regenerateMissingResponse.status, 404);
+
+    const regenerateStillFailingResponse = await fetch(
+      `http://127.0.0.1:${port}/campaigns/campaign-dispatch-1/captions/cvc-still-failing/regenerate`,
+      { method: "POST" }
+    );
+    assert.equal(regenerateStillFailingResponse.status, 422);
+    const regenerateStillFailingPayload = await regenerateStillFailingResponse.json();
+    assert.match(regenerateStillFailingPayload.error, /Falha ao gerar legenda/);
+
     const confirmDispatchResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-dispatch-1/dispatch/confirm`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -336,6 +379,18 @@ async function main() {
     });
 
     assert.equal(confirmDispatchPendingResponse.status, 409);
+
+    const removeCampaignResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-1`, {
+      method: "DELETE",
+    });
+    assert.equal(removeCampaignResponse.status, 204);
+
+    const removeDeliveredResponse = await fetch(`http://127.0.0.1:${port}/campaigns/campaign-delivered`, {
+      method: "DELETE",
+    });
+    assert.equal(removeDeliveredResponse.status, 409);
+    const removeDeliveredPayload = await removeDeliveredResponse.json();
+    assert.match(removeDeliveredPayload.error, /não pode ser apagado/);
 
     const envioAutomatizadoPageResponse = await fetch(`http://127.0.0.1:${port}/app/envio-automatizado.html`);
     assert.equal(envioAutomatizadoPageResponse.status, 200);
@@ -471,11 +526,8 @@ async function main() {
     assert.doesNotMatch(groupsAppPage, /mock-data\.js/);
     assert.doesNotMatch(groupsAppPage, /MOCK\./);
     assert.doesNotMatch(groupsAppPage, /id="editTrilha"/);
-    assert.match(groupsAppPage, /value="Pr&eacute;-Inf&acirc;ncia"/);
-    assert.match(groupsAppPage, /value="Inf&acirc;ncia"/);
-    assert.match(groupsAppPage, /value="Adolescente"/);
-    assert.match(groupsAppPage, /value="Maturidade"/);
-    assert.match(groupsAppPage, /requestJson\("\/groups\/search"\)/);
+    assert.match(groupsAppPage, /requestJson\("\/group-profiles"\)/);
+    assert.match(groupsAppPage, /requestJson\(`\/groups\/search\$\{query\}`\)/);
     assert.match(groupsAppPage, /requestJson\("\/organizations"\)/);
     assert.match(groupsAppPage, /requestJson\("\/groups\/sync"/);
     assert.match(groupsAppPage, /requestJson\(`\/groups\/\$\{encodeURIComponent\(editingGroupId\)\}`/);
@@ -539,7 +591,7 @@ async function main() {
     assert.doesNotMatch(trilhasAppPage, /organization_id/);
     assert.match(trilhasAppPage, /id="moveTargetTrilha"><\/select>/);
     assert.doesNotMatch(trilhasAppPage, /id="newTrailVideos"/);
-    assert.match(trilhasAppPage, /TRAIL_PROFILES = \["Pré-infância", "Infância", "Adolescência", "Maturidade"\]/);
+    assert.match(trilhasAppPage, /requestJson\("\/group-profiles"\)/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(renameContext\.trilhaId\)\}`/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(trail\.id\)\}\/perfis`/);
 

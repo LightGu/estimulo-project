@@ -1,6 +1,6 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { addDispatchJob, addJitteredDispatchJobs } = require("./dispatch");
-const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
+const { buildJitteredDispatchSchedule, resolveInstanceForOrder } = require("./dispatch-jitter");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const campaignVideoCaptionsRepository = require("../repositories/campaign-video-captions.repository");
 const campaignsRepository = require("../repositories/campaigns.repository");
@@ -8,6 +8,9 @@ const dispatchLogsRepository = require("../repositories/dispatch-logs.repository
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
+const defaultWhatsappInstancesService = require("../services/whatsapp-instances.service");
+const defaultNotificationsService = require("../services/notifications.service");
 const {
   resolveGroupTrailId,
   resolveGroupsVideoFlow,
@@ -84,12 +87,14 @@ function buildCampaignTriggerJobData(params) {
   const executionDate = normalizeExecutionDate(params.execution_at || params.executionAt);
   const timeWindow = normalizeTimeWindow(params);
   const dispatchJitter = normalizeDispatchJitter(params);
+  const timezone = params.timezone || params.tz;
 
   return {
     campaign_id: params.campaign_id,
     execution_at: executionDate.toISOString(),
     time_window: timeWindow,
     dispatch_jitter: dispatchJitter,
+    timezone: timezone || undefined,
     status: params.status || CAMPAIGN_TRIGGER_INITIAL_STATUS,
   };
 }
@@ -475,7 +480,7 @@ async function applyGeneratedCaptions(campaignId, dispatchGroups, dependencies =
   });
 }
 
-function buildDispatchParams(jobData, dispatchGroups) {
+function buildDispatchParams(jobData, dispatchGroups, options = {}) {
   return {
     campaign_id: jobData.campaign_id,
     execution_at: jobData.execution_at || jobData.created_at || new Date(),
@@ -486,6 +491,26 @@ function buildDispatchParams(jobData, dispatchGroups) {
     window_end: jobData.time_window && jobData.time_window.end,
     jitter_delay_min_ms: jobData.dispatch_jitter && jobData.dispatch_jitter.min_ms,
     jitter_delay_max_ms: jobData.dispatch_jitter && jobData.dispatch_jitter.max_ms,
+    whatsapp_instances: options.whatsappInstances,
+    rotation_group_count: options.rotationGroupCount,
+  };
+}
+
+// Carrega, uma vez por execucao do trigger, as instancias ativas (ordenadas por
+// prioridade) e o N global de rodizio - usados tanto no caminho com jitter
+// (dispatch-jitter.js resolve por grupo) quanto no caminho sem jitter abaixo.
+async function resolveActiveInstancesAndRotation(dependencies = {}) {
+  const instancesRepository = dependencies.whatsappInstancesRepository || defaultWhatsappInstancesRepository;
+  const instancesService = dependencies.whatsappInstancesService || defaultWhatsappInstancesService;
+
+  const [whatsappInstances, rotationSettings] = await Promise.all([
+    instancesRepository.listActive(),
+    instancesService.getRotationSettings(),
+  ]);
+
+  return {
+    whatsappInstances,
+    rotationGroupCount: rotationSettings.whatsapp_rotation_group_count,
   };
 }
 
@@ -500,6 +525,38 @@ function shouldUseJitteredDispatch(jobData = {}) {
   );
 }
 
+// Remove da lista os grupos que nao estao vinculados a todas as instancias
+// WhatsApp ativas (quando ha 2+ numeros cadastrados - com 0 ou 1 numero e um
+// no-op). Nao aborta a campanha inteira: cada grupo sem cobertura completa e
+// apenas pulado nesta rodada, com um evento de log para rastreabilidade.
+async function filterGroupsMissingInstanceCoverage(dispatchGroups, dependencies = {}, logger = console) {
+  if (!dispatchGroups.length) {
+    return dispatchGroups;
+  }
+
+  const instancesService = dependencies.whatsappInstancesService || defaultWhatsappInstancesService;
+  const groupIds = dispatchGroups.map((group) => group.progress_group_id).filter(Boolean);
+  const { ineligible } = await instancesService.filterDispatchableGroups(groupIds);
+
+  if (!ineligible.length) {
+    return dispatchGroups;
+  }
+
+  const ineligibleSet = new Set(ineligible);
+
+  ineligible.forEach((groupId) => {
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "dispatch.skipped_missing_instance_coverage",
+          group_id: groupId,
+        })
+      );
+  });
+
+  return dispatchGroups.filter((group) => !ineligibleSet.has(group.progress_group_id));
+}
+
 async function enqueueResolvedDispatchJobs(jobData, dispatchGroups, dependencies = {}) {
   const addSingleDispatchJob = dependencies.addDispatchJob || addDispatchJob;
   const addManyJitteredDispatchJobs = dependencies.addJitteredDispatchJobs || addJitteredDispatchJobs;
@@ -508,7 +565,8 @@ async function enqueueResolvedDispatchJobs(jobData, dispatchGroups, dependencies
     return [];
   }
 
-  const dispatchParams = buildDispatchParams(jobData, dispatchGroups);
+  const { whatsappInstances, rotationGroupCount } = await resolveActiveInstancesAndRotation(dependencies);
+  const dispatchParams = buildDispatchParams(jobData, dispatchGroups, { whatsappInstances, rotationGroupCount });
 
   if (shouldUseJitteredDispatch(jobData)) {
     return addManyJitteredDispatchJobs(dispatchParams);
@@ -518,12 +576,15 @@ async function enqueueResolvedDispatchJobs(jobData, dispatchGroups, dependencies
   const jobs = [];
 
   for (const [index, group] of dispatchGroups.entries()) {
+    const dispatchOrder = group.dispatch_order || group.order || index + 1;
+
     jobs.push(
       await addSingleDispatchJob({
         ...group,
         campaign_id: group.campaign_id || jobData.campaign_id,
         scheduled_at: group.scheduled_at || scheduledAt,
-        dispatch_order: group.dispatch_order || group.order || index + 1,
+        dispatch_order: dispatchOrder,
+        whatsapp_instance_id: resolveInstanceForOrder(dispatchOrder, whatsappInstances, rotationGroupCount),
       })
     );
   }
@@ -602,7 +663,7 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
   return created;
 }
 
-async function updateCampaignScheduledDispatch(campaigns, campaignId, dispatchJobs) {
+async function updateCampaignScheduledDispatch(campaigns, campaignId, dispatchJobs, timezone) {
   if (!campaigns || typeof campaigns.update !== "function" || !campaignId || !Array.isArray(dispatchJobs)) {
     return null;
   }
@@ -620,7 +681,7 @@ async function updateCampaignScheduledDispatch(campaigns, campaignId, dispatchJo
 
   return campaigns.update(campaignId, {
     ativo: true,
-    ...formatScheduledDateTime(scheduledTimes[0]),
+    ...formatScheduledDateTime(scheduledTimes[0], timezone || getCampaignTimezone()),
   });
 }
 
@@ -687,8 +748,9 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     repository: videoFlowRepository,
     logger,
   });
+  const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);
   const plannedScheduleByKey = resolvePlannedScheduleByGroup(
-    flow.dispatchGroups,
+    dispatchableGroups,
     {
       execution_at: options.execution_at,
       window_start: options.window_start,
@@ -698,7 +760,7 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     },
     logger
   );
-  const logPayloads = flow.dispatchGroups
+  const logPayloads = dispatchableGroups
     .map((group) => ({
       campaign_id: campaignId,
       group_id: group.progress_group_id,
@@ -739,7 +801,7 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     pending_logs_created: created,
     total_campaign_groups: campaignGroupRows.length,
     video_enabled_groups: groups.length,
-    eligible_groups: flow.dispatchGroups.length,
+    eligible_groups: dispatchableGroups.length,
     paused_groups: flow.pausedGroups.length,
     skipped_groups: flow.skippedGroups.length,
   };
@@ -753,6 +815,7 @@ function createCampaignTriggerProcessor(options = {}) {
     dispatchLogs = dispatchLogsRepository,
     trilhasRepository: trilhasRepositoryOption = trilhasRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
+    notificationsService = defaultNotificationsService,
     logger = console,
   } = options;
   const validateCampaignId = options.validateCampaignId ?? campaigns === campaignsRepository;
@@ -813,12 +876,13 @@ function createCampaignTriggerProcessor(options = {}) {
         repository: videoFlowRepository,
         logger,
       });
-      const dispatchGroupsWithCaptions = await applyGeneratedCaptions(job.data.campaign_id, flow.dispatchGroups, {
+      const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);
+      const dispatchGroupsWithCaptions = await applyGeneratedCaptions(job.data.campaign_id, dispatchableGroups, {
         campaignVideoCaptionsRepository: campaignVideoCaptionsRepositoryOption,
       });
       const dispatchJobs = await enqueueResolvedDispatchJobs(job.data, dispatchGroupsWithCaptions, options);
       const pendingLogsCreated = await ensurePendingDispatchLogs(dispatchLogs, job.data.campaign_id, dispatchJobs, logger);
-      await updateCampaignScheduledDispatch(campaigns, job.data.campaign_id, dispatchJobs);
+      await updateCampaignScheduledDispatch(campaigns, job.data.campaign_id, dispatchJobs, job.data.timezone);
       const completedAt = new Date().toISOString();
       const result = {
         campaign_id: job.data.campaign_id,
@@ -854,6 +918,26 @@ function createCampaignTriggerProcessor(options = {}) {
             ...result,
           })
         );
+
+      if (dispatchJobs.length > 0) {
+        await notificationsService
+          .notifyCampaignStarted({
+            campaignId: job.data.campaign_id,
+            campaignLabel: campaign && campaign.trilha,
+            groupsCount: dispatchJobs.length,
+          })
+          .catch((notifyError) => {
+            logger.error &&
+              logger.error(
+                JSON.stringify({
+                  event: "campaign_trigger.notification_failed",
+                  job_id: job.id,
+                  campaign_id: job.data.campaign_id,
+                  error_message: notifyError.message,
+                })
+              );
+          });
+      }
 
       return result;
     } catch (error) {
@@ -902,6 +986,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
     videoFlowRepository,
     addDispatchJob: injectedAddDispatchJob,
     addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,
+    notificationsService,
     logger,
     ...bullmqOptions
   } = workerOptions;
@@ -918,6 +1003,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
       videoFlowRepository,
       addDispatchJob: injectedAddDispatchJob,
       addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,
+      notificationsService,
       logger,
     }),
     bullmqOptions
@@ -942,6 +1028,7 @@ module.exports = {
   buildCampaignVideoFlowRepository,
   createPendingDispatchLogsForCampaign,
   extractCampaignGroup,
+  filterGroupsMissingInstanceCoverage,
   formatScheduledDateTime,
   ensurePendingDispatchLogs,
   isVideoEnabledGroup,

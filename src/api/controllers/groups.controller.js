@@ -106,6 +106,10 @@ function createGroupsController(dependencies = {}) {
         return res.status(404).json({ error: message });
       }
 
+      if (error?.code === "GROUPS_MISSING_INSTANCE_COVERAGE") {
+        return res.status(409).json({ error: message, group_ids: error.groupIds });
+      }
+
       return res.status(500).json({ error: "Internal server error" });
     }
   }

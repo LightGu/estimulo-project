@@ -667,7 +667,7 @@
               renderGroupList();
               renderDetail();
             } catch (error) {
-              alert(error.message);
+              window.estimuloAlert(error.message);
               confirmButton.disabled = false;
             }
           });
@@ -919,7 +919,12 @@
               <td>${captionStatusBadge(item)}</td>
               <td>${
                 item.status !== "processando"
-                  ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>`
+                  ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>
+                     ${
+                       item.status === "erro"
+                         ? `<button class="btn-icon btn-secondary" data-regenerate="${item.id}" title="Tentar gerar legenda novamente">${icon("refresh")}</button>`
+                         : ""
+                     }`
                   : '<span class="text-faint">—</span>'
               }</td>
             </tr>`;
@@ -927,6 +932,7 @@
           .join("");
 
         document.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openCaptionModal(btn.dataset.edit)));
+        document.querySelectorAll("[data-regenerate]").forEach((btn) => btn.addEventListener("click", () => regenerateCaption(btn.dataset.regenerate, btn)));
       }
 
       document.getElementById("captionFilterTabs").addEventListener("click", (e) => {
@@ -971,11 +977,27 @@
           closeCaptionModal();
           await refreshCaptionProgress();
         } catch (error) {
-          alert(error.message);
+          window.estimuloAlert(error.message);
         } finally {
           saveButton.disabled = false;
         }
       });
+
+      async function regenerateCaption(itemId, button) {
+        const item = captionItems.find((i) => i.id === itemId);
+        if (!item) return;
+
+        button.disabled = true;
+        try {
+          await requestJson(`/campaigns/${encodeURIComponent(item.campaignId)}/captions/${encodeURIComponent(itemId)}/regenerate`, {
+            method: "POST",
+          });
+          await refreshCaptionProgress();
+        } catch (error) {
+          window.estimuloAlert(`Falha ao tentar gerar a legenda novamente: ${error.message}`);
+          button.disabled = false;
+        }
+      }
 
       document.getElementById("startSendButton").addEventListener("click", async () => {
         const pendentes = captionItems.filter((i) => i.status !== "gerado").length;
@@ -1061,7 +1083,12 @@
           closeBackToConfigModal();
           goToStep(1);
         } catch (error) {
-          alert(`Falha ao apagar o disparo: ${error.message}`);
+          // Mensagens de regra de negocio (ex.: disparo ja enviado) ja vem prontas
+          // do backend; nesse caso mostramos direto, sem o prefixo de falha tecnica.
+          const isBusinessRuleMessage = /já teve envios|não pode ser apagado/i.test(error.message || "");
+          window.estimuloAlert(
+            isBusinessRuleMessage ? error.message : `Falha ao apagar o disparo: ${error.message}`
+          );
         } finally {
           confirmButton.disabled = false;
         }
@@ -1082,8 +1109,23 @@
           <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
       }
 
+      async function loadDefaultScheduleSettings() {
+        try {
+          const settings = await requestJson("/settings/schedule");
+          if (settings.min_interval_min !== undefined) {
+            document.getElementById("delayMin").value = settings.min_interval_min;
+          }
+          if (settings.max_interval_min !== undefined) {
+            document.getElementById("delayMax").value = settings.max_interval_min;
+          }
+        } catch (error) {
+          // mantém os valores padrão exibidos no HTML caso a chamada falhe
+        }
+      }
+
       async function initialize() {
         renderPeriodChips();
+        loadDefaultScheduleSettings();
 
         try {
           const [groups, organizations] = await Promise.all([

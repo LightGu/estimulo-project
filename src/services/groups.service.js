@@ -1,8 +1,11 @@
 const groupsRepository = require("../repositories/groups.repository");
 const organizationsRepository = require("../repositories/organizations.repository");
 const trilhasRepository = require("../repositories/trilhas.repository");
+const whatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
+const groupWhatsappInstancesRepository = require("../repositories/group-whatsapp-instances.repository");
 const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
+const whatsappInstancesService = require("./whatsapp-instances.service");
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
@@ -97,6 +100,9 @@ function createGroupsService(dependencies = {}) {
   const repository = dependencies.repository || groupsRepository;
   const organizationRepository = dependencies.organizationRepository || organizationsRepository;
   const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
+  const instancesRepository = dependencies.whatsappInstancesRepository || whatsappInstancesRepository;
+  const groupInstancesRepository = dependencies.groupWhatsappInstancesRepository || groupWhatsappInstancesRepository;
+  const instancesService = dependencies.whatsappInstancesService || whatsappInstancesService;
   const fetchEvolutionGroups = dependencies.fetchEvolutionGroups || fetchAllGroupsFromEvolution;
   const enqueueDispatch = dependencies.addDispatchJob || addDispatchJob;
 
@@ -295,8 +301,41 @@ function createGroupsService(dependencies = {}) {
     return repository.listWithoutSegment(options);
   }
 
+  async function attachInstanceIds(groups) {
+    const groupIds = groups.map((group) => group.id);
+    const linksByGroup = await groupInstancesRepository.listInstanceIdsByGroupIds(groupIds);
+
+    return groups.map((group) => ({
+      ...group,
+      whatsapp_instance_ids: [...(linksByGroup.get(group.id) || [])],
+    }));
+  }
+
   async function search(options = {}) {
-    return repository.searchByName(options);
+    const whatsappInstanceId = options.whatsapp_instance_id || options.whatsappInstanceId;
+    const groups = await repository.searchByName(options);
+
+    if (!whatsappInstanceId || whatsappInstanceId === "todos") {
+      return attachInstanceIds(groups);
+    }
+
+    const groupIdsForInstance = new Set(
+      await groupInstancesRepository.listGroupIdsForInstance(whatsappInstanceId)
+    );
+    const filtered = groups.filter((group) => groupIdsForInstance.has(group.id));
+
+    return attachInstanceIds(filtered);
+  }
+
+  async function listByInstance(whatsappInstanceId) {
+    if (!whatsappInstanceId) {
+      throw new Error("whatsapp_instance_id is required");
+    }
+
+    const groupIds = new Set(await groupInstancesRepository.listGroupIdsForInstance(whatsappInstanceId));
+    const groups = await repository.findAll();
+
+    return attachInstanceIds(groups.filter((group) => groupIds.has(group.id)));
   }
 
   async function syncGroupsFromEvolution(options = {}) {
@@ -328,70 +367,110 @@ function createGroupsService(dependencies = {}) {
       }
     }
 
-    const response = await fetchEvolutionGroups({ getParticipants, timeoutMs });
-    const evolutionGroups = extractEvolutionGroups(response.data ?? response);
-    const seen = new Set();
+    const activeInstances = await instancesRepository.listActive();
+
+    if (activeInstances.length === 0) {
+      throw new Error("No active WhatsApp instances registered");
+    }
+
+    // Une os grupos de todas as instancias em uma unica passada, deduplicando
+    // pelo JID (evolution_group_id) - o mesmo grupo pode aparecer em mais de
+    // uma instancia quando varios dos nossos numeros sao membros dele.
+    const groupsByJid = new Map();
+    const groupIdsSeenByInstance = new Map();
+    let ignored = 0;
+
+    for (const instance of activeInstances) {
+      const response = await fetchEvolutionGroups({
+        getParticipants,
+        timeoutMs,
+        config: { instanceName: instance.instance_name },
+      });
+      const evolutionGroups = extractEvolutionGroups(response.data ?? response);
+      const seenForInstance = new Set();
+
+      for (const rawGroup of evolutionGroups) {
+        const group = normalizeEvolutionGroup(rawGroup);
+
+        if (!group || !matchesNameFilter(group, nameContains)) {
+          ignored += 1;
+          continue;
+        }
+
+        const dedupeKey = group.id.toLowerCase();
+
+        if (seenForInstance.has(dedupeKey)) {
+          ignored += 1;
+          continue;
+        }
+
+        seenForInstance.add(dedupeKey);
+
+        if (!groupsByJid.has(dedupeKey)) {
+          groupsByJid.set(dedupeKey, { group, instanceIds: new Set() });
+        }
+
+        groupsByJid.get(dedupeKey).instanceIds.add(instance.id);
+      }
+
+      groupIdsSeenByInstance.set(instance.id, seenForInstance);
+    }
+
     const result = {
       inserted: 0,
       updated: 0,
-      ignored: 0,
+      ignored,
+      instances_synced: activeInstances.length,
       groups: [],
     };
+    const persistedIdByDedupeKey = new Map();
 
-    for (const rawGroup of evolutionGroups) {
-      const group = normalizeEvolutionGroup(rawGroup);
-
-      if (!group) {
-        result.ignored += 1;
-        continue;
-      }
-
-      if (!matchesNameFilter(group, nameContains)) {
-        result.ignored += 1;
-        continue;
-      }
-
-      const dedupeKey = group.id.toLowerCase();
-
-      if (seen.has(dedupeKey)) {
-        result.ignored += 1;
-        continue;
-      }
-
-      seen.add(dedupeKey);
-
+    for (const [dedupeKey, entry] of groupsByJid) {
+      const { group, instanceIds } = entry;
       const existing = await repository.findByEvolutionGroupId(group.id);
       const payload = {
         nome: group.nome,
         quantidade_membros: group.quantidade_membros,
       };
 
+      let persisted;
+
       if (existing) {
-        const updated = await repository.update(existing.id, payload);
+        persisted = await repository.update(existing.id, payload);
         result.updated += 1;
-        result.groups.push({
-          id: group.id,
-          nome: updated?.nome || group.nome,
-          quantidade_membros: updated?.quantidade_membros ?? group.quantidade_membros,
+      } else {
+        persisted = await repository.create({
+          ...payload,
+          organization_id: organizationId,
+          evolution_group_id: group.id,
+          segmento: null,
+          envia_video: false,
+          maturidade,
         });
-        continue;
+        result.inserted += 1;
       }
 
-      const created = await repository.create({
-        ...payload,
-        organization_id: organizationId,
-        evolution_group_id: group.id,
-        segmento: null,
-        envia_video: false,
-        maturidade,
-      });
+      persistedIdByDedupeKey.set(dedupeKey, persisted.id);
 
-      result.inserted += 1;
+      for (const instanceId of instanceIds) {
+        await groupInstancesRepository.linkGroupToInstance(persisted.id, instanceId);
+      }
+
       result.groups.push({
         id: group.id,
-        nome: created?.nome || group.nome,
-        quantidade_membros: created?.quantidade_membros ?? group.quantidade_membros,
+        nome: persisted?.nome || group.nome,
+        quantidade_membros: persisted?.quantidade_membros ?? group.quantidade_membros,
+        instance_ids: [...instanceIds],
       });
+    }
+
+    for (const instance of activeInstances) {
+      const seenDedupeKeys = groupIdsSeenByInstance.get(instance.id) || new Set();
+      const groupIdsStillPresent = [...seenDedupeKeys]
+        .map((dedupeKey) => persistedIdByDedupeKey.get(dedupeKey))
+        .filter(Boolean);
+
+      await groupInstancesRepository.unlinkGroupsNotIn(instance.id, groupIdsStillPresent);
     }
 
     return result;
@@ -418,6 +497,8 @@ function createGroupsService(dependencies = {}) {
     if (!trilhaId) {
       throw new Error("Trilha id is required");
     }
+
+    await instancesService.assertGroupsDispatchable([group.id]);
 
     const video = await trilhasRepositoryDependency.findFirstApprovedVideoByTrilhaAndProfile(trilhaId, profile);
 
@@ -472,6 +553,7 @@ function createGroupsService(dependencies = {}) {
     delete: remove,
     getById,
     list,
+    listByInstance,
     listByOrganization,
     listVideoEnabled,
     listWithoutSegment,
