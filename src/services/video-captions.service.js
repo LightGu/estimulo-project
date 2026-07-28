@@ -1,4 +1,5 @@
 const videoCaptionsRepository = require("../repositories/video-captions.repository");
+const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
 const { createAIProviderAdapter } = require("./ai");
 const defaultCaptionReviewService = require("./caption-review.service");
 
@@ -61,7 +62,12 @@ function normalizeCaptionText(caption) {
   return String(caption?.caption_text || caption?.captionText || "").trim();
 }
 
-async function generateCaption(adapter, downloadedVideo, options = {}) {
+// Legenda so pode ser gerada a partir da transcricao do video, nunca do video em
+// si. Quando falta transcricao, ela e gerada aqui (adapter.generateCaption cuida
+// do upload do video e, no caso do Gemini, deleta o arquivo da Files API assim
+// que a transcricao e obtida) e persistida no video_catalog antes de alimentar
+// generateCaptionFromTranscript.
+async function transcribeVideo(adapter, downloadedVideo, options = {}) {
   if (!downloadedVideo) {
     return "";
   }
@@ -74,7 +80,19 @@ async function generateCaption(adapter, downloadedVideo, options = {}) {
     return adapter.transcribe(downloadedVideo, options);
   }
 
-  throw new Error("AIProviderAdapter invalido: generateCaption e obrigatorio");
+  throw new Error("AIProviderAdapter invalido: geracao de transcricao e obrigatoria");
+}
+
+async function persistTranscript(videoCatalogRepository, videoId, transcript) {
+  if (!videoCatalogRepository || !videoId || !transcript) {
+    return;
+  }
+
+  if (typeof videoCatalogRepository.update !== "function") {
+    return;
+  }
+
+  await videoCatalogRepository.update(videoId, { transcript });
 }
 
 async function generateCaptionFromTranscript(adapter, transcript, options = {}) {
@@ -91,6 +109,7 @@ async function generateCaptionFromTranscript(adapter, transcript, options = {}) 
 
 function createVideoCaptionsService(dependencies = {}) {
   const repository = dependencies.repository || videoCaptionsRepository;
+  const videoCatalogRepository = dependencies.videoCatalogRepository || defaultVideoCatalogRepository;
   const captionReviewService = dependencies.captionReviewService || defaultCaptionReviewService;
   const logger = dependencies.logger || console;
   const timeZone = dependencies.timeZone || process.env.VIDEO_CAPTION_TIMEZONE || process.env.TZ || DEFAULT_CAPTION_TIMEZONE;
@@ -111,7 +130,10 @@ function createVideoCaptionsService(dependencies = {}) {
 
     const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
     const todayStart = getStartOfTodayInTimeZone(now, options.timeZone || timeZone);
-    const captions = await repository.listUnusedTodayByVideo(videoId, todayStart);
+    const excludeCaptionIds = new Set((options.excludeCaptionIds || []).filter(Boolean));
+    const captions = (await repository.listUnusedTodayByVideo(videoId, todayStart)).filter(
+      (candidate) => !excludeCaptionIds.has(candidate.id)
+    );
     const shouldReviewCaption = Boolean(options.requireCaptionReview || options.transcript);
     const hasTranscriptOption = Object.prototype.hasOwnProperty.call(options, "transcript");
     let transcriptResolved = false;
@@ -199,18 +221,25 @@ function createVideoCaptionsService(dependencies = {}) {
 
     const hasDownloadedVideoOption = Object.prototype.hasOwnProperty.call(options, "downloadedVideo");
     const downloadedVideo = hasDownloadedVideoOption ? await Promise.resolve(options.downloadedVideo) : undefined;
-    const transcript = await getTranscript();
+    let transcript = await getTranscript();
 
     if (!downloadedVideo && !transcript) {
       return null;
     }
 
     const adapter = getAIProviderAdapter();
-    const generatedText = String(
-      transcript
-        ? await generateCaptionFromTranscript(adapter, transcript, options.ai || {})
-        : await generateCaption(adapter, downloadedVideo, options.ai || {})
-    ).trim();
+
+    if (!transcript) {
+      transcript = String(await transcribeVideo(adapter, downloadedVideo, options.ai || {})).trim();
+
+      if (!transcript) {
+        return null;
+      }
+
+      await persistTranscript(videoCatalogRepository, videoId, transcript);
+    }
+
+    const generatedText = String(await generateCaptionFromTranscript(adapter, transcript, options.ai || {})).trim();
 
     if (!generatedText) {
       return null;
@@ -253,7 +282,7 @@ function createVideoCaptionsService(dependencies = {}) {
 module.exports = createVideoCaptionsService();
 module.exports.DEFAULT_CAPTION_TIMEZONE = DEFAULT_CAPTION_TIMEZONE;
 module.exports.createVideoCaptionsService = createVideoCaptionsService;
-module.exports.generateCaption = generateCaption;
 module.exports.generateCaptionFromTranscript = generateCaptionFromTranscript;
 module.exports.getStartOfTodayInTimeZone = getStartOfTodayInTimeZone;
 module.exports.normalizeCaptionText = normalizeCaptionText;
+module.exports.transcribeVideo = transcribeVideo;

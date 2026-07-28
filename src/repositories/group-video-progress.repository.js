@@ -30,6 +30,20 @@ async function listDelivered(groupId, client) {
   return data || [];
 }
 
+async function listDeliveredWithVideo(groupId, client) {
+  const { data, error } = await getClient(client)
+    .from("group_video_progress")
+    .select("*, video_catalog(*)")
+    .eq("group_id", groupId)
+    .order("enviado_em", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function getLastVideo(groupId, client) {
   const { data, error } = await getClient(client)
     .from("group_video_progress")
@@ -64,5 +78,6 @@ module.exports = {
   getLastVideo,
   hasDuplicate,
   listDelivered,
+  listDeliveredWithVideo,
   registerDelivery,
 };

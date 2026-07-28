@@ -16,10 +16,10 @@ async function listGroups(campaignId, client) {
   return data || [];
 }
 
-async function associateGroup(campaignId, groupId, client) {
+async function associateGroup(campaignId, groupId, organizationId, client) {
   const { data, error } = await getClient(client)
     .from("campaign_groups")
-    .insert({ campaign_id: campaignId, group_id: groupId })
+    .insert({ campaign_id: campaignId, group_id: groupId, organization_id: organizationId })
     .select("*")
     .single();
 

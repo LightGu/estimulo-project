@@ -107,10 +107,15 @@ async function testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday() {
     aiProviderAdapter: {
       async generateCaption(video, options) {
         calls.push({
-          type: "generate",
+          type: "transcribe",
           videoName: video.name,
           prompt: options.prompt,
         });
+
+        return " Transcricao crua ";
+      },
+      async generateCaptionFromTranscript(transcript) {
+        calls.push({ type: "generateFromTranscript", transcript });
 
         return " Legenda gerada por IA ";
       },
@@ -133,6 +138,13 @@ async function testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday() {
         };
       },
     },
+    videoCatalogRepository: {
+      async update(videoId, payload) {
+        calls.push({ type: "persist_transcript", videoId, payload });
+
+        return { id: videoId, ...payload };
+      },
+    },
     timeZone: "America/Bahia",
   });
 
@@ -147,7 +159,9 @@ async function testGeneratesStoresAndUsesCaptionWhenAllCaptionsWereUsedToday() {
   assert.equal(selected.caption.id, "caption-ai-1");
   assert.deepEqual(calls, [
     { type: "list", videoId: "video-1", todayStart: "2026-07-21T03:00:00.000Z" },
-    { type: "generate", videoName: "aula-01.mp4", prompt: "Crie uma legenda curta" },
+    { type: "transcribe", videoName: "aula-01.mp4", prompt: "Crie uma legenda curta" },
+    { type: "persist_transcript", videoId: "video-1", payload: { transcript: "Transcricao crua" } },
+    { type: "generateFromTranscript", transcript: "Transcricao crua" },
     {
       type: "create",
       payload: {
@@ -172,7 +186,12 @@ async function testAcceptsPendingDownloadedVideoForGeneration() {
   const service = createVideoCaptionsService({
     aiProviderAdapter: {
       async generateCaption(video) {
-        calls.push({ type: "generate", videoName: video.name });
+        calls.push({ type: "transcribe", videoName: video.name });
+
+        return "Transcricao crua";
+      },
+      async generateCaptionFromTranscript(transcript) {
+        calls.push({ type: "generateFromTranscript", transcript });
 
         return "Legenda gerada";
       },
@@ -187,6 +206,13 @@ async function testAcceptsPendingDownloadedVideoForGeneration() {
         calls.push({ type: "create", payload });
 
         return { id: "caption-ai-1", ...payload };
+      },
+    },
+    videoCatalogRepository: {
+      async update(videoId, payload) {
+        calls.push({ type: "persist_transcript", videoId, payload });
+
+        return { id: videoId, ...payload };
       },
     },
   });
@@ -204,7 +230,9 @@ async function testAcceptsPendingDownloadedVideoForGeneration() {
   assert.equal(selected.text, "Legenda gerada");
   assert.deepEqual(calls, [
     { type: "list" },
-    { type: "generate", videoName: "aula-01.mp4" },
+    { type: "transcribe", videoName: "aula-01.mp4" },
+    { type: "persist_transcript", videoId: "video-1", payload: { transcript: "Transcricao crua" } },
+    { type: "generateFromTranscript", transcript: "Transcricao crua" },
     {
       type: "create",
       payload: {

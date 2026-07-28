@@ -13,8 +13,10 @@
     <link rel="stylesheet" href="assets/css/layout.css">
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
-      tr.campaign-row.editable { cursor: pointer; }
-      tr.campaign-row.editable:hover { background: var(--surface-strong); }
+      tr.campaign-row { cursor: pointer; }
+      tr.campaign-row:hover { background: var(--surface-strong); }
+      tr.group-row { cursor: pointer; }
+      tr.group-row:hover { background: var(--surface-strong); }
     </style>
   </head>
   <body data-page="campanhas">
@@ -25,23 +27,22 @@
         <header class="topbar">
           <div class="topbar-titles">
             <h1>Campanhas</h1>
-            <p>Criação e acompanhamento de campanhas de envio.</p>
+            <p>Acompanhamento das campanhas de envio automatizado.</p>
           </div>
           <div class="topbar-actions">
-            <button class="btn" id="newCampaignButton" type="button">+ Nova campanha</button>
             <div class="user-chip"><span class="avatar">GL</span> Gustavo Luz</div>
           </div>
         </header>
 
         <main class="page">
           <section class="page-section">
-            <div class="section-head"><h2>Campanhas cadastradas</h2></div>
+            <div class="section-head"><h2>Campanhas</h2></div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Campanha</th>
-                    <th>Trilha</th>
+                    <th>Quantidade de grupos</th>
                     <th>Status</th>
                     <th>Data de disparo</th>
                   </tr>
@@ -54,196 +55,264 @@
       </div>
     </div>
 
-    <div class="overlay" id="campaignOverlay" hidden>
+    <div class="overlay" id="campaignDetailOverlay" hidden>
       <div class="modal">
         <div class="modal-header">
-          <h3 id="formTitle">Nova campanha</h3>
-          <button class="icon-btn-close" id="closeCampaignModal" type="button" aria-label="Fechar">✕</button>
+          <h3 id="campaignDetailTitle">Campanha</h3>
+          <button class="icon-btn-close" id="closeCampaignDetail" type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
-          <div class="field-row" style="grid-template-columns:2fr 1fr;">
-            <div class="field">
-              <label for="campNome">Nome da campanha</label>
-              <input id="campNome" type="text" placeholder="Ex.: Eufrásio - Gestão Financeira - Agosto">
-            </div>
-            <div class="field">
-              <label for="campTrilha">Trilha</label>
-              <select id="campTrilha"></select>
-            </div>
-          </div>
-
-          <div class="callout" id="autoAssocCallout">
-            A campanha associa automaticamente <strong id="autoAssocCount">0</strong> grupo(s) com a trilha selecionada e seleciona,
-            para cada um, o próximo vídeo aprovado ainda não enviado.
-          </div>
-
-          <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;margin-top:14px;">
-            <div class="field">
-              <label for="campData">Data do disparo</label>
-              <input id="campData" type="date">
-            </div>
-            <div class="field">
-              <label for="campJanelaInicio">Janela — início</label>
-              <input id="campJanelaInicio" type="time" value="08:00">
-            </div>
-            <div class="field">
-              <label for="campJanelaFim">Janela — fim</label>
-              <input id="campJanelaFim" type="time" value="18:00">
-            </div>
-          </div>
-
-          <div class="field-row" style="grid-template-columns:1fr 1fr;">
-            <div class="field">
-              <label for="campIntervaloMin">Intervalo mínimo entre envios, min</label>
-              <input id="campIntervaloMin" type="number" min="1" value="4">
-            </div>
-            <div class="field">
-              <label for="campIntervaloMax">Intervalo máximo entre envios, min</label>
-              <input id="campIntervaloMax" type="number" min="1" value="12">
-            </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Grupo</th>
+                  <th>Vídeo</th>
+                  <th>Status</th>
+                  <th>Atualizado em</th>
+                </tr>
+              </thead>
+              <tbody id="campaignGroupsBody"></tbody>
+            </table>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" id="cancelCampaignModal" type="button">Cancelar</button>
-          <button class="btn" id="saveCampaignButton" type="button">Criar campanha</button>
+          <button class="btn btn-secondary" id="closeCampaignDetailFooter" type="button">Fechar</button>
         </div>
       </div>
     </div>
 
-    <script src="assets/js/mock-data.js"></script>
-    <script src="assets/js/helpers.js"></script>
+    <div class="overlay" id="groupCaptionOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="groupCaptionTitle">Legenda do vídeo</h3>
+          <button class="icon-btn-close" id="closeGroupCaptionModal" type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted" id="groupCaptionMeta"></p>
+          <div id="groupCaptionContent"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="closeGroupCaptionModalFooter" type="button">Fechar</button>
+        </div>
+      </div>
+    </div>
+
     <script src="assets/js/nav.js"></script>
     <script>
-      let editingCampaignId = null;
+      const state = {
+        campaigns: [],
+        currentCampaignId: null,
+        captionsByGroup: new Map(),
+      };
 
-      function trailGroupCount(trailName) {
-        return MOCK.groups.filter((g) => g.trilha === trailName && g.enviaVideo).length;
+      function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       }
 
-      function populateTrailSelect() {
-        const select = document.getElementById("campTrilha");
-        select.innerHTML = MOCK.trails.map((t) => `<option value="${t.nome}">${t.nome}</option>`).join("");
-        updateAutoAssocCount();
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
       }
 
-      function updateAutoAssocCount() {
-        const trilha = document.getElementById("campTrilha").value;
-        document.getElementById("autoAssocCount").textContent = trailGroupCount(trilha);
+      function campaignName(campaign) {
+        return campaign.trilha || campaign.nome || "Campanha";
+      }
+
+      function statusLabel(status) {
+        return status === "concluido" ? "Concluído" : "Programado";
+      }
+
+      function statusBadgeClass(status) {
+        return status === "concluido" ? "badge-success" : "badge-info";
+      }
+
+      function dispatchStatusLabel(status) {
+        const labels = {
+          pendente: "Pendente",
+          processando: "Processando",
+          enviado: "Enviado",
+          erro: "Erro",
+          falhou: "Falhou",
+        };
+        return labels[status] || status || "-";
+      }
+
+      function dispatchStatusBadgeClass(status) {
+        if (status === "enviado") return "badge-success";
+        if (status === "erro" || status === "falhou") return "badge-danger";
+        if (status === "processando") return "badge-info";
+        return "badge-warning";
+      }
+
+      function captionStatusLabel(status) {
+        const labels = {
+          processando: "Gerando legenda…",
+          gerado: "Legenda pronta",
+          erro: "Erro ao gerar legenda",
+        };
+        return labels[status] || status || "-";
       }
 
       function renderCampaigns() {
-        document.getElementById("campaignsBody").innerHTML = MOCK.campaigns
-          .map((c) => {
-            const editable = c.status !== "concluida";
-            return `
-              <tr class="campaign-row${editable ? " editable" : ""}" ${editable ? `data-edit="${c.id}"` : ""}>
-                <td class="strong">${c.nome}</td>
-                <td>${trilhaShortName(c.trilha)}</td>
-                <td><span class="badge ${campaignStatusBadgeClass(c.status)}">${campaignStatusLabel(c.status)}</span></td>
-                <td class="mono">${c.dataEnvio || "—"}</td>
-              </tr>`;
-          })
-          .join("");
-
-        document.querySelectorAll("[data-edit]").forEach((row) => row.addEventListener("click", () => startEditCampaign(row.dataset.edit)));
-      }
-
-      const campaignOverlay = document.getElementById("campaignOverlay");
-
-      function openCampaignModal() {
-        campaignOverlay.hidden = false;
-      }
-
-      function closeCampaignModal() {
-        campaignOverlay.hidden = true;
-      }
-
-      function resetCampaignForm() {
-        editingCampaignId = null;
-        document.getElementById("formTitle").textContent = "Nova campanha";
-        document.getElementById("saveCampaignButton").textContent = "Criar campanha";
-        document.getElementById("campNome").value = "";
-        document.getElementById("campData").value = "";
-        document.getElementById("campJanelaInicio").value = "08:00";
-        document.getElementById("campJanelaFim").value = "18:00";
-        document.getElementById("campIntervaloMin").value = 4;
-        document.getElementById("campIntervaloMax").value = 12;
-        populateTrailSelect();
-      }
-
-      document.getElementById("newCampaignButton").addEventListener("click", () => {
-        resetCampaignForm();
-        openCampaignModal();
-      });
-
-      function startEditCampaign(campaignId) {
-        const c = MOCK.campaigns.find((camp) => camp.id === campaignId);
-        editingCampaignId = campaignId;
-
-        document.getElementById("formTitle").textContent = `Editando · ${c.nome}`;
-        document.getElementById("campNome").value = c.nome;
-        populateTrailSelect();
-        document.getElementById("campTrilha").value = c.trilha;
-        document.getElementById("campData").value = c.dataEnvio || "";
-        document.getElementById("campJanelaInicio").value = c.janelaInicio;
-        document.getElementById("campJanelaFim").value = c.janelaFim;
-        document.getElementById("campIntervaloMin").value = c.intervaloMinMin;
-        document.getElementById("campIntervaloMax").value = c.intervaloMaxMin;
-        updateAutoAssocCount();
-
-        document.getElementById("saveCampaignButton").textContent = "Salvar alterações";
-        openCampaignModal();
-      }
-
-      document.getElementById("closeCampaignModal").addEventListener("click", closeCampaignModal);
-      document.getElementById("cancelCampaignModal").addEventListener("click", closeCampaignModal);
-      campaignOverlay.addEventListener("click", (e) => {
-        if (e.target === campaignOverlay) closeCampaignModal();
-      });
-
-      document.getElementById("campTrilha").addEventListener("change", updateAutoAssocCount);
-
-      document.getElementById("saveCampaignButton").addEventListener("click", () => {
-        const nome = document.getElementById("campNome").value.trim();
-        const trilha = document.getElementById("campTrilha").value;
-        const data = document.getElementById("campData").value;
-        const janelaInicio = document.getElementById("campJanelaInicio").value;
-        const janelaFim = document.getElementById("campJanelaFim").value;
-        const intervaloMinMin = Number(document.getElementById("campIntervaloMin").value);
-        const intervaloMaxMin = Number(document.getElementById("campIntervaloMax").value);
-        if (!nome || !data) return;
-
-        const total = trailGroupCount(trilha);
-        const gruposPausados = MOCK.groups.filter((g) => g.trilha === trilha && g.filaStatus === "fim_de_fila").length;
-
-        if (editingCampaignId) {
-          const c = MOCK.campaigns.find((camp) => camp.id === editingCampaignId);
-          Object.assign(c, { nome, trilha, gruposTotal: total, gruposPausados, dataEnvio: data, janelaInicio, janelaFim, intervaloMinMin, intervaloMaxMin });
-          // TODO: PATCH /campaigns/:id { ... } (somente permitido antes do processamento começar)
-        } else {
-          MOCK.campaigns.unshift({
-            id: `camp-${Date.now()}`,
-            nome,
-            trilha,
-            status: "agendada",
-            gruposTotal: total,
-            gruposEnviados: 0,
-            gruposCancelados: 0,
-            gruposPausados,
-            dataEnvio: data,
-            janelaInicio,
-            janelaFim,
-            intervaloMinMin,
-            intervaloMaxMin,
-          });
-          // TODO: POST /campaigns { nome, trilha, group_ids: [...todos os grupos da trilha], execution_at, janela, intervalo }
+        if (!state.campaigns.length) {
+          document.getElementById("campaignsBody").innerHTML = `
+            <tr><td colspan="4"><div class="empty-state"><strong>Nenhuma campanha encontrada</strong><span>As campanhas aparecem aqui assim que um envio automatizado for disparado.</span></div></td></tr>`;
+          return;
         }
 
-        closeCampaignModal();
-        renderCampaigns();
+        document.getElementById("campaignsBody").innerHTML = state.campaigns
+          .map(
+            (c) => `
+              <tr class="campaign-row" data-campaign-id="${escapeHtml(c.id)}">
+                <td class="strong">${escapeHtml(campaignName(c))}</td>
+                <td>${Number(c.grupos_total || 0)}</td>
+                <td><span class="badge ${statusBadgeClass(c.status)}">${statusLabel(c.status)}</span></td>
+                <td class="mono">${escapeHtml(c.data_envio || "—")}</td>
+              </tr>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-campaign-id]").forEach((row) => {
+          row.addEventListener("click", () => openCampaignDetail(row.dataset.campaignId));
+        });
+      }
+
+      function renderLoadError(error) {
+        document.getElementById("campaignsBody").innerHTML = `
+          <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar campanhas</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+      }
+
+      const campaignDetailOverlay = document.getElementById("campaignDetailOverlay");
+
+      function closeCampaignDetail() {
+        campaignDetailOverlay.hidden = true;
+      }
+
+      async function openCampaignDetail(campaignId) {
+        const campaign = state.campaigns.find((c) => c.id === campaignId);
+        state.currentCampaignId = campaignId;
+        state.captionsByGroup = new Map();
+        document.getElementById("campaignDetailTitle").textContent = campaign ? campaignName(campaign) : "Campanha";
+        document.getElementById("campaignGroupsBody").innerHTML = `
+          <tr><td colspan="4"><div class="empty-state"><strong>Carregando grupos</strong></div></td></tr>`;
+        campaignDetailOverlay.hidden = false;
+
+        try {
+          const [groups, progress] = await Promise.all([
+            requestJson(`/campaigns/${encodeURIComponent(campaignId)}/groups`),
+            requestJson(`/campaigns/${encodeURIComponent(campaignId)}/captions/progress`).catch(() => null),
+          ]);
+
+          if (progress && Array.isArray(progress.items)) {
+            progress.items.forEach((item) => {
+              state.captionsByGroup.set(`${item.group_id}::${item.video_id}`, item);
+            });
+          }
+
+          if (!groups.length) {
+            document.getElementById("campaignGroupsBody").innerHTML = `
+              <tr><td colspan="4"><div class="empty-state"><strong>Nenhum grupo associado a esta campanha</strong></div></td></tr>`;
+            return;
+          }
+
+          document.getElementById("campaignGroupsBody").innerHTML = groups
+            .map(
+              (g) => `
+                <tr class="group-row" data-group-id="${escapeHtml(g.group_id)}" data-video-id="${escapeHtml(g.video_id || "")}">
+                  <td class="strong">${escapeHtml(g.nome || g.group_id)}</td>
+                  <td class="mono">${escapeHtml(g.video_id || "—")}</td>
+                  <td><span class="badge ${dispatchStatusBadgeClass(g.status)}">${dispatchStatusLabel(g.status)}</span></td>
+                  <td class="mono">${escapeHtml(g.criado_em || "—")}</td>
+                </tr>`
+            )
+            .join("");
+
+          document.querySelectorAll("#campaignGroupsBody [data-group-id]").forEach((row) => {
+            row.addEventListener("click", () =>
+              openGroupCaption(row.dataset.groupId, row.dataset.videoId, row)
+            );
+          });
+        } catch (error) {
+          document.getElementById("campaignGroupsBody").innerHTML = `
+            <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+        }
+      }
+
+      document.getElementById("closeCampaignDetail").addEventListener("click", closeCampaignDetail);
+      document.getElementById("closeCampaignDetailFooter").addEventListener("click", closeCampaignDetail);
+      campaignDetailOverlay.addEventListener("click", (e) => {
+        if (e.target === campaignDetailOverlay) closeCampaignDetail();
       });
 
-      renderCampaigns();
+      const groupCaptionOverlay = document.getElementById("groupCaptionOverlay");
+
+      function closeGroupCaption() {
+        groupCaptionOverlay.hidden = true;
+      }
+
+      function openGroupCaption(groupId, videoId, row) {
+        const groupName = row.cells[0].textContent;
+        const item = state.captionsByGroup.get(`${groupId}::${videoId}`);
+
+        document.getElementById("groupCaptionTitle").textContent = `Legenda · ${groupName}`;
+
+        if (!videoId) {
+          document.getElementById("groupCaptionMeta").textContent = "Este grupo ainda não possui um vídeo associado nesta campanha.";
+          document.getElementById("groupCaptionContent").innerHTML = "";
+          groupCaptionOverlay.hidden = false;
+          return;
+        }
+
+        if (!item) {
+          document.getElementById("groupCaptionMeta").textContent = "Nenhuma legenda encontrada para este vídeo.";
+          document.getElementById("groupCaptionContent").innerHTML = "";
+          groupCaptionOverlay.hidden = false;
+          return;
+        }
+
+        const videoName = item.video_catalog && item.video_catalog.nome_do_arquivo ? item.video_catalog.nome_do_arquivo : videoId;
+        document.getElementById("groupCaptionMeta").textContent = `Vídeo: ${videoName} · ${captionStatusLabel(item.status)}`;
+
+        if (item.status === "gerado" && item.caption_text) {
+          document.getElementById("groupCaptionContent").innerHTML = `<p style="white-space: pre-wrap;">${escapeHtml(item.caption_text)}</p>`;
+        } else if (item.status === "erro") {
+          document.getElementById("groupCaptionContent").innerHTML = `<div class="empty-state"><strong>Erro ao gerar legenda</strong><span>${escapeHtml(item.erro_mensagem || "Tente novamente mais tarde.")}</span></div>`;
+        } else {
+          document.getElementById("groupCaptionContent").innerHTML = `<div class="empty-state"><strong>Legenda ainda sendo preparada</strong><span>Aguarde a conclusão do processamento.</span></div>`;
+        }
+
+        groupCaptionOverlay.hidden = false;
+      }
+
+      document.getElementById("closeGroupCaptionModal").addEventListener("click", closeGroupCaption);
+      document.getElementById("closeGroupCaptionModalFooter").addEventListener("click", closeGroupCaption);
+      groupCaptionOverlay.addEventListener("click", (e) => {
+        if (e.target === groupCaptionOverlay) closeGroupCaption();
+      });
+
+      async function initialize() {
+        try {
+          const campaigns = await requestJson("/campaigns");
+          state.campaigns = Array.isArray(campaigns) ? campaigns : [];
+          renderCampaigns();
+        } catch (error) {
+          renderLoadError(error);
+        }
+      }
+
+      initialize();
     </script>
   </body>
 </html>

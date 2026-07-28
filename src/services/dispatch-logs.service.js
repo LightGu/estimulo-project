@@ -43,7 +43,7 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Video not found");
     }
 
-    const validStatuses = ["pendente", "processando", "enviado", "erro", "falhou"];
+    const validStatuses = ["pendente", "processando", "enviado", "falhou"];
 
     if (!validStatuses.includes(status)) {
       throw new Error("Invalid status");
@@ -57,7 +57,7 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Dispatch log id is required");
     }
 
-    const validStatuses = ["pendente", "processando", "enviado", "erro", "falhou"];
+    const validStatuses = ["pendente", "processando", "enviado", "falhou"];
 
     if (!validStatuses.includes(status)) {
       throw new Error("Invalid status");
@@ -86,10 +86,41 @@ function createDispatchLogsService(dependencies = {}) {
     return repository.listRecent(limit);
   }
 
+  async function listForReport(filters = {}) {
+    const { startDate, endDate, organizationId, groupId, status } = filters;
+    const today = new Date().toISOString().slice(0, 10);
+
+    if (startDate && startDate > today) {
+      throw new Error("Start date cannot be in the future");
+    }
+
+    if (endDate && endDate > today) {
+      throw new Error("End date cannot be in the future");
+    }
+
+    if (startDate && endDate && startDate > endDate) {
+      throw new Error("Start date cannot be after end date");
+    }
+
+    const logs = await repository.listWithFilters({
+      startDate: startDate ? `${startDate}T00:00:00.000Z` : null,
+      endDate: endDate ? `${endDate}T23:59:59.999Z` : null,
+      groupId: groupId || null,
+      status: status || null,
+    });
+
+    if (!organizationId) {
+      return logs;
+    }
+
+    return logs.filter((log) => log.groups?.organization_id === organizationId);
+  }
+
   return {
     createLog,
     listByCampaign,
     listByGroup,
+    listForReport,
     listRecent,
     updateStatus,
   };
