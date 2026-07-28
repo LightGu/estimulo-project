@@ -21,6 +21,39 @@ async function createPending(payload, client) {
   return data;
 }
 
+async function findById(id, client) {
+  const { data, error } = await getClient(client)
+    .from("campaign_video_captions")
+    .select("*, groups(nome, trilha_id, trilhas(macrotema, trilha)), video_catalog(nome_do_arquivo, drive_file_id)")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+async function markProcessing(id, client) {
+  const { data, error } = await getClient(client)
+    .from("campaign_video_captions")
+    .update({
+      status: "processando",
+      erro_mensagem: null,
+      atualizado_em: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 async function markGenerated(id, payload, client) {
   const { data, error } = await getClient(client)
     .from("campaign_video_captions")
@@ -97,8 +130,10 @@ async function listByCampaign(campaignId, client) {
 
 module.exports = {
   createPending,
+  findById,
   listByCampaign,
   markError,
   markGenerated,
+  markProcessing,
   updateCaptionText,
 };

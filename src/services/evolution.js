@@ -247,6 +247,8 @@ module.exports = {
   EvolutionDeliveryProvider,
   buildFetchAllGroupsRequest,
   buildEvolutionRequest,
+  createEvolutionClient,
   fetchAllGroupsFromEvolution,
+  parseEvolutionError,
   sendToEvolution,
 };

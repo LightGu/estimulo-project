@@ -138,6 +138,51 @@ async function testDispatchSelectsUnusedCaptionForVideo() {
   assert.ok(markedCaptions[0].usedAt instanceof Date);
 }
 
+async function testDispatchReusesCaptionGeneratedInCaptionsStepEvenWithoutCaptionId() {
+  // Legendas geradas/revisadas na Etapa 2 (tela envio-automatizado, tabela
+  // campaign_video_captions) chegam ao job com caption_generated=true, mas
+  // caption_id pode ser null (ex.: legenda de teste inserida manualmente, ou
+  // linha sem video_captions.id associado). Mesmo assim o dispatch deve reusar
+  // esse texto ja aprovado, sem chamar selectCaptionForVideo para gerar outro.
+  const selectedCaptions = [];
+  const jobData = buildDispatchJobData({
+    group_id: "120363000000000000@g.us",
+    campaign_id: "campaign-1",
+    video_catalog: {
+      id: "video-1",
+      drive_file_id: "drive-file-1",
+    },
+    legenda: "Legenda revisada na etapa 2",
+    caption_id: null,
+    caption_generated: true,
+    scheduled_at: "2026-07-14T10:00:00.000Z",
+  });
+  const processor = createDispatchProcessor({
+    videoDownloader: async () => ({
+      video_id: "video-1",
+      drive_file_id: "drive-file-1",
+      bytes: Buffer.from("video-bytes"),
+      name: "aula-01.mp4",
+      mime_type: "video/mp4",
+    }),
+    videoCaptionsService: {
+      async selectCaptionForVideo(videoId) {
+        selectedCaptions.push(videoId);
+        return { caption: { id: "caption-outra" }, text: "Legenda diferente" };
+      },
+      async markCaptionUsed() {},
+    },
+    sender: async (payload) => {
+      return { provider: "fake", status: 200, receivedMessage: payload.message };
+    },
+  });
+
+  const result = await processor(createFakeJob(jobData));
+
+  assert.deepEqual(selectedCaptions, []);
+  assert.equal(result.delivery.receivedMessage, "Legenda revisada na etapa 2");
+}
+
 async function testDispatchStartsDownloadAndCaptionResolutionInParallel() {
   const order = [];
   let finishDownload;
@@ -613,6 +658,7 @@ async function testDispatchFallsBackToManualCaptionWhenGenerationFails() {
 async function main() {
   await testDispatchDownloadsVideoAndSendsBase64Payload();
   await testDispatchSelectsUnusedCaptionForVideo();
+  await testDispatchReusesCaptionGeneratedInCaptionsStepEvenWithoutCaptionId();
   await testDispatchStartsDownloadAndCaptionResolutionInParallel();
   await testDispatchDoesNotMarkCaptionUsedWhenSendFails();
   await testDispatchRegistersProgressAfterConfirmedSend();

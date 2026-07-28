@@ -174,6 +174,27 @@ async function main() {
         .filter((row) => row.campaign_id === campaignId)
         .map((row) => ({ ...row, groups: groupsById[row.group_id] || { id: row.group_id } }));
     },
+    isCampaignFullyTerminal: async (campaignId, options = {}) => {
+      const groupRows = await campaignGroupsRepository.listGroups(campaignId);
+
+      if (!groupRows.length) {
+        return false;
+      }
+
+      const logs = await options.dispatchLogsRepository.listByCampaign(campaignId);
+      const latestStatusByGroup = new Map();
+
+      logs.forEach((log) => {
+        if (!latestStatusByGroup.has(log.group_id)) {
+          latestStatusByGroup.set(log.group_id, log.status);
+        }
+      });
+
+      return groupRows.every((row) => {
+        const status = latestStatusByGroup.get(row.group_id);
+        return status && ["enviado", "falhou"].includes(status);
+      });
+    },
   };
 
   const campaignVideoCaptionRows = [];
@@ -183,6 +204,7 @@ async function main() {
       campaignVideoCaptionRows.push(row);
       return row;
     },
+    findById: async (id) => campaignVideoCaptionRows.find((row) => row.id === id) || null,
     listByCampaign: async (campaignId) => campaignVideoCaptionRows.filter((row) => row.campaign_id === campaignId),
     markError: async (id, payload) => {
       const row = campaignVideoCaptionRows.find((item) => item.id === id);
@@ -192,6 +214,11 @@ async function main() {
     markGenerated: async (id, payload) => {
       const row = campaignVideoCaptionRows.find((item) => item.id === id);
       Object.assign(row, { status: "gerado", ...payload });
+      return row;
+    },
+    markProcessing: async (id) => {
+      const row = campaignVideoCaptionRows.find((item) => item.id === id);
+      Object.assign(row, { status: "processando", erro_mensagem: null });
       return row;
     },
     updateCaptionText: async (id, payload) => {
@@ -221,6 +248,15 @@ async function main() {
     repository: campaignVideoCaptionsRepository,
     videoCaptionsService: videoCaptionsServiceStub,
     videoCatalogRepository,
+    // selectCaptionForVideo esta stubado; o download real do Drive nao deve ser
+    // acionado nos testes. Injeta-se um downloader falso para isolar a unidade.
+    videoDownloader: async () => ({
+      video_id: "video-flow-1",
+      drive_file_id: "drive-flow-1",
+      bytes: Buffer.from("fake"),
+      name: "fake.mp4",
+      mime_type: "video/mp4",
+    }),
     videoFlowRepository: {
       findNextApprovedUnsentVideoForGroup: async (group) => {
         if (group.id === "group-1") {
@@ -249,6 +285,23 @@ async function main() {
   };
 
   const orgService = organizationsService.createOrganizationsService({ repository: orgRepository });
+  const groupInstanceLinks = [];
+  const fakeWhatsappInstancesRepository = {
+    listActive: async () => [{ id: "instance-legacy", instance_name: "estimulo-mvp" }],
+  };
+  const fakeGroupWhatsappInstancesRepository = {
+    linkGroupToInstance: async (groupId, instanceId) => {
+      groupInstanceLinks.push({ groupId, instanceId });
+      return { group_id: groupId, whatsapp_instance_id: instanceId };
+    },
+    unlinkGroupsNotIn: async () => {},
+    listInstanceIdsByGroupIds: async () => new Map(),
+    listGroupIdsForInstance: async () => [],
+  };
+  // Uma unica instancia ativa: assertGroupsDispatchable deve ser no-op (compatibilidade retroativa).
+  const fakeWhatsappInstancesService = {
+    assertGroupsDispatchable: async () => {},
+  };
   const groupService = groupsService.createGroupsService({
     trilhasRepository: trilhasFakeRepository,
     addDispatchJob: async (payload) => ({ id: "dispatch-test-1", name: "dispatch-content", queueName: "dispatch", data: payload }),
@@ -276,6 +329,9 @@ async function main() {
     }),
     organizationRepository: orgRepository,
     repository: groupRepository,
+    whatsappInstancesRepository: fakeWhatsappInstancesRepository,
+    groupWhatsappInstancesRepository: fakeGroupWhatsappInstancesRepository,
+    whatsappInstancesService: fakeWhatsappInstancesService,
   });
   const campaignService = campaignsService.createCampaignsService({
     addCampaignTriggerJob: async (payload) => {
@@ -292,6 +348,13 @@ async function main() {
     campaignVideoCaptionsService: campaignVideoCaptionsServiceInstance,
     dispatchLogsRepository: dispatchLogRepository,
     groupsRepository: groupRepository,
+    settingsService: {
+      getScheduleSettings: async () => ({
+        timezone: "America/Bahia",
+        min_interval_min: 1,
+        max_interval_min: 5,
+      }),
+    },
     groupVideoProgressRepository: progressRepository,
     organizationRepository: orgRepository,
     repository: campaignRepository,
@@ -331,9 +394,11 @@ async function main() {
   assert.equal(insertedGroup.organization_id, null);
   assert.equal(insertedGroup.envia_video, false);
   assert.deepEqual(syncedGroups.groups, [
-    { id: "120363new@g.us", nome: "Grupo Novo", quantidade_membros: 3 },
-    { id: "120363existing@g.us", nome: "Grupo Existente", quantidade_membros: 4 },
+    { id: "120363new@g.us", nome: "Grupo Novo", quantidade_membros: 3, instance_ids: ["instance-legacy"] },
+    { id: "120363existing@g.us", nome: "Grupo Existente", quantidade_membros: 4, instance_ids: ["instance-legacy"] },
   ]);
+  assert.equal(syncedGroups.instances_synced, 1);
+  assert.deepEqual(groupInstanceLinks.map((link) => link.instanceId), ["instance-legacy", "instance-legacy"]);
   const groupsWithoutSegment = await groupService.listWithoutSegment();
   assert.equal(groupsWithoutSegment.length, 1);
   assert.equal(groupsWithoutSegment[0].evolution_group_id, "120363new@g.us");
@@ -488,6 +553,46 @@ async function main() {
   );
   assert.equal(editedCaption.caption_text, "Legenda revisada manualmente");
   await assert.rejects(() => campaignVideoCaptionsServiceInstance.updateCaptionText("cvc-1", "  "), /required/);
+
+  await assert.rejects(() => campaignVideoCaptionsServiceInstance.regenerateCaption(""), /required/);
+  await assert.rejects(() => campaignVideoCaptionsServiceInstance.regenerateCaption("cvc-missing"), /not found/);
+
+  const failingRow = await campaignVideoCaptionsRepository.createPending({
+    campaign_id: "campaign-1",
+    group_id: "group-1",
+    video_id: "video-caption-fail",
+  });
+  await campaignVideoCaptionsRepository.markError(failingRow.id, { erro_mensagem: "Falha ao gerar legenda via IA" });
+
+  await assert.rejects(
+    () => campaignVideoCaptionsServiceInstance.regenerateCaption(failingRow.id),
+    /Falha ao gerar legenda via IA/
+  );
+  const stillFailingRow = await campaignVideoCaptionsRepository.findById(failingRow.id);
+  assert.equal(stillFailingRow.status, "erro");
+  assert.equal(stillFailingRow.erro_mensagem, "Falha ao gerar legenda via IA");
+
+  // Corrige o stub para simular o problema resolvido (ex.: modelo de IA voltou a funcionar)
+  // e confirma que regenerar atualiza a MESMA linha para "gerado", sem criar duplicata.
+  const originalSelectCaptionForVideo = videoCaptionsServiceStub.selectCaptionForVideo;
+  videoCaptionsServiceStub.selectCaptionForVideo = async (videoId, options) => {
+    if (videoId === "video-caption-fail") {
+      return { caption: { id: "caption-recovered" }, generated: true, text: "Legenda recuperada" };
+    }
+    return originalSelectCaptionForVideo(videoId, options);
+  };
+  try {
+    const regenerated = await campaignVideoCaptionsServiceInstance.regenerateCaption(failingRow.id);
+    assert.equal(regenerated.id, failingRow.id);
+    assert.equal(regenerated.status, "gerado");
+    assert.equal(regenerated.caption_text, "Legenda recuperada");
+    assert.equal(
+      campaignVideoCaptionRows.filter((row) => row.video_id === "video-caption-fail").length,
+      1
+    );
+  } finally {
+    videoCaptionsServiceStub.selectCaptionForVideo = originalSelectCaptionForVideo;
+  }
 
   const dispatchedCampaign = await campaignService.dispatchCampaign({
     group_ids: ["group-1"],

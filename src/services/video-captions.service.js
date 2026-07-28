@@ -236,6 +236,13 @@ function createVideoCaptionsService(dependencies = {}) {
         return null;
       }
 
+      // A transcricao acabou de ser obtida a partir do video baixado. Atualiza o
+      // cache usado por getTranscript()/reviewCaption para que a revisao factual
+      // compare a legenda gerada com a transcricao real, e nao com o valor inicial
+      // vazio (que causaria a reprovacao "Transcricao do video ausente").
+      resolvedTranscript = transcript;
+      transcriptResolved = true;
+
       await persistTranscript(videoCatalogRepository, videoId, transcript);
     }
 

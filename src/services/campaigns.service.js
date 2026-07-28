@@ -3,12 +3,12 @@ const campaignGroupsRepository = require("../repositories/campaign-groups.reposi
 const groupsRepository = require("../repositories/groups.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultCampaignVideoCaptionsService = require("./campaign-video-captions.service");
+const defaultSettingsService = require("./settings.service");
 const {
   addCampaignTriggerJob,
   createPendingDispatchLogsForCampaign: defaultCreatePendingDispatchLogsForCampaign,
 } = require("../queues/campaign-trigger");
 
-const TERMINAL_LOG_STATUSES = ["enviado", "falhou"];
 const TRIGGER_ENQUEUE_TIMEOUT_MS = Number(process.env.CAMPAIGN_TRIGGER_ENQUEUE_TIMEOUT_MS) || 5000;
 
 function withTimeout(promise, timeoutMs, timeoutMessage) {
@@ -18,11 +18,11 @@ function withTimeout(promise, timeoutMs, timeoutMessage) {
   ]);
 }
 
-function formatCampaignDayName(date = new Date()) {
+function formatCampaignDayName(date = new Date(), timezone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
     month: "2-digit",
-    timeZone: process.env.CAMPAIGN_TIMEZONE || process.env.TZ || "America/Bahia",
+    timeZone: timezone || process.env.CAMPAIGN_TIMEZONE || process.env.TZ || "America/Bahia",
   })
     .formatToParts(date)
     .reduce((accumulator, part) => {
@@ -33,12 +33,12 @@ function formatCampaignDayName(date = new Date()) {
   return `Campanha do dia ${parts.day}/${parts.month}`;
 }
 
-function formatDateOnlyInTimezone(date = new Date()) {
+function formatDateOnlyInTimezone(date = new Date(), timezone) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-    timeZone: process.env.CAMPAIGN_TIMEZONE || process.env.TZ || "America/Bahia",
+    timeZone: timezone || process.env.CAMPAIGN_TIMEZONE || process.env.TZ || "America/Bahia",
   })
     .formatToParts(date)
     .reduce((accumulator, part) => {
@@ -73,7 +73,7 @@ function normalizeNumber(value, defaultValue) {
   return Number.isFinite(number) ? Math.trunc(number) : defaultValue;
 }
 
-function resolveDispatchScheduleOptions(payload = {}, executionDate = new Date()) {
+function resolveDispatchScheduleOptions(payload = {}, executionDate = new Date(), scheduleSettings = {}) {
   const defaultWindowEnd = new Date(executionDate.getTime() + 60 * 60 * 1000);
   const windowStart =
     payload.window_start ||
@@ -89,10 +89,16 @@ function resolveDispatchScheduleOptions(payload = {}, executionDate = new Date()
     payload.timeWindow?.end ||
     process.env.CAMPAIGN_DISPATCH_WINDOW_END ||
     defaultWindowEnd.toISOString();
+  const defaultMinMs = Number.isInteger(scheduleSettings.min_interval_min)
+    ? scheduleSettings.min_interval_min * 60000
+    : 60000;
+  const defaultMaxMs = Number.isInteger(scheduleSettings.max_interval_min)
+    ? scheduleSettings.max_interval_min * 60000
+    : 300000;
   const jitterMin = payload.jitter_delay_min_ms ?? payload.jitterDelayMinMs ?? process.env.CAMPAIGN_DISPATCH_JITTER_MIN_MS;
   const jitterMax = payload.jitter_delay_max_ms ?? payload.jitterDelayMaxMs ?? process.env.CAMPAIGN_DISPATCH_JITTER_MAX_MS;
-  const minMs = normalizeNumber(jitterMin, 60000);
-  const maxMs = normalizeNumber(jitterMax, 300000);
+  const minMs = normalizeNumber(jitterMin, defaultMinMs);
+  const maxMs = normalizeNumber(jitterMax, defaultMaxMs);
 
   return {
     window_start: windowStart,
@@ -125,7 +131,16 @@ function createCampaignsService(dependencies = {}) {
   const dispatchLogsRepositoryDependency = dependencies.dispatchLogsRepository || dispatchLogsRepository;
   const campaignVideoCaptionsServiceDependency =
     dependencies.campaignVideoCaptionsService || defaultCampaignVideoCaptionsService;
+  const settingsServiceDependency = dependencies.settingsService || defaultSettingsService;
   const enqueueCampaignTrigger = dependencies.addCampaignTriggerJob || addCampaignTriggerJob;
+
+  async function resolveScheduleSettings() {
+    try {
+      return await settingsServiceDependency.getScheduleSettings();
+    } catch (error) {
+      return {};
+    }
+  }
   const createPendingDispatchLogs = (campaignId, scheduleParams = {}) =>
     (dependencies.createPendingDispatchLogsForCampaign || defaultCreatePendingDispatchLogsForCampaign)(campaignId, {
       campaignGroups: campaignGroupsRepositoryDependency,
@@ -170,8 +185,9 @@ function createCampaignsService(dependencies = {}) {
       groups.push(group);
     }
 
-    const scheduleOptions = resolveDispatchScheduleOptions(payload, executionDate);
-    const campaign = await findOrCreateForToday({ reference_date: executionDate });
+    const scheduleSettings = await resolveScheduleSettings();
+    const scheduleOptions = resolveDispatchScheduleOptions(payload, executionDate, scheduleSettings);
+    const campaign = await findOrCreateForToday({ reference_date: executionDate, schedule_settings: scheduleSettings });
 
     if (deferDispatch && campaign.status !== "gerando_legendas") {
       await repository.update(campaign.id, { status: "gerando_legendas" });
@@ -211,6 +227,7 @@ function createCampaignsService(dependencies = {}) {
         window_end: scheduleOptions.window_end,
         jitter_delay_min_ms: scheduleOptions.jitter_delay_min_ms,
         jitter_delay_max_ms: scheduleOptions.jitter_delay_max_ms,
+        timezone: payload.timezone || scheduleSettings.timezone,
       },
       {
         removeOnComplete: false,
@@ -271,7 +288,8 @@ function createCampaignsService(dependencies = {}) {
     const executionDate = normalizeScheduledDate(
       payload.execution_at || payload.executionAt || payload.scheduled_at || payload.scheduledAt
     );
-    const scheduleOptions = resolveDispatchScheduleOptions(payload, executionDate);
+    const scheduleSettings = await resolveScheduleSettings();
+    const scheduleOptions = resolveDispatchScheduleOptions(payload, executionDate, scheduleSettings);
 
     const pendingLogs = await createPendingDispatchLogs(campaign.id, {
       execution_at: executionDate.toISOString(),
@@ -297,6 +315,7 @@ function createCampaignsService(dependencies = {}) {
             window_end: scheduleOptions.window_end,
             jitter_delay_min_ms: scheduleOptions.jitter_delay_min_ms,
             jitter_delay_max_ms: scheduleOptions.jitter_delay_max_ms,
+            timezone: payload.timezone || scheduleSettings.timezone,
           },
           {
             removeOnComplete: false,
@@ -376,6 +395,18 @@ function createCampaignsService(dependencies = {}) {
       throw new Error("Campaign not found");
     }
 
+    // Apagar a campanha remove, via ON DELETE CASCADE, todo o historico de logs
+    // vinculado (inclusive disparos ja enviados). Para nao destruir o historico
+    // operacional, bloqueamos o delete quando ja houve pelo menos um envio.
+    const logs = await dispatchLogsRepositoryDependency.listByCampaign(id);
+    const hasDeliveredLogs = logs.some((log) => log.status === "enviado");
+
+    if (hasDeliveredLogs) {
+      const error = new Error("Campaign already has delivered dispatches");
+      error.code = "CAMPAIGN_HAS_DELIVERIES";
+      throw error;
+    }
+
     return repository.delete(id);
   }
 
@@ -397,7 +428,9 @@ function createCampaignsService(dependencies = {}) {
 
   async function findOrCreateForToday(payload = {}) {
     const referenceDate = payload.reference_date ? new Date(payload.reference_date) : new Date();
-    const dataEnvio = formatDateOnlyInTimezone(referenceDate);
+    const scheduleSettings = payload.schedule_settings || (await resolveScheduleSettings());
+    const timezone = scheduleSettings.timezone;
+    const dataEnvio = formatDateOnlyInTimezone(referenceDate, timezone);
 
     const existing = await repository.findByData(dataEnvio);
 
@@ -408,7 +441,7 @@ function createCampaignsService(dependencies = {}) {
     return repository.create({
       ativo: true,
       status: "programado",
-      trilha: formatCampaignDayName(referenceDate),
+      trilha: formatCampaignDayName(referenceDate, timezone),
       data_envio: dataEnvio,
       horario_envio: payload.horario_envio || payload.horarioEnvio || null,
     });
@@ -421,18 +454,8 @@ function createCampaignsService(dependencies = {}) {
       return "programado";
     }
 
-    const logs = await dispatchLogsRepositoryDependency.listByCampaign(campaignId);
-    const latestStatusByGroup = new Map();
-
-    logs.forEach((log) => {
-      if (!latestStatusByGroup.has(log.group_id)) {
-        latestStatusByGroup.set(log.group_id, log.status);
-      }
-    });
-
-    const allTerminal = groupRows.every((row) => {
-      const status = latestStatusByGroup.get(row.group_id);
-      return status && TERMINAL_LOG_STATUSES.includes(status);
+    const allTerminal = await campaignGroupsRepositoryDependency.isCampaignFullyTerminal(campaignId, {
+      dispatchLogsRepository: dispatchLogsRepositoryDependency,
     });
 
     return allTerminal ? "concluido" : "programado";
@@ -495,6 +518,7 @@ function createCampaignsService(dependencies = {}) {
     createAndQueue,
     delete: remove,
     dispatchCampaign,
+    remove,
     findOrCreateForToday,
     getById,
     getGroupsDetail,
