@@ -139,8 +139,16 @@
       return;
     }
 
-    const x = event.clientX;
-    const y = event.clientY;
+    // Measure the button's live position instead of trusting event.clientX/clientY —
+    // synthetic clicks (keyboard activation, some touch/assistive-tech paths) report
+    // (0,0) or stale coordinates, which is what made the bubble appear to start from
+    // the middle of the screen instead of the button. getBoundingClientRect is always
+    // correct for the current viewport, so this also stays right across window/monitor
+    // sizes, zoom levels, and the collapsed-sidebar breakpoint.
+    const button = event.currentTarget || document.getElementById("themeToggleButton");
+    const rect = button.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
     const endRadius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
 
     const transition = document.startViewTransition(() => applyTheme(newTheme));
