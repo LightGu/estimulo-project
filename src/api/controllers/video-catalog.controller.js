@@ -5,23 +5,6 @@ function createVideoCatalogController(dependencies = {}) {
     return req.body?.force ?? req.query?.force;
   }
 
-  async function listTrailsByProfile(req, res) {
-    try {
-      const profile = req.query.perfil || req.query.profile || req.query.segmento;
-      const trails = await videoCatalogService.listTrailsByProfile(profile);
-
-      return res.status(200).json(trails);
-    } catch (error) {
-      const message = error?.message || "Internal server error";
-
-      if (message === "Profile is required") {
-        return res.status(400).json({ error: message });
-      }
-
-      return res.status(500).json({ error: "Internal server error" });
-    }
-  }
-
   async function transcribeByDriveFileId(req, res) {
     try {
       const driveFileId = req.body?.drive_file_id || req.body?.driveFileId || req.query?.drive_file_id;
@@ -68,7 +51,6 @@ function createVideoCatalogController(dependencies = {}) {
   }
 
   return {
-    listTrailsByProfile,
     transcribeByDriveFileId,
     transcribeById,
   };

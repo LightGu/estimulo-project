@@ -85,7 +85,6 @@
         <img src="assets/img/logo-mark.svg" alt="">
         <span>estímulo</span>
       </a>
-      <div class="sidebar-env-tag">Protótipo de interface — dados de exemplo, sem integração com a API ainda.</div>
       ${groupsHtml}
       <div class="sidebar-footer">Estímulo &middot; Painel de Conteúdo<br>São Paulo</div>
     `;

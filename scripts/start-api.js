@@ -10,7 +10,7 @@ const app = createApp();
 
 const server = app.listen(port, () => {
   console.log(`API local iniciada em http://127.0.0.1:${port}`);
-  console.log(`Tela de grupos: http://127.0.0.1:${port}/groups-unclassified.html`);
+  console.log(`Aplicacao web: http://127.0.0.1:${port}/app/index.html`);
 });
 
 async function shutdown() {
