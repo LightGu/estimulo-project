@@ -4,9 +4,14 @@ const { clearLoopbackDiscardProxyEnv } = require("../src/config/network");
 clearLoopbackDiscardProxyEnv(process.env, { logger: console });
 
 const createApp = require("../src/api/app");
+const whatsappInstancesService = require("../src/services/whatsapp-instances.service");
 
 const port = Number(process.env.PORT || 3000);
 const app = createApp();
+
+whatsappInstancesService.ensureLegacyInstanceRegistered().catch((error) => {
+  console.error("Falha ao registrar instancia legada da Evolution API:", error.message);
+});
 
 const server = app.listen(port, () => {
   console.log(`API local iniciada em http://127.0.0.1:${port}`);

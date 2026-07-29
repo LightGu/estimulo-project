@@ -26,8 +26,15 @@
       .events-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:10px 20px; }
       .check-row { display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
       .section-num { color: var(--text-faint); font-weight:600; margin-right:6px; }
-      .agent-model-cell { display:flex; gap:8px; }
-      .agent-model-cell select { min-width:0; }
+      .link-toggle { display:inline-flex; align-items:center; gap:6px; background:none; border:none; padding:0; font-size:13px; color:var(--text); cursor:pointer; }
+      .link-toggle:hover { color:var(--primary, var(--text)); }
+      .link-toggle-arrow { display:inline-block; width:10px; color:var(--text-faint); }
+      .status-line { min-height:20px; margin-top:10px; font-size:12.5px; color:var(--text-muted); }
+      .status-line.error { color:var(--danger); }
+      .drag-handle { cursor: grab; color: var(--text-faint); font-size:16px; line-height:1; padding:4px 6px; user-select:none; }
+      .drag-handle:active { cursor: grabbing; }
+      #whatsappInstancesBody tr.dragging { opacity: 0.5; }
+      #whatsappInstancesBody tr.drag-over { border-top: 2px solid var(--brand, #6366f1); }
     </style>
   </head>
   <body data-page="configuracoes">
@@ -48,12 +55,32 @@
         <main class="page">
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3><span class="section-num">1.</span>Google Drive</h3></div>
+              <div class="card-header"><h3><span class="section-num">1.</span>Perfil do usuário</h3></div>
+              <div class="card-body">
+                <p class="text-muted" style="margin-bottom:14px;">Nome exibido no canto superior direito do sistema.</p>
+                <div class="field" style="max-width:360px;">
+                  <label for="profileNameInput">Nome do usuário</label>
+                  <input id="profileNameInput" type="text" placeholder="Nome completo">
+                </div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="profileSaveStatus" style="margin-right:auto;"></span>
+                <button class="btn" id="saveProfileButton" type="button">Salvar</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
+              <div class="card-header"><h3><span class="section-num">2.</span>Google Drive</h3></div>
               <div class="card-body">
                 <p class="text-muted" style="margin-bottom:14px;">Configura tudo relacionado à origem dos vídeos.</p>
                 <div class="field">
                   <label for="driveFolder">Pasta raiz do Drive</label>
-                  <input id="driveFolder" type="text" value="Estímulo/Trilhas de Vídeo" placeholder="ID ou link da pasta">
+                  <div style="display:flex; gap:8px;">
+                    <input id="driveFolder" type="text" placeholder="Cole o link ou o ID da pasta" style="flex:1;">
+                    <button class="btn btn-secondary" id="driveSaveFolderButton" type="button">Salvar</button>
+                  </div>
                 </div>
                 <div class="field">
                   <label for="driveServiceAccount">Conta de serviço conectada</label>
@@ -65,13 +92,8 @@
                     <div><span class="badge badge-success" id="driveStatusBadge">Conectado</span></div>
                   </div>
                   <div class="field">
-                    <label for="driveIndexFreq">Frequência de indexação</label>
-                    <select id="driveIndexFreq">
-                      <option value="15">A cada 15 minutos</option>
-                      <option value="30" selected>A cada 30 minutos</option>
-                      <option value="60">A cada 1 hora</option>
-                      <option value="360">A cada 6 horas</option>
-                    </select>
+                    <label for="driveIndexTime">Horário da indexação diária</label>
+                    <input id="driveIndexTime" type="time" value="03:00">
                   </div>
                 </div>
               </div>
@@ -85,65 +107,45 @@
 
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3><span class="section-num">2.</span>Evolution API (WhatsApp)</h3></div>
+              <div class="card-header"><h3><span class="section-num">3.</span>Evolution API (WhatsApp)</h3></div>
               <div class="card-body">
-                <div class="field-row" style="grid-template-columns:2fr 1fr;">
-                  <div class="field">
-                    <label for="evoUrl">URL da Evolution</label>
-                    <input id="evoUrl" type="text" value="https://evolution.estimulo.org">
-                  </div>
-                  <div class="field">
-                    <label for="evoInstance">Instância utilizada (número WhatsApp)</label>
-                    <input id="evoInstance" type="text" value="+55 11 98888-0000">
-                  </div>
+                <p class="text-muted" style="margin-bottom:14px;">Números conectados à Evolution API compartilhada. A ordem define a prioridade de disparo.</p>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th></th><th>Prioridade</th><th>Número</th><th>Instância</th><th>Status</th><th>Ações</th></tr></thead>
+                    <tbody id="whatsappInstancesBody"></tbody>
+                  </table>
                 </div>
-                <div class="field">
-                  <label for="evoNotifyContact">Grupo/contato para notificações</label>
-                  <input id="evoNotifyContact" type="text" value="Equipe Estímulo - Alertas">
+                <div class="field" style="max-width:360px;margin-top:16px;">
+                  <label for="rotationGroupCount">Trocar de número a cada N grupos</label>
+                  <input id="rotationGroupCount" type="number" min="1" value="1">
                 </div>
               </div>
               <div class="modal-footer">
                 <span class="text-muted" id="evoActionStatus" style="margin-right:auto;"></span>
-                <button class="btn" id="evoTestButton" type="button">Testar conexão</button>
+                <button class="btn btn-secondary" id="evoTestButton" type="button">Testar conexão</button>
+                <button class="btn" id="evoAddInstanceButton" type="button">Adicionar número</button>
               </div>
             </div>
           </section>
 
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3><span class="section-num">3.</span>IA</h3></div>
+              <div class="card-header"><h3><span class="section-num">4.</span>IA</h3></div>
               <div class="card-body">
-                <p class="text-muted" style="margin-bottom:14px;">O sistema possui abstração entre provedores de IA — Gemini e GPT podem ser combinados livremente por agente.</p>
-
-                <div class="field">
-                  <label>Provedor padrão</label>
-                  <div class="segmented" id="aiDefaultProviderTabs">
-                    <button class="active" data-provider="gemini">Gemini</button>
-                    <button data-provider="openai">OpenAI</button>
-                  </div>
-                </div>
-                <div class="field" style="max-width:280px;">
-                  <label for="aiDefaultModel">Modelo utilizado</label>
-                  <select id="aiDefaultModel"></select>
-                </div>
-
-                <div class="divider" style="margin:16px 0;"></div>
-
-                <p class="text-muted" style="margin-bottom:10px;">Agentes <span class="text-faint" style="font-weight:400;">— cada um pode usar um provedor e modelo diferentes</span></p>
-                <div class="table-wrap">
-                  <table>
-                    <thead><tr><th>Agente</th><th>Provedor e modelo</th></tr></thead>
-                    <tbody id="aiAgentsBody"></tbody>
-                  </table>
-                </div>
-                <p class="text-faint" style="font-size:12px;margin-top:8px;">Exemplo: transcrição em Gemini 2.5 Pro, legenda em GPT-5 Mini, revisão em Gemini 2.5 Flash.</p>
+                <p class="text-muted" style="margin-bottom:14px;">Provedor de IA: Gemini. Para cada agente, defina o modelo principal e, opcionalmente, modelos de fallback (usados em ordem caso o principal fique indisponível ou estoure a cota).</p>
+                <div id="aiAgentsList"></div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="aiSaveStatus" style="margin-right:auto;"></span>
+                <button class="btn" id="saveAiButton" type="button">Salvar</button>
               </div>
             </div>
           </section>
 
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3><span class="section-num">4.</span>Agendamento padrão</h3></div>
+              <div class="card-header"><h3><span class="section-num">5.</span>Agendamento padrão</h3></div>
               <div class="card-body">
                 <div class="field" style="max-width:320px;">
                   <label for="timezoneSelect">Timezone</label>
@@ -176,7 +178,7 @@
 
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3><span class="section-num">5.</span>Regras de envio</h3></div>
+              <div class="card-header"><h3><span class="section-num">6.</span>Regras de envio</h3></div>
               <p class="text-muted" style="padding:16px 20px 0;">Regras globais aplicadas a todos os envios automáticos.</p>
               <div id="dispatchRulesList"></div>
             </div>
@@ -184,7 +186,7 @@
 
           <section class="page-section">
             <div class="card">
-              <div class="card-header"><h3><span class="section-num">6.</span>Notificações</h3></div>
+              <div class="card-header"><h3><span class="section-num">7.</span>Notificações</h3></div>
               <div class="card-body">
                 <p class="text-muted" style="margin-bottom:14px;">Onde o operador recebe avisos.</p>
                 <div class="field-row" style="grid-template-columns:1fr 2fr;">
@@ -195,8 +197,10 @@
                     </select>
                   </div>
                   <div class="field">
-                    <label for="notifyTarget">Destino</label>
-                    <input id="notifyTarget" type="text" value="Equipe Estímulo - Alertas">
+                    <label for="notifyTarget">Grupo de notificações</label>
+                    <select id="notifyTarget">
+                      <option value="">Selecione um grupo...</option>
+                    </select>
                   </div>
                 </div>
                 <div class="divider" style="margin:14px 0;"></div>
@@ -212,7 +216,7 @@
               <div class="card-body">
                 <div class="field">
                   <label>Status</label>
-                  <div><span class="badge badge-success" id="dbStatusBadge">Conectado</span> <span class="text-faint" style="font-size:12px;">PostgreSQL · latência 8ms</span></div>
+                  <div><span class="badge badge-neutral" id="dbStatusBadge">Desconhecido</span> <span class="text-faint" style="font-size:12px;" id="dbLatencyText"></span></div>
                 </div>
               </div>
               <div class="modal-footer">
@@ -226,8 +230,13 @@
             <div class="card">
               <div class="card-header"><h3>Perfis de grupo</h3></div>
               <div class="card-body">
-                <p class="text-muted" style="margin-bottom:12px;">Perfis disponíveis para classificação de grupos.</p>
-                <div class="chip-list" id="segmentChips"></div>
+                <p class="text-muted" style="margin-bottom:12px;">Perfis disponíveis para classificação de grupos e trilhas.</p>
+                <div class="chip-list" id="segmentChips" style="margin-bottom:14px;"></div>
+                <div style="display:flex; gap:8px; max-width:360px;">
+                  <input id="newProfileInput" type="text" placeholder="Nome do novo perfil" style="flex:1;">
+                  <button class="btn btn-secondary" id="addProfileButton" type="button">Adicionar</button>
+                </div>
+                <div id="profilesStatus" class="text-muted" style="margin-top:8px; font-size:12.5px;"></div>
               </div>
             </div>
           </section>
@@ -235,11 +244,23 @@
       </div>
     </div>
 
+    <div class="overlay" id="qrOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Conectar novo número</h3>
+          <button class="icon-btn-close" id="qrCloseModal" type="button" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body" style="text-align:center;">
+          <img id="qrImage" alt="QR Code" style="width:240px;height:240px;margin:0 auto 12px;">
+          <div id="qrCountdown" style="font-size:22px;font-weight:700;"></div>
+          <div id="qrStatus" class="status-line"></div>
+        </div>
+      </div>
+    </div>
+
     <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
     <script>
-      document.getElementById("segmentChips").innerHTML = MOCK.segments.map((s) => `<span class="chip">${s}</span>`).join("");
-
       function simulateAction(buttonId, statusId, runningText, doneText) {
         const button = document.getElementById(buttonId);
         const status = document.getElementById(statusId);
@@ -256,98 +277,729 @@
         });
       }
 
-      // ---------- 1. Google Drive ----------
-      simulateAction("driveTestButton", "driveActionStatus", "Testando conexão com o Google Drive…", "Conectado com sucesso.");
-      simulateAction("driveReindexButton", "driveActionStatus", "Reindexando pasta do Drive…", "Reindexação concluída — 3 vídeo(s) novo(s) encontrado(s).");
-      // TODO: POST /settings/drive/test-connection · POST /settings/drive/reindex
+      // ---------- 1. Perfil do usuário ----------
+      const profileNameInput = document.getElementById("profileNameInput");
+      const profileSaveStatus = document.getElementById("profileSaveStatus");
 
-      // ---------- 2. Evolution API ----------
-      simulateAction("evoTestButton", "evoActionStatus", "Testando conexão com a Evolution API…", "Conectado com sucesso.");
-      // TODO: POST /settings/evolution/test-connection
-
-      // ---------- 3. IA ----------
-      const AI_MODELS = {
-        gemini: ["Gemini 2.5 Pro", "Gemini 2.5 Flash", "Gemini 2.5 Flash-Lite"],
-        openai: ["GPT-5", "GPT-5 Mini", "GPT-5 Nano"],
-      };
-      const AI_AGENTS = [
-        { id: "transcricao", nome: "Transcrever vídeo", provider: "gemini", model: "Gemini 2.5 Pro" },
-        { id: "legenda", nome: "Gerar legenda", provider: "openai", model: "GPT-5 Mini" },
-        { id: "revisao", nome: "Revisar legenda", provider: "gemini", model: "Gemini 2.5 Flash" },
-      ];
-
-      function modelOptions(provider, selected) {
-        return AI_MODELS[provider].map((m) => `<option${m === selected ? " selected" : ""}>${m}</option>`).join("");
+      async function loadProfileSettings() {
+        try {
+          const response = await fetch("/settings/profile");
+          const data = await response.json();
+          if (data.profile_name) profileNameInput.value = data.profile_name;
+        } catch (error) {
+          // mantém o campo vazio caso a chamada falhe
+        }
       }
 
-      function populateDefaultModel(provider) {
-        document.getElementById("aiDefaultModel").innerHTML = modelOptions(provider, AI_MODELS[provider][0]);
-      }
-
-      document.getElementById("aiDefaultProviderTabs").addEventListener("click", (e) => {
-        const btn = e.target.closest("button[data-provider]");
-        if (!btn) return;
-        document.querySelectorAll("#aiDefaultProviderTabs button").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        populateDefaultModel(btn.dataset.provider);
-        // TODO: PATCH /settings/ai { default_provider }
+      document.getElementById("saveProfileButton").addEventListener("click", async () => {
+        profileSaveStatus.style.color = "var(--text-muted)";
+        profileSaveStatus.textContent = "Salvando…";
+        try {
+          const response = await fetch("/settings/profile", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profile_name: profileNameInput.value.trim() }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao salvar nome do usuário");
+          profileNameInput.value = data.profile_name;
+          profileSaveStatus.textContent = "Configurações salvas.";
+          profileSaveStatus.style.color = "var(--success)";
+          if (window.estimuloRefreshUserChip) await window.estimuloRefreshUserChip();
+        } catch (error) {
+          profileSaveStatus.textContent = error.message;
+          profileSaveStatus.style.color = "var(--danger)";
+        }
+        setTimeout(() => (profileSaveStatus.textContent = ""), 2500);
       });
 
-      function renderAiAgents() {
-        document.getElementById("aiAgentsBody").innerHTML = AI_AGENTS.map(
-          (agent) => `
-          <tr>
-            <td class="strong">${agent.nome}</td>
+      loadProfileSettings();
+
+      // ---------- 2. Google Drive ----------
+      const driveStatus = document.getElementById("driveActionStatus");
+      const driveStatusBadge = document.getElementById("driveStatusBadge");
+      const driveFolderInput = document.getElementById("driveFolder");
+      const driveServiceAccountInput = document.getElementById("driveServiceAccount");
+      const driveIndexTimeInput = document.getElementById("driveIndexTime");
+
+      function setDriveStatus(text, color) {
+        driveStatus.style.color = color || "var(--text-muted)";
+        driveStatus.textContent = text;
+      }
+
+      function setDriveBadge(connected) {
+        driveStatusBadge.textContent = connected ? "Conectado" : "Desconectado";
+        driveStatusBadge.className = `badge ${connected ? "badge-success" : "badge-danger"}`;
+      }
+
+      function pad2(value) {
+        return String(value).padStart(2, "0");
+      }
+
+      async function loadDriveSettings() {
+        try {
+          const response = await fetch("/settings/drive");
+          const data = await response.json();
+
+          driveFolderInput.value = data.root_folder_url || data.root_folder_id || "";
+          driveServiceAccountInput.value = data.service_account_email || "";
+          if (data.index_hour !== null && data.index_minute !== null) {
+            driveIndexTimeInput.value = `${pad2(data.index_hour)}:${pad2(data.index_minute)}`;
+          }
+          setDriveBadge(Boolean(data.connected));
+        } catch (error) {
+          setDriveBadge(false);
+        }
+      }
+
+      document.getElementById("driveSaveFolderButton").addEventListener("click", async () => {
+        setDriveStatus("Salvando pasta raiz…");
+        try {
+          const response = await fetch("/settings/drive/root-folder", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folder_url_or_id: driveFolderInput.value }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao salvar pasta raiz");
+          driveFolderInput.value = data.root_folder_url || data.root_folder_id || "";
+          setDriveStatus("Pasta raiz atualizada.", "var(--success)");
+        } catch (error) {
+          setDriveStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setDriveStatus(""), 3000);
+      });
+
+      document.getElementById("driveTestButton").addEventListener("click", async () => {
+        const button = document.getElementById("driveTestButton");
+        button.disabled = true;
+        setDriveStatus("Testando conexão com o Google Drive…");
+        try {
+          const response = await fetch("/settings/drive/test-connection", { method: "POST" });
+          const data = await response.json();
+          setDriveBadge(data.connected);
+          setDriveStatus(
+            data.connected ? "Conectado com sucesso." : `Falha na conexão: ${data.reason}`,
+            data.connected ? "var(--success)" : "var(--danger)"
+          );
+        } catch (error) {
+          setDriveStatus(error.message, "var(--danger)");
+        }
+        button.disabled = false;
+        setTimeout(() => setDriveStatus(""), 3000);
+      });
+
+      document.getElementById("driveReindexButton").addEventListener("click", async () => {
+        const button = document.getElementById("driveReindexButton");
+        button.disabled = true;
+        setDriveStatus("Reindexando pasta do Drive…");
+        try {
+          const response = await fetch("/settings/drive/reindex", { method: "POST" });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao reindexar");
+          setDriveStatus(
+            `Reindexação concluída — ${data.created} novo(s), ${data.updated} atualizado(s), ${data.removed} removido(s).`,
+            "var(--success)"
+          );
+        } catch (error) {
+          setDriveStatus(error.message, "var(--danger)");
+        }
+        button.disabled = false;
+        setTimeout(() => setDriveStatus(""), 5000);
+      });
+
+      driveIndexTimeInput.addEventListener("change", async () => {
+        const [hour, minute] = driveIndexTimeInput.value.split(":").map(Number);
+        setDriveStatus("Salvando horário de indexação…");
+        try {
+          const response = await fetch("/settings/drive/schedule", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ hour, minute }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao salvar horário");
+          setDriveStatus("Horário de indexação atualizado.", "var(--success)");
+        } catch (error) {
+          setDriveStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setDriveStatus(""), 3000);
+      });
+
+      loadDriveSettings();
+
+      // ---------- 3. Evolution API (WhatsApp) ----------
+      let whatsappInstances = [];
+      let qrPollTimer = null;
+      let qrCountdownTimer = null;
+
+      function setEvoStatus(text, color) {
+        document.getElementById("evoActionStatus").style.color = color || "var(--text-muted)";
+        document.getElementById("evoActionStatus").textContent = text;
+      }
+
+      function connectionStateBadge(state) {
+        if (state === "open") return '<span class="badge badge-success">Conectado</span>';
+        if (state === "connecting") return '<span class="badge badge-warning">Conectando</span>';
+        return '<span class="badge badge-danger">Desconectado</span>';
+      }
+
+      function renderWhatsappInstances() {
+        document.getElementById("whatsappInstancesBody").innerHTML = whatsappInstances
+          .map(
+            (instance, index) => `
+          <tr draggable="true" data-instance-row="${escapeHtml(instance.id)}">
+            <td><span class="drag-handle" title="Arraste para reordenar">&#8942;&#8942;</span></td>
+            <td>${index + 1}</td>
+            <td class="strong">${escapeHtml(instance.phone_number || "-")}</td>
+            <td class="mono">${escapeHtml(instance.instance_name)}</td>
+            <td>${connectionStateBadge(instance.connection_state)}</td>
             <td>
-              <div class="agent-model-cell">
-                <select data-agent-provider="${agent.id}" style="max-width:130px;">
-                  <option value="gemini"${agent.provider === "gemini" ? " selected" : ""}>Gemini</option>
-                  <option value="openai"${agent.provider === "openai" ? " selected" : ""}>OpenAI</option>
-                </select>
-                <select data-agent-model="${agent.id}">${modelOptions(agent.provider, agent.model)}</select>
-              </div>
+              ${instance.connection_state !== "open" ? `<button class="btn btn-secondary btn-sm" data-connect-instance="${escapeHtml(instance.id)}">Conectar</button>` : ""}
+              <button class="btn btn-secondary btn-sm" data-remove-instance="${escapeHtml(instance.id)}">Remover</button>
             </td>
           </tr>`
-        ).join("");
+          )
+          .join("");
 
-        document.querySelectorAll("[data-agent-provider]").forEach((select) =>
+        document.querySelectorAll("[data-remove-instance]").forEach((button) =>
+          button.addEventListener("click", () => removeInstance(button.dataset.removeInstance))
+        );
+        document.querySelectorAll("[data-connect-instance]").forEach((button) =>
+          button.addEventListener("click", () => startQrFlow(button.dataset.connectInstance))
+        );
+
+        let draggedId = null;
+
+        document.querySelectorAll("[data-instance-row]").forEach((row) => {
+          row.addEventListener("dragstart", () => {
+            draggedId = row.dataset.instanceRow;
+            row.classList.add("dragging");
+          });
+          row.addEventListener("dragend", () => {
+            row.classList.remove("dragging");
+            document.querySelectorAll("[data-instance-row]").forEach((r) => r.classList.remove("drag-over"));
+          });
+          row.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            if (row.dataset.instanceRow !== draggedId) row.classList.add("drag-over");
+          });
+          row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+          row.addEventListener("drop", (event) => {
+            event.preventDefault();
+            row.classList.remove("drag-over");
+            const targetId = row.dataset.instanceRow;
+            if (!draggedId || draggedId === targetId) return;
+            reorderInstanceByDrag(draggedId, targetId);
+          });
+        });
+      }
+
+      function reorderInstanceByDrag(draggedId, targetId) {
+        const fromIndex = whatsappInstances.findIndex((instance) => instance.id === draggedId);
+        const toIndex = whatsappInstances.findIndex((instance) => instance.id === targetId);
+        if (fromIndex < 0 || toIndex < 0) return;
+
+        const reordered = [...whatsappInstances];
+        const [moved] = reordered.splice(fromIndex, 1);
+        reordered.splice(toIndex, 0, moved);
+
+        persistInstanceOrder(reordered);
+      }
+
+      async function loadWhatsappInstances() {
+        try {
+          const response = await fetch("/settings/whatsapp/instances");
+          whatsappInstances = await response.json();
+          renderWhatsappInstances();
+        } catch (error) {
+          whatsappInstances = [];
+          renderWhatsappInstances();
+          return;
+        }
+
+        await refreshMissingPhoneNumbers();
+      }
+
+      // Instâncias já conectadas antes desta correção (ou conectadas fora do fluxo
+      // de QR Code desta tela) podem não ter phone_number salvo ainda. Consulta o
+      // status de cada uma para preencher o número assim que possível.
+      async function refreshMissingPhoneNumbers() {
+        const pending = whatsappInstances.filter(
+          (instance) => instance.connection_state === "open" && !instance.phone_number
+        );
+
+        if (pending.length === 0) return;
+
+        const updates = await Promise.all(
+          pending.map((instance) =>
+            fetch(`/settings/whatsapp/instances/${encodeURIComponent(instance.id)}/status`)
+              .then((response) => (response.ok ? response.json() : null))
+              .catch(() => null)
+          )
+        );
+
+        let changed = false;
+        updates.forEach((updated) => {
+          if (!updated || !updated.phone_number) return;
+          const index = whatsappInstances.findIndex((instance) => instance.id === updated.id);
+          if (index >= 0) {
+            whatsappInstances[index] = updated;
+            changed = true;
+          }
+        });
+
+        if (changed) renderWhatsappInstances();
+      }
+
+      async function loadRotationSettings() {
+        try {
+          const response = await fetch("/settings/whatsapp/rotation");
+          const data = await response.json();
+          document.getElementById("rotationGroupCount").value = data.whatsapp_rotation_group_count || 1;
+        } catch (error) {
+          // mantém o valor padrão exibido no HTML caso a chamada falhe
+        }
+      }
+
+      document.getElementById("rotationGroupCount").addEventListener("change", async (event) => {
+        setEvoStatus("Salvando…");
+        try {
+          const response = await fetch("/settings/whatsapp/rotation", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ whatsapp_rotation_group_count: Number(event.target.value) }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao salvar regra de rotação");
+          setEvoStatus("Regra de rotação salva.", "var(--success)");
+        } catch (error) {
+          setEvoStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setEvoStatus(""), 3000);
+      });
+
+      async function persistInstanceOrder(reordered) {
+        setEvoStatus("Reordenando…");
+        try {
+          const response = await fetch("/settings/whatsapp/instances/reorder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ordered_ids: reordered.map((instance) => instance.id) }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao reordenar números");
+          setEvoStatus("");
+          await loadWhatsappInstances();
+        } catch (error) {
+          setEvoStatus(error.message, "var(--danger)");
+          setTimeout(() => setEvoStatus(""), 3000);
+        }
+      }
+
+      async function removeInstance(id) {
+        const confirmed = await window.estimuloConfirm("Remover este número? A instância será desconectada da Evolution API.", { title: "Remover número", confirmLabel: "Remover" });
+        if (!confirmed) return;
+
+        setEvoStatus("Removendo número…");
+        try {
+          const response = await fetch(`/settings/whatsapp/instances/${encodeURIComponent(id)}`, { method: "DELETE" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao remover número");
+          setEvoStatus("Número removido.", "var(--success)");
+          await loadWhatsappInstances();
+        } catch (error) {
+          setEvoStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setEvoStatus(""), 3000);
+      }
+
+      function stopQrPolling() {
+        clearInterval(qrPollTimer);
+        clearInterval(qrCountdownTimer);
+        qrPollTimer = null;
+        qrCountdownTimer = null;
+      }
+
+      function closeQrModal() {
+        stopQrPolling();
+        document.getElementById("qrOverlay").hidden = true;
+      }
+
+      document.getElementById("qrCloseModal").addEventListener("click", closeQrModal);
+      document.getElementById("qrOverlay").addEventListener("click", (event) => {
+        if (event.target.id === "qrOverlay") closeQrModal();
+      });
+
+      async function startQrFlow(instanceId) {
+        const qrStatus = document.getElementById("qrStatus");
+        const qrCountdown = document.getElementById("qrCountdown");
+
+        document.getElementById("qrOverlay").hidden = false;
+        qrStatus.textContent = "Gerando QR Code…";
+        qrStatus.className = "status-line";
+        qrCountdown.textContent = "";
+
+        try {
+          const qrResponse = await fetch(`/settings/whatsapp/instances/${encodeURIComponent(instanceId)}/qr`);
+          const qrData = await qrResponse.json();
+
+          if (!qrResponse.ok) {
+            qrStatus.textContent = qrData.error || "Falha ao gerar QR Code";
+            qrStatus.className = "status-line error";
+            return;
+          }
+
+          document.getElementById("qrImage").src = qrData.qr_base64;
+          qrStatus.textContent = "Escaneie com o WhatsApp em até 45 segundos.";
+
+          let remaining = qrData.expires_in_seconds || 45;
+          qrCountdown.textContent = `${remaining}s`;
+
+          qrCountdownTimer = setInterval(() => {
+            remaining -= 1;
+            qrCountdown.textContent = `${Math.max(remaining, 0)}s`;
+            if (remaining <= 0) {
+              stopQrPolling();
+              qrStatus.textContent = "QR Code expirado. Feche e tente novamente.";
+              qrStatus.className = "status-line error";
+            }
+          }, 1000);
+
+          qrPollTimer = setInterval(async () => {
+            try {
+              const statusResponse = await fetch(`/settings/whatsapp/instances/${encodeURIComponent(instanceId)}/status`);
+              const statusData = await statusResponse.json();
+              if (statusData.connection_state === "open") {
+                stopQrPolling();
+                qrStatus.textContent = "Conectado com sucesso!";
+                qrStatus.className = "status-line";
+                await loadWhatsappInstances();
+                setTimeout(closeQrModal, 1500);
+              }
+            } catch (error) {
+              // ignora falhas transitórias de polling; o contador de 45s cobre o timeout visual
+            }
+          }, 2500);
+        } catch (error) {
+          qrStatus.textContent = error.message;
+          qrStatus.className = "status-line error";
+        }
+      }
+
+      document.getElementById("evoTestButton").addEventListener("click", async () => {
+        const button = document.getElementById("evoTestButton");
+        button.disabled = true;
+        setEvoStatus("Testando conexão com a Evolution API…");
+        try {
+          const response = await fetch("/settings/whatsapp/test-connection", { method: "POST" });
+          const data = await response.json();
+          setEvoStatus(
+            data.connected ? "Conectado com sucesso." : `Falha na conexão: ${data.reason}`,
+            data.connected ? "var(--success)" : "var(--danger)"
+          );
+        } catch (error) {
+          setEvoStatus(error.message, "var(--danger)");
+        }
+        button.disabled = false;
+        setTimeout(() => setEvoStatus(""), 3000);
+      });
+
+      document.getElementById("evoAddInstanceButton").addEventListener("click", async () => {
+        const instanceName = await window.estimuloPrompt("Nome da instância (identificador técnico, ex.: estimulo-numero-2):", { title: "Adicionar número" });
+        if (!instanceName) return;
+
+        setEvoStatus("Registrando instância…");
+        try {
+          const response = await fetch("/settings/whatsapp/instances", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ instance_name: instanceName }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao registrar instância");
+          setEvoStatus("");
+          await loadWhatsappInstances();
+          await startQrFlow(data.id);
+        } catch (error) {
+          setEvoStatus(error.message, "var(--danger)");
+          setTimeout(() => setEvoStatus(""), 3000);
+        }
+      });
+
+      loadWhatsappInstances();
+      loadRotationSettings();
+
+      // ---------- 4. IA ----------
+      const GEMINI_MODELS = [
+        { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
+        { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+        { value: "gemini-3.5-flash-lite", label: "Gemini 3.5 Flash-Lite" },
+        { value: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash-Lite" },
+        { value: "gemini-3-flash-preview", label: "Gemini 3 Flash (Preview)" },
+        { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+        { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+        { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
+        { value: "gemini-2.5-flash-lite-preview-09-2025", label: "Gemini 2.5 Flash-Lite (Preview 09-2025)" },
+        { value: "gemini-flash-latest", label: "Gemini Flash (Latest)" },
+      ];
+      const AI_AGENT_DEFS = [
+        { key: "transcription", nome: "Transcrever vídeo", hasPrompt: false },
+        { key: "caption_generation", nome: "Gerar legenda", hasPrompt: true },
+        { key: "caption_review", nome: "Revisar legenda", hasPrompt: true },
+      ];
+      let aiAgentsState = {};
+
+      function modelSelectOptions(selectedValue) {
+        return GEMINI_MODELS.map(
+          (m) => `<option value="${m.value}"${m.value === selectedValue ? " selected" : ""}>${m.label}</option>`
+        ).join("");
+      }
+
+      function renderAiFallbackRows(agentKey) {
+        const models = aiAgentsState[agentKey].models;
+
+        return models
+          .slice(1)
+          .map(
+            (model, fallbackIndex) => `
+          <div class="field-row" style="grid-template-columns:1fr auto;align-items:end;gap:8px;margin-bottom:8px;" data-agent-model-row="${agentKey}" data-index="${fallbackIndex + 1}">
+            <div class="field" style="margin-bottom:0;">
+              <label>Fallback #${fallbackIndex + 1}</label>
+              <select data-agent-model-select="${agentKey}" data-index="${fallbackIndex + 1}">${modelSelectOptions(model)}</select>
+            </div>
+            <button class="btn btn-secondary" type="button" data-remove-fallback="${agentKey}" data-index="${fallbackIndex + 1}">Remover</button>
+          </div>`
+          )
+          .join("");
+      }
+
+      function renderAiAgents() {
+        document.getElementById("aiAgentsList").innerHTML = AI_AGENT_DEFS.map((def, defIndex) => {
+          const state = aiAgentsState[def.key];
+          const fallbackCount = state.models.length - 1;
+          const fallbacksOpen = Boolean(state.fallbacksOpen);
+          const promptOpen = Boolean(state.promptOpen);
+          const isCustomPrompt = Boolean(state.prompt);
+          const promptValue = isCustomPrompt ? state.prompt : state.defaultPrompt || "";
+
+          return `
+          <div class="ai-agent-block" ${defIndex > 0 ? 'style="margin-top:18px;"' : ""}>
+            <p class="text-muted" style="margin-bottom:8px;"><strong>${def.nome}</strong></p>
+            <div class="field" style="margin-bottom:0;">
+              <label>Modelo principal</label>
+              <select data-agent-model-select="${def.key}" data-index="0">${modelSelectOptions(state.models[0])}</select>
+            </div>
+
+            <button class="link-toggle" type="button" data-toggle-fallbacks="${def.key}" style="margin-top:8px;">
+              <span class="link-toggle-arrow">${fallbacksOpen ? "▾" : "▸"}</span>
+              Fallbacks${fallbackCount ? ` (${fallbackCount})` : ""}
+            </button>
+            <div data-fallbacks-panel="${def.key}" ${fallbacksOpen ? "" : "hidden"} style="margin-top:10px;">
+              <div data-agent-models="${def.key}">${renderAiFallbackRows(def.key)}</div>
+              <button class="btn btn-secondary" type="button" data-add-fallback="${def.key}">+ adicionar fallback</button>
+            </div>
+
+            ${
+              def.hasPrompt
+                ? `
+            <button class="link-toggle" type="button" data-toggle-prompt="${def.key}" style="margin-top:12px;">
+              <span class="link-toggle-arrow">${promptOpen ? "▾" : "▸"}</span>
+              Prompt personalizado
+              <span class="text-faint" style="font-weight:400;">${isCustomPrompt ? "— personalizado" : "— usando padrão do sistema"}</span>
+            </button>
+            <div data-prompt-panel="${def.key}" ${promptOpen ? "" : "hidden"} style="margin-top:10px;">
+              <div class="field" style="margin-bottom:0;">
+                <textarea data-agent-prompt="${def.key}" rows="6" style="width:100%;resize:vertical;">${promptValue}</textarea>
+                <p class="text-faint" style="font-size:12px;margin-top:6px;">Este é o texto usado hoje (padrão do sistema, caso ainda não tenha sido personalizado). Edite e salve para sobrescrevê-lo.</p>
+              </div>
+            </div>`
+                : ""
+            }
+            ${defIndex < AI_AGENT_DEFS.length - 1 ? '<div class="divider" style="margin:16px 0;"></div>' : ""}
+          </div>`;
+        }).join("");
+
+        document.querySelectorAll("[data-agent-model-select]").forEach((select) =>
           select.addEventListener("change", () => {
-            const agent = AI_AGENTS.find((a) => a.id === select.dataset.agentProvider);
-            agent.provider = select.value;
-            agent.model = AI_MODELS[agent.provider][0];
-            renderAiAgents();
-            // TODO: PATCH /settings/ai/agents/:id { provider, model }
+            const agentKey = select.dataset.agentModelSelect;
+            const index = Number(select.dataset.index);
+            aiAgentsState[agentKey].models[index] = select.value;
           })
         );
-        document.querySelectorAll("[data-agent-model]").forEach((select) =>
-          select.addEventListener("change", () => {
-            const agent = AI_AGENTS.find((a) => a.id === select.dataset.agentModel);
-            agent.model = select.value;
-            // TODO: PATCH /settings/ai/agents/:id { provider, model }
+
+        document.querySelectorAll("[data-toggle-fallbacks]").forEach((button) =>
+          button.addEventListener("click", () => {
+            const agentKey = button.dataset.toggleFallbacks;
+            aiAgentsState[agentKey].fallbacksOpen = !aiAgentsState[agentKey].fallbacksOpen;
+            renderAiAgents();
+          })
+        );
+
+        document.querySelectorAll("[data-toggle-prompt]").forEach((button) =>
+          button.addEventListener("click", () => {
+            const agentKey = button.dataset.togglePrompt;
+            aiAgentsState[agentKey].promptOpen = !aiAgentsState[agentKey].promptOpen;
+            renderAiAgents();
+          })
+        );
+
+        document.querySelectorAll("[data-add-fallback]").forEach((button) =>
+          button.addEventListener("click", () => {
+            const agentKey = button.dataset.addFallback;
+            const usedModels = new Set(aiAgentsState[agentKey].models);
+            const nextModel = GEMINI_MODELS.map((m) => m.value).find((value) => !usedModels.has(value));
+
+            if (!nextModel) return;
+
+            aiAgentsState[agentKey].models.push(nextModel);
+            aiAgentsState[agentKey].fallbacksOpen = true;
+            renderAiAgents();
+          })
+        );
+
+        document.querySelectorAll("[data-remove-fallback]").forEach((button) =>
+          button.addEventListener("click", () => {
+            const agentKey = button.dataset.removeFallback;
+            const index = Number(button.dataset.index);
+            aiAgentsState[agentKey].models.splice(index, 1);
+            aiAgentsState[agentKey].fallbacksOpen = true;
+            renderAiAgents();
+          })
+        );
+
+        document.querySelectorAll("[data-agent-prompt]").forEach((textarea) =>
+          textarea.addEventListener("input", () => {
+            const agentKey = textarea.dataset.agentPrompt;
+            const state = aiAgentsState[agentKey];
+            // Se o texto voltar a ser exatamente o prompt padrão, trata como "sem customização"
+            // para exibir novamente "usando padrão do sistema" e persistir prompt: null.
+            state.prompt = textarea.value === state.defaultPrompt ? "" : textarea.value;
           })
         );
       }
 
-      populateDefaultModel("gemini");
-      renderAiAgents();
+      async function loadAiSettings() {
+        try {
+          const response = await fetch("/settings/ai");
+          const data = await response.json();
 
-      // ---------- 4. Agendamento padrão ----------
-      document.getElementById("saveScheduleButton").addEventListener("click", () => {
-        const status = document.getElementById("scheduleSaveStatus");
-        status.textContent = "Configurações salvas.";
-        status.style.color = "var(--success)";
-        // TODO: PATCH /settings/schedule { timezone, min_interval_min, max_interval_min }
-        setTimeout(() => (status.textContent = ""), 2500);
+          aiAgentsState = {
+            transcription: {
+              models: [...(data.transcription?.models || [])],
+              fallbacksOpen: false,
+            },
+            caption_generation: {
+              models: [...(data.caption_generation?.models || [])],
+              prompt: data.caption_generation?.prompt || "",
+              defaultPrompt: data.caption_generation?.default_prompt || "",
+              fallbacksOpen: false,
+              promptOpen: false,
+            },
+            caption_review: {
+              models: [...(data.caption_review?.models || [])],
+              prompt: data.caption_review?.prompt || "",
+              defaultPrompt: data.caption_review?.default_prompt || "",
+              fallbacksOpen: false,
+              promptOpen: false,
+            },
+          };
+          renderAiAgents();
+        } catch (error) {
+          // mantém o estado atual (vazio) caso a chamada falhe
+        }
+      }
+
+      const aiSaveStatus = document.getElementById("aiSaveStatus");
+
+      document.getElementById("saveAiButton").addEventListener("click", async () => {
+        aiSaveStatus.style.color = "var(--text-muted)";
+        aiSaveStatus.textContent = "Salvando…";
+        try {
+          const response = await fetch("/settings/ai", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              transcription: { models: aiAgentsState.transcription.models },
+              caption_generation: {
+                models: aiAgentsState.caption_generation.models,
+                prompt: aiAgentsState.caption_generation.prompt || null,
+              },
+              caption_review: {
+                models: aiAgentsState.caption_review.models,
+                prompt: aiAgentsState.caption_review.prompt || null,
+              },
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao salvar configurações de IA");
+          aiSaveStatus.textContent = "Configurações salvas.";
+          aiSaveStatus.style.color = "var(--success)";
+        } catch (error) {
+          aiSaveStatus.textContent = error.message;
+          aiSaveStatus.style.color = "var(--danger)";
+        }
+        setTimeout(() => (aiSaveStatus.textContent = ""), 2500);
       });
 
-      // ---------- 5. Regras de envio ----------
+      loadAiSettings();
+
+      // ---------- 5. Agendamento padrão ----------
+      const timezoneSelect = document.getElementById("timezoneSelect");
+      const minIntervalInput = document.getElementById("minInterval");
+      const maxIntervalInput = document.getElementById("maxInterval");
+      const scheduleSaveStatus = document.getElementById("scheduleSaveStatus");
+
+      async function loadScheduleSettings() {
+        try {
+          const response = await fetch("/settings/schedule");
+          const data = await response.json();
+
+          if (data.timezone) timezoneSelect.value = data.timezone;
+          if (data.min_interval_min !== undefined) minIntervalInput.value = data.min_interval_min;
+          if (data.max_interval_min !== undefined) maxIntervalInput.value = data.max_interval_min;
+        } catch (error) {
+          // mantém os valores padrão exibidos no HTML caso a chamada falhe
+        }
+      }
+
+      document.getElementById("saveScheduleButton").addEventListener("click", async () => {
+        scheduleSaveStatus.style.color = "var(--text-muted)";
+        scheduleSaveStatus.textContent = "Salvando…";
+        try {
+          const response = await fetch("/settings/schedule", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              timezone: timezoneSelect.value,
+              min_interval_min: Number(minIntervalInput.value),
+              max_interval_min: Number(maxIntervalInput.value),
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || "Falha ao salvar agendamento padrão");
+          minIntervalInput.value = data.min_interval_min;
+          maxIntervalInput.value = data.max_interval_min;
+          timezoneSelect.value = data.timezone;
+          scheduleSaveStatus.textContent = "Configurações salvas.";
+          scheduleSaveStatus.style.color = "var(--success)";
+        } catch (error) {
+          scheduleSaveStatus.textContent = error.message;
+          scheduleSaveStatus.style.color = "var(--danger)";
+        }
+        setTimeout(() => (scheduleSaveStatus.textContent = ""), 2500);
+      });
+
+      loadScheduleSettings();
+
+      // ---------- 6. Regras de envio ----------
       const DISPATCH_RULES = [
-        { id: "neverRepeat", label: "Nunca repetir vídeo", hint: "Impede que o mesmo vídeo seja enviado duas vezes ao mesmo grupo.", checked: true },
-        { id: "pauseOnTrailEnd", label: "Pausar grupo quando trilha terminar", hint: "O grupo fica sinalizado como 'fim de fila' até que uma nova trilha seja definida.", checked: true },
-        { id: "autoCaption", label: "Gerar legenda automaticamente", hint: "Toda pílula importada recebe uma legenda gerada por IA antes da revisão.", checked: true },
-        { id: "requireReview", label: "Exigir revisão humana", hint: "Legendas geradas por IA ficam pendentes até aprovação manual.", checked: true },
-        { id: "autoSendAfterTimeout", label: "Enviar mesmo sem revisão após X minutos", hint: "Se ninguém revisar a legenda a tempo, o envio segue com a versão gerada por IA.", checked: false, withMinutes: true, minutes: 60 },
-        { id: "autoRetryFailures", label: "Reprocessar falhas automaticamente", hint: "Tentativas com erro voltam para a fila e são reenviadas automaticamente.", checked: true },
+        { id: "never_repeat_video", label: "Nunca repetir vídeo", hint: "Impede que o mesmo vídeo seja enviado duas vezes ao mesmo grupo. Quando desativado, você pode forçar o reenvio de um vídeo específico na tela de Envio automatizado.", checked: true },
+        { id: "notify_on_trail_finished", label: "Notificar quando uma trilha em um grupo terminar", hint: "Envia uma notificação (conforme configurado na seção Notificações) quando não houver mais vídeos aprovados pendentes na trilha do grupo.", checked: true },
+        { id: "auto_generate_caption", label: "Gerar legenda automaticamente", hint: "Toda pílula importada recebe uma legenda gerada por IA. Se desativado, só é usada legenda já pronta no banco; caso contrário fica vazia para edição manual.", checked: true },
+        { id: "require_human_review", label: "Exigir revisão humana", hint: "Legendas geradas por IA ficam no quadro de legendagem aguardando o clique em 'Iniciar envio'. Se desativado, o disparo é confirmado automaticamente assim que as legendas forem geradas.", checked: true },
+        { id: "auto_send_after_timeout", label: "Enviar mesmo sem revisão após X minutos", hint: "Se ninguém revisar a legenda a tempo, o envio segue com a versão gerada por IA.", checked: false, withMinutes: true, minutes: 60 },
+        { id: "auto_retry_failures", label: "Reprocessar falhas automaticamente", hint: "Tentativas com erro voltam para a fila e são reenviadas automaticamente.", checked: true },
       ];
 
       function renderDispatchRules() {
@@ -370,54 +1022,303 @@
         ).join("");
 
         document.querySelectorAll("[data-rule]").forEach((input) =>
-          input.addEventListener("change", () => {
+          input.addEventListener("change", async () => {
             const rule = DISPATCH_RULES.find((r) => r.id === input.dataset.rule);
+            const previousChecked = rule.checked;
             rule.checked = input.checked;
             if (rule.withMinutes) {
               document.querySelector(`[data-rule-minutes-wrap="${rule.id}"]`).style.display = rule.checked ? "block" : "none";
             }
-            // TODO: PATCH /settings/dispatch-rules { [rule.id]: rule.checked }
+
+            try {
+              const body = rule.withMinutes
+                ? { [rule.id]: { enabled: rule.checked, minutes: rule.minutes } }
+                : { [rule.id]: rule.checked };
+              await requestJsonConfig("/settings/dispatch-rules", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+              });
+            } catch (error) {
+              rule.checked = previousChecked;
+              input.checked = previousChecked;
+              if (rule.withMinutes) {
+                document.querySelector(`[data-rule-minutes-wrap="${rule.id}"]`).style.display = previousChecked ? "block" : "none";
+              }
+              window.estimuloAlert(error.message);
+            }
           })
         );
         document.querySelectorAll("[data-rule-minutes]").forEach((input) =>
-          input.addEventListener("change", () => {
+          input.addEventListener("change", async () => {
             const rule = DISPATCH_RULES.find((r) => r.id === input.dataset.ruleMinutes);
+            const previousMinutes = rule.minutes;
             rule.minutes = Number(input.value);
-            // TODO: PATCH /settings/dispatch-rules { auto_send_after_minutes: rule.minutes }
+
+            try {
+              await requestJsonConfig("/settings/dispatch-rules", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ [rule.id]: { enabled: rule.checked, minutes: rule.minutes } }),
+              });
+            } catch (error) {
+              rule.minutes = previousMinutes;
+              input.value = previousMinutes;
+              window.estimuloAlert(error.message);
+            }
           })
         );
       }
-      renderDispatchRules();
 
-      // ---------- 6. Notificações ----------
+      function requestJsonConfig(url, options) {
+        return fetch(url, options).then(async (response) => {
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || `Falha na requisição (${response.status})`);
+          return data;
+        });
+      }
+
+      async function loadDispatchRules() {
+        try {
+          const data = await requestJsonConfig("/settings/dispatch-rules");
+
+          DISPATCH_RULES.forEach((rule) => {
+            if (!Object.prototype.hasOwnProperty.call(data, rule.id)) return;
+
+            if (rule.withMinutes) {
+              const timeout = data[rule.id] || {};
+              rule.checked = Boolean(timeout.enabled);
+              rule.minutes = Number.isInteger(timeout.minutes) ? timeout.minutes : rule.minutes;
+            } else {
+              rule.checked = Boolean(data[rule.id]);
+            }
+          });
+        } catch (error) {
+          // mantém os valores padrão exibidos caso a chamada falhe
+        }
+        renderDispatchRules();
+      }
+
+      loadDispatchRules();
+
+      // ---------- 7. Notificações ----------
       const NOTIFY_EVENTS = [
         { id: "campaignStarted", label: "Campanha iniciada", checked: true },
         { id: "campaignFinished", label: "Campanha concluída", checked: true },
         { id: "dispatchFailure", label: "Falha de envio", checked: true },
-        { id: "trailFinished", label: "Trilha encerrada", checked: true },
         { id: "aiError", label: "Erro na IA", checked: true },
-        { id: "evolutionError", label: "Erro na Evolution", checked: true },
+        { id: "trailFinished", label: "Trilha finalizada em um grupo", checked: true },
       ];
 
-      document.getElementById("notifyEventsGrid").innerHTML = NOTIFY_EVENTS.map(
-        (ev) => `
-        <label class="check-row">
-          <input type="checkbox" data-notify-event="${ev.id}"${ev.checked ? " checked" : ""}>
-          ${ev.label}
-        </label>`
-      ).join("");
+      function escapeHtmlNotify(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
 
-      document.querySelectorAll("[data-notify-event]").forEach((input) =>
-        input.addEventListener("change", () => {
-          const ev = NOTIFY_EVENTS.find((e) => e.id === input.dataset.notifyEvent);
-          ev.checked = input.checked;
-          // TODO: PATCH /settings/notifications { events: { [ev.id]: ev.checked } }
-        })
-      );
+      function renderNotifyEvents() {
+        document.getElementById("notifyEventsGrid").innerHTML = NOTIFY_EVENTS.map(
+          (ev) => `
+          <label class="check-row">
+            <input type="checkbox" data-notify-event="${ev.id}"${ev.checked ? " checked" : ""}>
+            ${ev.label}
+          </label>`
+        ).join("");
+
+        document.querySelectorAll("[data-notify-event]").forEach((input) =>
+          input.addEventListener("change", async () => {
+            const ev = NOTIFY_EVENTS.find((e) => e.id === input.dataset.notifyEvent);
+            ev.checked = input.checked;
+            try {
+              await fetch("/settings/notifications", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ events: { [ev.id]: ev.checked } }),
+              });
+            } catch (error) {
+              // mantém o estado local mesmo se o PATCH falhar; próximo load corrige
+            }
+          })
+        );
+      }
+      renderNotifyEvents();
+
+      async function loadNotificationSettings() {
+        const notifyTargetSelect = document.getElementById("notifyTarget");
+
+        try {
+          const groupsResponse = await fetch("/groups/search");
+          const groups = await groupsResponse.json();
+
+          notifyTargetSelect.innerHTML =
+            '<option value="">Selecione um grupo...</option>' +
+            (Array.isArray(groups) ? groups : [])
+              .map((group) => `<option value="${escapeHtmlNotify(group.id)}">${escapeHtmlNotify(group.nome)}</option>`)
+              .join("");
+        } catch (error) {
+          // mantém apenas a opção padrão se a listagem de grupos falhar
+        }
+
+        try {
+          const response = await fetch("/settings/notifications");
+          const data = await response.json();
+
+          notifyTargetSelect.value = data.notification_group_id || "";
+
+          NOTIFY_EVENTS.forEach((ev) => {
+            if (data.events && Object.prototype.hasOwnProperty.call(data.events, ev.id)) {
+              ev.checked = Boolean(data.events[ev.id]);
+            }
+          });
+          renderNotifyEvents();
+        } catch (error) {
+          // mantém os valores padrão exibidos caso a chamada falhe
+        }
+      }
+
+      document.getElementById("notifyTarget").addEventListener("change", async (event) => {
+        try {
+          await fetch("/settings/notifications", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ notification_group_id: event.target.value || null }),
+          });
+        } catch (error) {
+          // próximo load corrige o estado exibido caso o PATCH falhe
+        }
+      });
+
+      loadNotificationSettings();
 
       // ---------- 8. Banco de dados ----------
-      simulateAction("dbTestButton", "dbActionStatus", "Testando conexão com o banco de dados…", "Conectado com sucesso.");
-      // TODO: GET /settings/database/health
+      const dbActionStatus = document.getElementById("dbActionStatus");
+      const dbStatusBadge = document.getElementById("dbStatusBadge");
+      const dbLatencyText = document.getElementById("dbLatencyText");
+
+      function setDbBadge(connected) {
+        dbStatusBadge.textContent = connected ? "Conectado" : "Desconectado";
+        dbStatusBadge.className = `badge ${connected ? "badge-success" : "badge-danger"}`;
+      }
+
+      document.getElementById("dbTestButton").addEventListener("click", async () => {
+        const button = document.getElementById("dbTestButton");
+        button.disabled = true;
+        dbActionStatus.style.color = "var(--text-muted)";
+        dbActionStatus.textContent = "Testando conexão com o banco de dados…";
+        try {
+          const response = await fetch("/settings/database/health");
+          const data = await response.json();
+          setDbBadge(data.connected);
+          if (data.connected) {
+            dbLatencyText.textContent = `PostgreSQL · latência ${data.latency_ms}ms`;
+            dbActionStatus.style.color = "var(--success)";
+            dbActionStatus.textContent = "Conectado com sucesso.";
+          } else {
+            dbLatencyText.textContent = "";
+            dbActionStatus.style.color = "var(--danger)";
+            dbActionStatus.textContent = `Falha na conexão: ${data.reason}`;
+          }
+        } catch (error) {
+          setDbBadge(false);
+          dbLatencyText.textContent = "";
+          dbActionStatus.style.color = "var(--danger)";
+          dbActionStatus.textContent = error.message;
+        }
+        button.disabled = false;
+        setTimeout(() => (dbActionStatus.textContent = ""), 3000);
+      });
+
+      // ---------- Perfis de grupo ----------
+      const profilesStatus = document.getElementById("profilesStatus");
+
+      function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function setProfilesStatus(text, color) {
+        profilesStatus.style.color = color || "var(--text-muted)";
+        profilesStatus.textContent = text;
+      }
+
+      function renderProfileChips(profiles) {
+        document.getElementById("segmentChips").innerHTML = profiles
+          .map(
+            (profile) => `
+            <span class="chip">
+              ${escapeHtml(profile.nome)}
+              <span class="chip-remove" data-remove-profile="${escapeHtml(profile.id)}" title="Remover perfil">&times;</span>
+            </span>`
+          )
+          .join("");
+
+        document.querySelectorAll("[data-remove-profile]").forEach((el) =>
+          el.addEventListener("click", () => removeProfile(el.dataset.removeProfile))
+        );
+      }
+
+      async function loadProfiles() {
+        try {
+          const response = await fetch("/group-profiles");
+          const profiles = await response.json();
+          renderProfileChips(Array.isArray(profiles) ? profiles : []);
+        } catch (error) {
+          setProfilesStatus("Falha ao carregar perfis.", "var(--danger)");
+        }
+      }
+
+      async function removeProfile(id) {
+        const confirmed = await window.estimuloConfirm("Remover este perfil?", { title: "Remover perfil", confirmLabel: "Remover" });
+        if (!confirmed) return;
+
+        setProfilesStatus("Removendo perfil…");
+        try {
+          const response = await fetch(`/group-profiles/${encodeURIComponent(id)}`, { method: "DELETE" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao remover perfil");
+          setProfilesStatus("Perfil removido.", "var(--success)");
+          await loadProfiles();
+        } catch (error) {
+          setProfilesStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setProfilesStatus(""), 3000);
+      }
+
+      document.getElementById("addProfileButton").addEventListener("click", async () => {
+        const input = document.getElementById("newProfileInput");
+        const nome = input.value.trim();
+
+        if (!nome) {
+          setProfilesStatus("Informe o nome do perfil.", "var(--danger)");
+          return;
+        }
+
+        setProfilesStatus("Adicionando perfil…");
+        try {
+          const response = await fetch("/group-profiles", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao adicionar perfil");
+          input.value = "";
+          setProfilesStatus("Perfil adicionado.", "var(--success)");
+          await loadProfiles();
+        } catch (error) {
+          setProfilesStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setProfilesStatus(""), 3000);
+      });
+
+      loadProfiles();
     </script>
   </body>
 </html>

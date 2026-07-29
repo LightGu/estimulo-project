@@ -70,6 +70,19 @@ async function findByDriveFileId(driveFileId, client) {
   return data || null;
 }
 
+async function findAllDriveFileIds(client) {
+  const { data, error } = await getClient(client)
+    .from("video_catalog")
+    .select("id, drive_file_id")
+    .not("drive_file_id", "is", null);
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function create(payload, client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
@@ -118,6 +131,7 @@ module.exports = {
   create,
   delete: remove,
   findAll,
+  findAllDriveFileIds,
   findByDriveFileId,
   findById,
   listApproved,
