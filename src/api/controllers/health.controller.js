@@ -1,7 +1,20 @@
 const { getRedisConnection } = require("../../config/redis");
 
 function createHealthController(dependencies = {}) {
-  const redisClient = dependencies.redisClient || getRedisConnection();
+  const redisTimeoutMs = Number(dependencies.redisTimeoutMs || process.env.HEALTH_REDIS_TIMEOUT_MS || 1000);
+
+  function getRedisClient() {
+    return dependencies.redisClient || getRedisConnection();
+  }
+
+  function withTimeout(promise, timeoutMs) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Redis health check timeout")), timeoutMs)
+      ),
+    ]);
+  }
 
   return async function health(req, res) {
     const timestamp = new Date().toISOString();
@@ -12,7 +25,7 @@ function createHealthController(dependencies = {}) {
 
     try {
       const startedAt = Date.now();
-      await redisClient.ping();
+      await withTimeout(getRedisClient().ping(), redisTimeoutMs);
       redis.latency = Date.now() - startedAt;
     } catch (error) {
       redis.status = "error";

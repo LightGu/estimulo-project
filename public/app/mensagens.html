@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        } catch (e) {}
+      })();
+    </script>
+    <title>Disparador Pontual · Estímulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/layout.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      .checkbox-list { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; }
+      .checkbox-list label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
+      .checkbox-list label:hover { background: var(--surface-strong); }
+      .preview-bubble { background: var(--surface-strong); border:1px solid var(--line); border-radius: var(--radius-lg); padding:16px; max-width:340px; }
+      .preview-bubble .ptitle { font-weight:700; font-size:13px; margin-bottom:6px; }
+      .preview-bubble .pattach { font-size:12px; color:var(--text-muted); margin-top:8px; padding:6px 8px; background:var(--surface); border-radius:6px; border:1px solid var(--line); }
+      .two-col { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; align-items:start; }
+      @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body data-page="mensagens">
+    <div class="shell">
+      <aside class="sidebar" id="sidebar-root"></aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-titles">
+            <h1>Disparador Pontual</h1>
+            <p>Comunicações fora do fluxo automático de trilhas: eventos, avisos, crédito, pesquisas.</p>
+          </div>
+          <div class="topbar-actions">
+            <div class="user-chip"><span class="avatar">LC</span> Lina Chaim</div>
+          </div>
+        </header>
+
+        <main class="page">
+          <section class="page-section">
+            <div class="two-col">
+              <div class="card">
+                <div class="card-header"><h3>Novo disparo</h3></div>
+                <div class="card-body">
+                  <div class="field">
+                    <label for="msgTitulo">Título (uso interno)</label>
+                    <input id="msgTitulo" type="text" placeholder="Ex.: Convite — Feira de Empreendedorismo">
+                  </div>
+
+                  <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                    <div class="field">
+                      <label for="msgTipo">Classificação</label>
+                      <select id="msgTipo">
+                        <option value="evento">Evento</option>
+                        <option value="credito">Crédito</option>
+                        <option value="pesquisa">Pesquisa</option>
+                        <option value="aviso">Aviso</option>
+                        <option value="outro">Outro</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label for="msgConteudoTipo">Tipo de conteúdo</label>
+                      <select id="msgConteudoTipo">
+                        <option value="texto">Somente texto</option>
+                        <option value="imagem">Imagem</option>
+                        <option value="video">Vídeo</option>
+                        <option value="documento">Documento (PDF)</option>
+                        <option value="link">Link</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label for="msgTexto">Texto da mensagem</label>
+                    <textarea id="msgTexto" rows="3" placeholder="Escreva o texto que acompanhará o envio..."></textarea>
+                  </div>
+
+                  <div class="field" id="anexoField" style="display:none;">
+                    <label for="msgAnexo">URL do conteúdo</label>
+                    <input id="msgAnexo" type="url" placeholder="https://.../arquivo.jpg">
+                  </div>
+
+                  <div class="field">
+                    <label>Grupos destinatários</label>
+                    <div class="checkbox-list" id="groupCheckboxes"></div>
+                  </div>
+
+                  <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;">
+                    <div class="field">
+                      <label for="msgData">Data do envio</label>
+                      <input id="msgData" type="date">
+                    </div>
+                    <div class="field">
+                      <label for="msgInicio">Início</label>
+                      <input id="msgInicio" type="time" value="10:00">
+                    </div>
+                    <div class="field">
+                      <label for="msgFim">Fim</label>
+                      <input id="msgFim" type="time" value="13:30">
+                    </div>
+                  </div>
+                  <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                    <div class="field">
+                      <label for="msgDelayMin">Delay randômico mín. (min)</label>
+                      <input id="msgDelayMin" type="number" min="0" value="2">
+                    </div>
+                    <div class="field">
+                      <label for="msgDelayMax">Delay randômico máx. (min)</label>
+                      <input id="msgDelayMax" type="number" min="0" value="8">
+                    </div>
+                  </div>
+                  <p class="text-faint" style="font-size:11px;margin:-8px 0 4px;">Com mais de 1 grupo selecionado, os envios são espalhados aleatoriamente dentro da janela acima — mesmo mecanismo do Envio automatizado — pra não disparar tudo no mesmo instante. Com 1 grupo só, o envio é imediato ao clicar em "Programar mensagem".</p>
+
+                  <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                    <div class="field">
+                      <label for="testGroup">Grupo de teste</label>
+                      <select id="testGroup"></select>
+                    </div>
+                    <div class="field" style="justify-content:flex-end;display:flex;">
+                      <button class="btn btn-secondary" id="sendTestButton" type="button" style="width:100%;">Enviar teste para este grupo</button>
+                    </div>
+                  </div>
+                  <span class="text-muted" id="testStatus"></span>
+                </div>
+                <div class="modal-footer">
+                  <button class="btn" id="scheduleMessageButton" type="button">Programar mensagem</button>
+                </div>
+              </div>
+
+              <div>
+                <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:14px;">Prévia</h2></div>
+                <div class="preview-bubble" id="previewBubble"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="section-head">
+              <h2>Disparos desta sessão</h2>
+              <p class="text-faint" style="font-size:12px;">Histórico não persistido — some ao recarregar a página.</p>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Título</th>
+                    <th>Tipo</th>
+                    <th>Conteúdo</th>
+                    <th>Grupos</th>
+                    <th>Envio</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="messagesBody"></tbody>
+              </table>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
+    <script>
+      const TIPO_LABEL = { evento: "Evento", credito: "Crédito", pesquisa: "Pesquisa", aviso: "Aviso", outro: "Outro" };
+      const CONTEUDO_LABEL = { texto: "Texto", imagem: "Imagem", video: "Vídeo", documento: "Documento", link: "Link" };
+      const STATUS_BADGE = { programado: "badge-info", enviada: "badge-success", parcial: "badge-warning", erro: "badge-danger" };
+      const STATUS_LABEL = { programado: "Programado (fila)", enviada: "Enviada", parcial: "Parcial", erro: "Erro" };
+
+      const state = { groups: [] };
+      const sentMessages = [];
+
+      function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
+      }
+
+      // new Date("YYYY-MM-DDTHH:mm:00") e interpretado no horario local do navegador;
+      // convertemos para ISO UTC para o backend (que pode rodar em outro fuso) nao
+      // reinterpretar essa mesma string como horario local dele.
+      function localDateTimeToUtcIso(dataEnvio, horaStr) {
+        return new Date(`${dataEnvio}T${horaStr}:00`).toISOString();
+      }
+
+      function populateGroupCheckboxes() {
+        document.getElementById("groupCheckboxes").innerHTML = state.groups.length
+          ? state.groups
+              .map(
+                (g) =>
+                  `<label><input type="checkbox" value="${g.id}" class="group-check"> ${escapeHtml(g.nome)}${g.evolution_group_id ? "" : ' <span class="text-faint">(sem WhatsApp vinculado)</span>'}</label>`
+              )
+              .join("")
+          : '<span class="text-faint">Nenhum grupo cadastrado.</span>';
+        document.querySelectorAll(".group-check").forEach((cb) => cb.addEventListener("change", updatePreview));
+      }
+
+      function populateTestGroupSelect() {
+        document.getElementById("testGroup").innerHTML = state.groups
+          .map((g) => `<option value="${g.id}">${escapeHtml(g.nome)}</option>`)
+          .join("");
+      }
+
+      function toggleContentFields() {
+        const tipo = document.getElementById("msgConteudoTipo").value;
+        document.getElementById("anexoField").style.display = tipo === "texto" ? "none" : "block";
+        updatePreview();
+      }
+
+      function selectedGroupIds() {
+        return Array.from(document.querySelectorAll(".group-check:checked")).map((cb) => cb.value);
+      }
+
+      function selectedGroupNames() {
+        return selectedGroupIds().map((id) => state.groups.find((g) => g.id === id)?.nome).filter(Boolean);
+      }
+
+      function updatePreview() {
+        const titulo = document.getElementById("msgTitulo").value.trim() || "(sem título)";
+        const texto = document.getElementById("msgTexto").value.trim() || "(sem texto ainda)";
+        const conteudoTipo = document.getElementById("msgConteudoTipo").value;
+        const anexo = document.getElementById("msgAnexo").value.trim();
+        const grupos = selectedGroupNames();
+        const data = document.getElementById("msgData").value;
+        const inicio = document.getElementById("msgInicio").value;
+        const fim = document.getElementById("msgFim").value;
+
+        let anexoHtml = "";
+        if (conteudoTipo !== "texto" && anexo) anexoHtml = `<div class="pattach">📎 ${escapeHtml(anexo)} (${CONTEUDO_LABEL[conteudoTipo]})</div>`;
+
+        let envioHtml;
+        if (grupos.length <= 1) {
+          envioHtml = "Envio imediato";
+        } else if (data && inicio && fim) {
+          envioHtml = `Espalhado entre ${inicio} e ${fim} em ${data} (intervalo aleatório entre os grupos)`;
+        } else {
+          envioHtml = "defina data/início/fim para agendar com intervalo";
+        }
+
+        document.getElementById("previewBubble").innerHTML = `
+          <div class="ptitle">${escapeHtml(titulo)}</div>
+          <div style="font-size:13px;white-space:pre-wrap;">${escapeHtml(texto)}</div>
+          ${anexoHtml}
+          <div class="pattach">👥 ${grupos.length ? escapeHtml(grupos.join(", ")) : "nenhum grupo selecionado"}</div>
+          <div class="pattach">🕒 ${envioHtml}</div>
+        `;
+      }
+
+      document.getElementById("msgConteudoTipo").addEventListener("change", toggleContentFields);
+      ["msgTitulo", "msgTexto", "msgAnexo", "msgData", "msgInicio", "msgFim"].forEach((id) =>
+        document.getElementById(id).addEventListener("input", updatePreview)
+      );
+
+      function currentContentPayload() {
+        return {
+          texto: document.getElementById("msgTexto").value.trim(),
+          link: document.getElementById("msgConteudoTipo").value === "texto" ? "" : document.getElementById("msgAnexo").value.trim(),
+          tipo_conteudo: document.getElementById("msgConteudoTipo").value,
+        };
+      }
+
+      document.getElementById("sendTestButton").addEventListener("click", async () => {
+        const groupId = document.getElementById("testGroup").value;
+        const group = state.groups.find((g) => g.id === groupId);
+        const status = document.getElementById("testStatus");
+
+        if (!group) {
+          status.textContent = "Selecione um grupo de teste.";
+          status.style.color = "var(--danger)";
+          return;
+        }
+
+        status.textContent = "Enviando teste…";
+        status.style.color = "var(--text-muted)";
+
+        try {
+          const payload = { group_ids: [groupId], ...currentContentPayload() };
+          const result = await requestJson("/mensagens/dispatch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const detail = result.results[0];
+
+          if (detail.ok) {
+            status.textContent = `Teste enviado para "${group.nome}" via Evolution API.`;
+            status.style.color = "var(--success)";
+          } else {
+            status.textContent = `Falha ao enviar para "${group.nome}": ${detail.error}`;
+            status.style.color = "var(--danger)";
+          }
+        } catch (error) {
+          status.textContent = `Erro: ${error.message}`;
+          status.style.color = "var(--danger)";
+        }
+      });
+
+      function collectMessageFromForm() {
+        const grupos = selectedGroupIds();
+        const conteudo = currentContentPayload();
+        return {
+          id: `msg-${sentMessages.length}-${grupos.length}`,
+          titulo: document.getElementById("msgTitulo").value.trim() || "Sem título",
+          tipo: document.getElementById("msgTipo").value,
+          conteudoTipo: conteudo.tipo_conteudo,
+          texto: conteudo.texto,
+          link: conteudo.link || null,
+          grupos,
+          data: document.getElementById("msgData").value,
+          inicio: document.getElementById("msgInicio").value,
+          fim: document.getElementById("msgFim").value,
+          detalhes: [],
+        };
+      }
+
+      function resetForm() {
+        document.getElementById("msgTitulo").value = "";
+        document.getElementById("msgTexto").value = "";
+        document.getElementById("msgAnexo").value = "";
+        document.querySelectorAll(".group-check:checked").forEach((cb) => (cb.checked = false));
+        updatePreview();
+      }
+
+      document.getElementById("scheduleMessageButton").addEventListener("click", async () => {
+        const msg = collectMessageFromForm();
+
+        if (!msg.grupos.length) {
+          window.alert("Selecione ao menos um grupo destinatário.");
+          return;
+        }
+
+        if (!msg.texto && !msg.link) {
+          window.alert("Informe um texto ou uma URL de conteúdo.");
+          return;
+        }
+
+        const button = document.getElementById("scheduleMessageButton");
+        const multiplosGrupos = msg.grupos.length > 1;
+
+        if (multiplosGrupos && (!msg.data || !msg.inicio || !msg.fim)) {
+          window.alert("Com mais de 1 grupo selecionado, preencha data, início e fim da janela de envio.");
+          return;
+        }
+
+        button.disabled = true;
+        button.textContent = multiplosGrupos ? "Programando…" : "Enviando…";
+
+        try {
+          if (!multiplosGrupos) {
+            const result = await requestJson("/mensagens/dispatch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ group_ids: msg.grupos, texto: msg.texto, link: msg.link, tipo_conteudo: msg.conteudoTipo }),
+            });
+
+            msg.detalhes = result.results;
+            msg.status = result.falhas === 0 ? "enviada" : result.enviados === 0 ? "erro" : "parcial";
+          } else {
+            const delayMin = Number(document.getElementById("msgDelayMin").value) * 60000;
+            const delayMax = Number(document.getElementById("msgDelayMax").value) * 60000;
+            const result = await requestJson("/mensagens/dispatch/schedule", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                group_ids: msg.grupos,
+                texto: msg.texto,
+                link: msg.link,
+                tipo_conteudo: msg.conteudoTipo,
+                window_start: localDateTimeToUtcIso(msg.data, msg.inicio),
+                window_end: localDateTimeToUtcIso(msg.data, msg.fim),
+                jitter_delay_min_ms: delayMin,
+                jitter_delay_max_ms: delayMax,
+              }),
+            });
+
+            msg.detalhes = result.jobs.map((job) => ({ ok: true, group_id: job.group_id, group_nome: job.group_nome, scheduled_at: job.scheduled_at }));
+            msg.status = "programado";
+          }
+        } catch (error) {
+          msg.status = "erro";
+          msg.detalhes = [{ ok: false, error: error.message }];
+        }
+
+        sentMessages.unshift(msg);
+        resetForm();
+        renderMessages();
+        button.disabled = false;
+        button.textContent = "Programar mensagem";
+      });
+
+      function statusTip(m) {
+        if (!m.detalhes.length) return "";
+        return m.detalhes
+          .map((d) => {
+            if (!d.ok) return `${d.group_nome || d.group_id}: ${d.error}`;
+            if (d.scheduled_at) return `${d.group_nome || d.group_id}: agendado para ${new Date(d.scheduled_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+            return `${d.group_nome || d.group_id}: enviado`;
+          })
+          .join(" · ");
+      }
+
+      function renderMessages() {
+        document.getElementById("messagesBody").innerHTML = sentMessages.length
+          ? sentMessages
+              .map(
+                (m) => `
+            <tr>
+              <td class="strong">${escapeHtml(m.titulo)}</td>
+              <td>${TIPO_LABEL[m.tipo]}</td>
+              <td>${CONTEUDO_LABEL[m.conteudoTipo]}</td>
+              <td>${m.grupos.length}</td>
+              <td class="mono">${m.grupos.length > 1 ? `${m.data || "—"} ${m.inicio || ""}–${m.fim || ""}` : "Imediato"}</td>
+              <td><span class="badge has-tip ${STATUS_BADGE[m.status]}" data-tip="${escapeHtml(statusTip(m))}" data-tip-tone="${STATUS_BADGE[m.status].replace("badge-", "")}">${STATUS_LABEL[m.status]}</span></td>
+            </tr>`
+              )
+              .join("")
+          : '<tr><td colspan="6" class="text-faint">Nenhum disparo nesta sessão ainda. Este histórico não é persistido — ele reflete apenas os envios feitos desde que esta página foi carregada.</td></tr>';
+      }
+
+      async function init() {
+        try {
+          state.groups = await requestJson("/groups/search");
+        } catch (error) {
+          document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(error.message)}</span>`;
+        }
+        populateGroupCheckboxes();
+        populateTestGroupSelect();
+        toggleContentFields();
+        updatePreview();
+        renderMessages();
+      }
+
+      init();
+    </script>
+  </body>
+</html>

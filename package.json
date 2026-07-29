@@ -13,6 +13,7 @@
     "queue:campaign-trigger:worker": "node scripts/start-campaign-trigger-worker.js",
     "queue:dispatch:test": "node scripts/enqueue-dispatch.js",
     "queue:dispatch:worker": "node scripts/start-dispatch-worker.js",
+    "queue:mensagens-dispatch:worker": "node scripts/start-mensagens-dispatch-worker.js",
     "queue:group-sync:worker": "node scripts/start-group-sync-worker.js",
     "queue:drive-video-index:test": "node scripts/enqueue-google-drive-video-index.js",
     "queue:drive-video-index:worker": "node scripts/start-google-drive-video-index-worker.js",
