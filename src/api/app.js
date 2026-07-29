@@ -1,10 +1,12 @@
 const express = require("express");
+const cors = require("cors");
 const path = require("node:path");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createCampaignVideoCaptionsController = require("./controllers/campaign-video-captions.controller");
 const createGroupsController = require("./controllers/groups.controller");
 const createGroupVideoProgressController = require("./controllers/group-video-progress.controller");
 const createHealthController = require("./controllers/health.controller");
+const createMensagensController = require("./controllers/mensagens.controller");
 const createOrganizationsController = require("./controllers/organizations.controller");
 const createReportController = require("./controllers/report.controller");
 const createTrilhasController = require("./controllers/trilhas.controller");
@@ -14,12 +16,30 @@ const campaignVideoCaptionsService = require("../services/campaign-video-caption
 const dispatchLogsService = require("../services/dispatch-logs.service");
 const groupsService = require("../services/groups.service");
 const groupVideoProgressService = require("../services/group-video-progress.service");
+const mensagensService = require("../services/mensagens.service");
 const organizationsService = require("../services/organizations.service");
 const trilhasService = require("../services/trilhas.service");
 const videoCatalogService = require("../services/video-catalog.service");
 
 function createApp(dependencies = {}) {
   const app = express();
+  app.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin || origin === "null") {
+          callback(null, true);
+          return;
+        }
+
+        try {
+          const url = new URL(origin);
+          callback(null, ["localhost", "127.0.0.1", "::1"].includes(url.hostname));
+        } catch (error) {
+          callback(null, false);
+        }
+      },
+    })
+  );
   app.use(express.json());
   app.use(express.static(path.join(__dirname, "../../public")));
 
@@ -30,6 +50,7 @@ function createApp(dependencies = {}) {
   const groupVideoProgressServiceDependency = dependencies.groupVideoProgressService || groupVideoProgressService;
   const organizationService = dependencies.organizationService || organizationsService;
   const dispatchLogsServiceDependency = dependencies.dispatchLogsService || dispatchLogsService;
+  const mensagensServiceDependency = dependencies.mensagensService || mensagensService;
   const trilhasServiceDependency = dependencies.trilhasService || trilhasService;
   const videoService = dependencies.videoCatalogService || videoCatalogService;
   const campaignsController = createCampaignsController({ campaignService });
@@ -42,6 +63,7 @@ function createApp(dependencies = {}) {
     groupVideoProgressService: groupVideoProgressServiceDependency,
   });
   const healthController = createHealthController(dependencies.healthController || {});
+  const mensagensController = createMensagensController({ mensagensService: mensagensServiceDependency });
   const organizationsController = createOrganizationsController({ organizationService });
   const reportController = createReportController({ dispatchLogsService: dispatchLogsServiceDependency });
   const trilhasController = createTrilhasController({ trilhasService: trilhasServiceDependency });
@@ -81,6 +103,8 @@ function createApp(dependencies = {}) {
   app.patch("/groups/:id", groupsController.updateOperationalSettings);
   app.patch("/groups/:id/operational-settings", groupsController.updateOperationalSettings);
   app.post("/groups/:id/test-dispatch", groupsController.dispatchTestVideo);
+  app.post("/mensagens/dispatch", mensagensController.dispatch);
+  app.post("/mensagens/dispatch/schedule", mensagensController.schedule);
   app.get("/health", healthController);
 
   return app;

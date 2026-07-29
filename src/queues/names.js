@@ -3,6 +3,7 @@ const queueNames = {
   dispatch: "dispatch",
   groupSync: "group-sync",
   googleDriveVideoIndex: "google-drive-video-index",
+  mensagensDispatch: "mensagens-dispatch",
 };
 
 module.exports = {
