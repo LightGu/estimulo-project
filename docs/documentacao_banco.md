@@ -1,45 +1,51 @@
-# Documentação Inicial do Banco de Dados do MVP
+# Documentação do Banco de Dados
 
 ## 1. Visão Geral
 
-O banco de dados do MVP organiza as organizações atendidas, os grupos de WhatsApp, o catálogo de vídeos, as campanhas de agendamento, o progresso de cada grupo e o histórico das tentativas de envio.
+O banco de dados organiza a operação de envio de conteúdos para grupos de WhatsApp. A estrutura atual separa clientes, grupos, campanhas, trilhas, catálogo de vídeos, legendas, instâncias de WhatsApp e logs de envio.
 
-A estrutura foi separada para que cada parte da plataforma tenha uma responsabilidade específica:
+Essa separação evita que regras importantes fiquem misturadas em uma única tabela. Por exemplo, a tabela `video_catalog` descreve o arquivo de vídeo, enquanto `trilha_videos` define em quais trilhas esse vídeo aparece e em qual ordem. Assim, o mesmo vídeo pode ser reaproveitado em mais de uma trilha sem duplicar metadados.
 
-- `organizations`: armazena os clientes B2B;
-- `groups`: armazena os grupos de WhatsApp;
-- `video_catalog`: armazena as referências e classificações dos vídeos;
-- `campaigns`: armazena as campanhas de agendamento;
-- `campaign_groups`: relaciona campanhas e grupos;
-- `group_video_progress`: registra quais vídeos cada grupo já recebeu;
-- `dispatch_logs`: registra as tentativas de envio.
+As tabelas descritas abaixo foram conferidas no Supabase em 2026-07-29.
 
-O arquivo de vídeo não é armazenado no banco. Apenas o identificador do arquivo no Google Drive e seus metadados são registrados.
-
----
-
-## 2. Relacionamentos Principais
+## 2. Diagrama Entidade-Relacionamento
 
 ```mermaid
 erDiagram
     ORGANIZATIONS ||--o{ GROUPS : possui
-    ORGANIZATIONS ||--o{ CAMPAIGNS : possui
+    ORGANIZATIONS ||--o{ CAMPAIGN_GROUPS : contextualiza
 
     CAMPAIGNS ||--o{ CAMPAIGN_GROUPS : inclui
     GROUPS ||--o{ CAMPAIGN_GROUPS : participa
 
-    GROUPS ||--o{ GROUP_VIDEO_PROGRESS : recebe
-    VIDEO_CATALOG ||--o{ GROUP_VIDEO_PROGRESS : foi_enviado
+    TRILHAS ||--o{ GROUPS : orienta
+    TRILHAS ||--o{ TRILHA_VIDEOS : organiza
+    VIDEO_CATALOG ||--o{ TRILHA_VIDEOS : compoe
+    TRILHAS ||--o{ TRILHA_PERFIS : atende
 
-    CAMPAIGNS ||--o{ DISPATCH_LOGS : gera
-    GROUPS ||--o{ DISPATCH_LOGS : recebe
-    VIDEO_CATALOG ||--o{ DISPATCH_LOGS : registra
+    GROUPS ||--o{ GROUP_VIDEO_PROGRESS : registra
+    VIDEO_CATALOG ||--o{ GROUP_VIDEO_PROGRESS : enviado
+    TRILHAS ||--o{ GROUP_VIDEO_PROGRESS : contexto
+
+    CAMPAIGNS ||--o{ LOGS : gera
+    GROUPS ||--o{ LOGS : recebe
+    VIDEO_CATALOG ||--o{ LOGS : referencia
+
+    VIDEO_CATALOG ||--o{ VIDEO_CAPTIONS : possui
+    CAMPAIGNS ||--o{ CAMPAIGN_VIDEO_CAPTIONS : usa
+    GROUPS ||--o{ CAMPAIGN_VIDEO_CAPTIONS : recebe
+    VIDEO_CATALOG ||--o{ CAMPAIGN_VIDEO_CAPTIONS : legenda
+    VIDEO_CAPTIONS ||--o{ CAMPAIGN_VIDEO_CAPTIONS : seleciona
+
+    GROUPS ||--o{ GROUP_WHATSAPP_INSTANCES : vincula
+    WHATSAPP_INSTANCES ||--o{ GROUP_WHATSAPP_INSTANCES : atende
 
     ORGANIZATIONS {
         uuid id PK
         varchar nome
+        varchar description
+        varchar programa
         timestamptz created_at
-        timestamptz updated_at
     }
 
     GROUPS {
@@ -49,6 +55,12 @@ erDiagram
         text evolution_group_id
         boolean envia_video
         varchar trilha_override
+        uuid trilha_id FK
+        uuid forced_next_video_id FK
+        text setor
+        varchar segmento
+        smallint maturidade
+        integer quantidade_membros
         timestamptz created_at
         timestamptz updated_at
         varchar cliente_b2b
@@ -61,512 +73,265 @@ erDiagram
         integer quantidade_membros
     }
 
-    VIDEO_CATALOG {
-        uuid id PK
-        text drive_file_id "UNIQUE"
-        integer etapa
-        varchar trilha_segmento
-        varchar status
-        timestamptz data_aprovacao
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
     CAMPAIGNS {
         uuid id PK
-        uuid organization_id FK
-        varchar nome
-        varchar cron_expression
         boolean ativo
-        timestamptz created_at
-        timestamptz updated_at
+        text trilha
+        date data_envio
+        time horario_envio
+        text status
+        timestamptz window_start
+        timestamptz window_end
+        timestamptz status_changed_at
     }
 
     CAMPAIGN_GROUPS {
-        uuid campaign_id PK, FK
-        uuid group_id PK, FK
+        uuid campaign_id PK
+        uuid group_id PK
+        uuid organization_id FK
         timestamptz created_at
+    }
+
+    TRILHAS {
+        uuid id PK
+        text macrotema
+        text trilha
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    TRILHA_VIDEOS {
+        uuid id PK
+        uuid trilha_id FK
+        uuid video_id FK
+        integer ordem
+        timestamptz created_at
+    }
+
+    TRILHA_PERFIS {
+        uuid id PK
+        uuid trilha_id FK
+        text macrotema
+        text trilha
+        text perfil
+        timestamptz created_at
+    }
+
+    VIDEO_CATALOG {
+        uuid id PK
+        text drive_file_id
+        boolean status
+        text nome_do_arquivo
+        text pasta_atual
+        text objetivo_de_aprendizagem
+        text nivel
+        text observacoes
+        text link_video
+        integer ordem_geral
+        varchar transcript
+        timestamptz google_drive_created_at
     }
 
     GROUP_VIDEO_PROGRESS {
         uuid id PK
         uuid group_id FK
         uuid video_id FK
+        uuid trilha_id FK
         timestamptz enviado_em
     }
 
-    DISPATCH_LOGS {
+    LOGS {
         uuid id PK
         uuid campaign_id FK
         uuid group_id FK
         uuid video_id FK
         varchar status
         text mensagem_erro
+        integer retry_count
         timestamptz criado_em
+        timestamptz horario_envio_planejado
+    }
+
+    VIDEO_CAPTIONS {
+        uuid id PK
+        uuid video_id FK
+        text caption_text
+        timestamptz criado_em
+        timestamptz ultimo_uso_em
+    }
+
+    CAMPAIGN_VIDEO_CAPTIONS {
+        uuid id PK
+        uuid campaign_id FK
+        uuid group_id FK
+        uuid video_id FK
+        uuid caption_id FK
+        text caption_text
+        text status
+        text erro_mensagem
+        timestamptz criado_em
+        timestamptz atualizado_em
+    }
+
+    WHATSAPP_INSTANCES {
+        uuid id PK
+        text instance_name
+        text phone_number
+        text connection_state
+        integer priority
+        boolean active
+        timestamptz qr_generated_at
+        timestamptz connected_at
+        timestamptz last_status_check_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    GROUP_WHATSAPP_INSTANCES {
+        uuid id PK
+        uuid group_id FK
+        uuid whatsapp_instance_id FK
+        timestamptz discovered_at
+        timestamptz last_seen_at
+    }
+
+    SETTINGS {
+        uuid id PK
+        text key
+        text profile_name
+        text drive_root_folder_id
+        text drive_index_cron
+        text drive_index_timezone
+        integer whatsapp_rotation_group_count
+        text default_timezone
+        integer default_min_interval_min
+        integer default_max_interval_min
+        uuid notification_group_id
+        jsonb notification_events
+        jsonb dispatch_rules
+        jsonb ai_agents
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    GROUP_PROFILES {
+        uuid id PK
+        text nome
+        timestamptz created_at
     }
 ```
 
----
+## 3. Descrição das Tabelas
 
-## 3. Tabela `organizations`
-
-### 3.1 Finalidade
-
-A tabela `organizations` armazena os clientes B2B atendidos pela plataforma.
-
-Exemplos:
-
-- Ambev;
-- Relay Trust.
-
-Essa tabela evita repetir o nome do cliente em todos os grupos e campanhas.
-
-### 3.2 Campos
-
-| Campo | Significado |
+| Tabela | Função no sistema |
 |---|---|
-| `id` | Identificador único da organização |
-| `nome` | Nome da organização ou cliente B2B |
-| `created_at` | Data e horário de criação do registro |
-| `updated_at` | Data e horário da última atualização |
+| `organizations` | Guarda os clientes ou organizações atendidas pela plataforma. |
+| `groups` | Representa os grupos de WhatsApp sincronizados ou cadastrados para a operação. |
+| `campaigns` | Define campanhas de envio e suas janelas de execução. |
+| `campaign_groups` | Relaciona campanhas com os grupos participantes e preserva a organização de contexto. |
+| `trilhas` | Define trilhas de conteúdo por macrotema e nome da trilha. |
+| `trilha_videos` | Relaciona vídeos com trilhas e controla a ordem de exibição dentro de cada trilha. |
+| `trilha_perfis` | Indica quais perfis de grupo podem seguir determinada trilha. |
+| `video_catalog` | Guarda metadados dos vídeos indexados a partir do Google Drive. |
+| `video_captions` | Armazena legendas geradas ou aprovadas para cada vídeo. |
+| `campaign_video_captions` | Registra a legenda usada em uma combinação de campanha, grupo e vídeo. |
+| `group_video_progress` | Indica quais vídeos já foram enviados para cada grupo, considerando a trilha. |
+| `logs` | Registra tentativas de envio, status, erros e horário planejado. |
+| `whatsapp_instances` | Guarda instâncias de WhatsApp disponíveis para envio pela Evolution API. |
+| `group_whatsapp_instances` | Relaciona grupos de WhatsApp com as instâncias que os identificaram. |
+| `settings` | Centraliza parâmetros operacionais, como indexação do Drive, fuso, regras de envio e agentes de IA. |
+| `group_profiles` | Lista perfis usados para classificar grupos e apoiar regras de trilhas. |
 
-### 3.3 Exemplo de Registro
+## 4. Principais Regras de Modelagem
 
-```text
-id: 9f841693-dfe7-4ce2-9709-78cd3dbb6afe
-nome: Ambev
-created_at: 2026-07-13 14:00:00-03
-updated_at: 2026-07-13 14:00:00-03
-```
+### Organizações e grupos
 
----
+`organizations` concentra os dados do cliente B2B. A tabela `groups` referencia uma organização por `organization_id`, mas o schema atual também permite enriquecer o grupo com informações operacionais, como `segmento`, `setor`, `maturidade`, `quantidade_membros`, `envia_video` e `trilha_id`.
 
-## 4. Tabela `groups`
+O campo `envia_video` funciona como uma chave operacional. Quando ele está como `false`, o grupo não deve ser considerado no fluxo automático de vídeos, mesmo que esteja associado a uma campanha.
 
-### 4.1 Finalidade
+### Trilhas e vídeos
 
-A tabela `groups` armazena os grupos reais do WhatsApp que participam da operação.
+A estrutura atual usa uma relação N:N entre `trilhas` e `video_catalog`, implementada por `trilha_videos`. Isso é melhor do que guardar a trilha diretamente no vídeo, porque um mesmo vídeo pode ser reutilizado em diferentes trilhas e com ordens diferentes.
 
-Cada grupo pertence a uma organização e pode participar de uma ou mais campanhas.
+O campo `trilha_videos.ordem` define a sequência da trilha. O campo `video_catalog.ordem_geral` ainda existe como apoio ao catálogo, mas a ordem do envio por trilha deve priorizar `trilha_videos.ordem`.
 
-### 4.2 Campos
+### Campanhas e envios
 
-| Campo | Significado |
-|---|---|
-| `id` | Identificador único do grupo |
-| `organization_id` | Organização à qual o grupo pertence |
-| `nome` | Nome usado para identificar o grupo |
-| `evolution_group_id` | Identificador do grupo na Evolution API ou no WhatsApp |
-| `segmento` | Segmento ou perfil do público do grupo |
-| `envia_video` | Indica se o grupo pode receber vídeos |
-| `created_at` | Data e horário de criação |
-| `updated_at` | Data e horário da última atualização |
+`campaigns` define a intenção de envio, como status, data, horário e janela operacional. A relação com grupos acontece em `campaign_groups`, permitindo que uma campanha contemple vários grupos.
 
-### 4.3 Regras Importantes
+Antes do envio real, o sistema cria registros em `logs`. Esses registros representam a intenção e o acompanhamento do envio. O status pode indicar estados como pendente, processando, enviado, falhou ou erro, dependendo da etapa do fluxo.
 
-```text
-envia_video = true  → o grupo pode entrar no fluxo de envio
-envia_video = false → o grupo deve ser ignorado pelo agendador
-```
+### Legendas
 
-O campo `evolution_group_id` deve ser único para evitar o cadastro duplicado do mesmo grupo.
+`video_captions` guarda legendas associadas ao vídeo. Já `campaign_video_captions` registra a legenda usada ou gerada para uma campanha, grupo e vídeo específicos. Essa separação ajuda a auditar o que foi enviado sem perder o histórico de variações de legenda.
 
-O campo `last_message_sent_at` é atualizado quando um envio é concluído com status `sent`.
+### WhatsApp e Evolution API
 
-### 4.4 Exemplo de Registro
+`whatsapp_instances` representa as instâncias conectadas à Evolution API. `group_whatsapp_instances` registra quais grupos foram encontrados por cada instância, permitindo controle de disponibilidade, rotação e rastreabilidade.
 
-```text
-id: a4ac594b-9f97-4d64-84a4-365338f13211
-organization_id: 9f841693-dfe7-4ce2-9709-78cd3dbb6afe
-nome: Grupo Ambev Nordeste
-evolution_group_id: 120363000000000000@g.us
-segmento: Pré-Infância
-envia_video: true
-trilha_override: null
-```
-
----
-
-## 5. Tabela `video_catalog`
-
-### 5.1 Finalidade
-
-A tabela `video_catalog` armazena as referências dos vídeos disponíveis no Google Drive e os metadados usados na curadoria.
-
-O arquivo de vídeo não é salvo no banco.
-
-A tabela armazena apenas:
-
-- o identificador do arquivo no Drive;
-- a etapa do conteúdo;
-- a trilha ou segmento ao qual ele pertence;
-- o status de revisão;
-- a data de aprovação.
-
-### 5.2 Campos
-
-| Campo | Significado |
-|---|---|
-| `id` | Identificador interno do vídeo |
-| `drive_file_id` | Identificador único do arquivo no Google Drive |
-| `etapa` | Posição do vídeo dentro da sequência de conteúdos |
-| `trilha_segmento` | Trilha ou segmento para o qual o vídeo é indicado |
-| `status` | Situação atual do vídeo no processo de curadoria |
-| `data_aprovacao` | Data e horário em que o vídeo foi aprovado |
-| `created_at` | Data e horário de criação |
-| `updated_at` | Data e horário da última atualização |
-
-### 5.3 Valores Permitidos para `status`
-
-```text
-pendente_revisao
-aprovado
-reprovado
-inativo
-```
-
-O valor padrão é:
-
-```text
-pendente_revisao
-```
-
-Quando o status for `aprovado`, o campo `data_aprovacao` deve estar preenchido.
-
-### 5.4 Significado da Etapa
-
-A etapa indica a posição do vídeo na sequência de uma trilha ou segmento.
-
-```text
-etapa 1 → primeiro vídeo
-etapa 2 → segundo vídeo
-etapa 3 → terceiro vídeo
-```
-
-O próximo vídeo de um grupo é identificado a partir do segmento ou da trilha do grupo e dos vídeos que ainda não foram registrados em `group_video_progress`.
-
-### 5.5 Exemplo de Registro
-
-```text
-id: edafae61-2305-4552-bef6-1f20cfc6a8c0
-drive_file_id: 1AbCDeFGhijkLMNopQRstuVWXyz
-etapa: 1
-trilha_segmento: Pré-Infância
-status: aprovado
-data_aprovacao: 2026-07-13 14:30:00-03
-```
-
----
-
-## 6. Tabela `campaigns`
-
-### 6.1 Finalidade
-
-A tabela `campaigns` armazena as campanhas responsáveis por definir quando o processo de envio deve ser executado.
-
-Uma campanha pertence a uma organização e pode ser associada a vários grupos.
-
-A campanha não armazena o vídeo. Ela controla o agendamento.
-
-### 6.2 Campos
-
-| Campo | Significado |
-|---|---|
-| `id` | Identificador único da campanha |
-| `organization_id` | Organização responsável pela campanha |
-| `nome` | Nome da campanha |
-| `cron_expression` | Expressão que define a frequência e o horário da execução |
-| `ativo` | Indica se a campanha pode ser executada |
-| `created_at` | Data e horário de criação |
-| `updated_at` | Data e horário da última atualização |
-
-### 6.3 Regra de Ativação
-
-```text
-ativo = true  → a campanha pode ser executada
-ativo = false → a campanha deve ser ignorada pelo agendador
-```
-
-### 6.4 Exemplo de Registro
-
-```text
-id: 26badcb0-e2ab-42e1-b49c-a8fe41a8e8d4
-organization_id: 9f841693-dfe7-4ce2-9709-78cd3dbb6afe
-nome: Envios Semanais Ambev
-cron_expression: 0 10 * * 1
-ativo: true
-```
-
----
-
-## 7. Tabela `campaign_groups`
-
-### 7.1 Finalidade
-
-A tabela `campaign_groups` relaciona as campanhas aos grupos participantes.
-
-Ela é necessária porque uma campanha pode conter vários grupos e um grupo pode participar de mais de uma campanha.
-
-### 7.2 Campos
-
-| Campo | Significado |
-|---|---|
-| `campaign_id` | Campanha associada |
-| `group_id` | Grupo participante |
-| `created_at` | Data e horário em que a associação foi criada |
-
-### 7.3 Regra de Duplicidade
-
-```text
-campaign_id + group_id
-```
-
-A combinação é a chave primária e impede que o mesmo grupo seja adicionado duas vezes à mesma campanha.
-
-### 7.4 Exemplo de Registro
-
-```text
-campaign_id: 26badcb0-e2ab-42e1-b49c-a8fe41a8e8d4
-group_id: a4ac594b-9f97-4d64-84a4-365338f13211
-created_at: 2026-07-13 15:00:00-03
-```
-
----
-
-## 8. Tabela `group_video_progress`
-
-### 8.1 Finalidade
-
-A tabela `group_video_progress` registra quais vídeos já foram enviados para cada grupo.
-
-Ela permite que cada grupo avance de forma independente e impede que o mesmo vídeo seja reenviado ao mesmo grupo.
-
-### 8.2 Campos
-
-| Campo | Significado |
-|---|---|
-| `id` | Identificador único do registro |
-| `group_id` | Grupo que recebeu o vídeo |
-| `video_id` | Vídeo enviado |
-| `enviado_em` | Data e horário do envio |
-
-### 8.3 Regra de Duplicidade
-
-```text
-group_id + video_id
-```
-
-Essa combinação deve ser única.
-
-### 8.4 Exemplo de Registro
-
-```text
-id: 1a4a21eb-4600-436b-8a1b-6c820eb8a455
-group_id: a4ac594b-9f97-4d64-84a4-365338f13211
-video_id: edafae61-2305-4552-bef6-1f20cfc6a8c0
-enviado_em: 2026-07-13 15:10:00-03
-```
-
----
-
-## 9. Tabela `dispatch_logs`
-
-### 9.1 Finalidade
-
-A tabela `dispatch_logs` registra cada tentativa de envio feita pelo sistema.
-
-Ela permite identificar qual campanha iniciou a tentativa, qual grupo seria atendido, qual vídeo foi utilizado, se o envio funcionou ou falhou e quando a tentativa ocorreu.
-
-### 9.2 Campos
-
-| Campo | Significado |
-|---|---|
-| `id` | Identificador único do log |
-| `campaign_id` | Campanha que iniciou o envio |
-| `group_id` | Grupo que recebeu ou deveria receber o vídeo |
-| `video_id` | Vídeo relacionado à tentativa |
-| `status` | Situação da tentativa |
-| `mensagem_erro` | Detalhes do erro, quando houver |
-| `criado_em` | Data e horário do registro |
-
-### 9.3 Valores Permitidos para `status`
-
-```text
-pendente
-processando
-enviado
-falhou
-```
-
-### 9.4 Exemplo de Registro
-
-```text
-id: 89936959-b25c-44af-b061-b6d318c08efb
-campaign_id: 26badcb0-e2ab-42e1-b49c-a8fe41a8e8d4
-group_id: a4ac594b-9f97-4d64-84a4-365338f13211
-video_id: edafae61-2305-4552-bef6-1f20cfc6a8c0
-status: enviado
-mensagem_erro: null
-criado_em: 2026-07-13 15:10:00-03
-```
-
----
-
-## 10. Como o Sistema Identifica o Próximo Vídeo
-
-O sistema pode seguir este processo:
-
-1. identificar uma campanha ativa;
-2. buscar seus grupos em `campaign_groups`;
-3. ignorar grupos com `envia_video = false`;
-4. identificar o segmento do grupo;
-5. buscar apenas vídeos aprovados no `video_catalog`;
-6. excluir os vídeos já registrados em `group_video_progress`;
-7. ordenar os vídeos por etapa;
-8. selecionar o primeiro vídeo disponível;
-9. registrar a tentativa em `dispatch_logs`;
-10. após o sucesso, registrar o vídeo em `group_video_progress`;
-11. atualizar `groups.last_message_sent_at`.
-
-### 10.1 Exemplo de Consulta
-
-```sql
-select vc.*
-from public.groups g
-join public.video_catalog vc
-    on vc.trilha_segmento = coalesce(g.trilha_override, g.segmento)
-left join public.group_video_progress gvp
-    on gvp.group_id = g.id
-   and gvp.video_id = vc.id
-where g.id = 'ID_DO_GRUPO'
-  and g.envia_video = true
-  and vc.status = 'aprovado'
-  and gvp.id is null
-order by vc.etapa
-limit 1;
-```
-
----
-
-## 11. Fluxo Simplificado de Envio
+## 5. Fluxo Simplificado de Envio
 
 ```mermaid
 flowchart TD
-    A[Agendador identifica campanha ativa] --> B[Busca grupos da campanha]
-    B --> C{Grupo pode receber vídeo?}
-    C -- Não --> D[Ignorar grupo]
-    C -- Sim --> E[Identificar segmento do grupo]
-    E --> F[Buscar vídeos aprovados]
-    F --> G[Excluir vídeos já enviados]
-    G --> H{Existe vídeo disponível?}
-    H -- Não --> I[Encerrar processamento do grupo]
-    H -- Sim --> J[Registrar tentativa em dispatch_logs]
-    J --> K[Enviar vídeo pelo WhatsApp]
-    K --> L{Envio funcionou?}
-    L -- Não --> M[Atualizar log como falhou]
-    L -- Sim --> N[Atualizar log como enviado]
-    N --> O[Registrar em group_video_progress]
-    O --> P[Atualizar último envio do grupo]
+    A[Campanha é criada ou confirmada] --> B[Worker campaign-trigger processa a campanha]
+    B --> C[Buscar grupos em campaign_groups]
+    C --> D{Grupo está habilitado para vídeo?}
+    D -- Não --> E[Ignorar grupo]
+    D -- Sim --> F[Identificar trilha_id do grupo]
+    F --> G[Buscar vídeos da trilha em trilha_videos]
+    G --> H[Remover vídeos já registrados em group_video_progress]
+    H --> I{Existe vídeo elegível?}
+    I -- Não --> J[Pausar fluxo do grupo por fim de fila]
+    I -- Sim --> K[Criar ou reaproveitar log pendente]
+    K --> L[Enfileirar job na dispatch]
+    L --> M[Worker dispatch envia pela Evolution API]
+    M --> N{Envio funcionou?}
+    N -- Não --> O[Atualizar logs com falha]
+    N -- Sim --> P[Atualizar logs como enviado]
+    P --> Q[Registrar group_video_progress]
 ```
 
----
+## 6. Consulta de Referência
 
-## 12. Resumo dos Relacionamentos
+A consulta abaixo representa a ideia central da escolha do próximo vídeo. No código, essa regra fica distribuída entre repositórios e serviços, mas a lógica de negócio é equivalente:
 
-| Origem | Destino | Finalidade |
-|---|---|---|
-| `groups.organization_id` | `organizations.id` | Identificar a organização do grupo |
-| `campaigns.organization_id` | `organizations.id` | Identificar a organização da campanha |
-| `campaign_groups.campaign_id` | `campaigns.id` | Identificar a campanha |
-| `campaign_groups.group_id` | `groups.id` | Identificar o grupo participante |
-| `group_video_progress.group_id` | `groups.id` | Identificar o grupo que recebeu o vídeo |
-| `group_video_progress.video_id` | `video_catalog.id` | Identificar o vídeo enviado |
-| `dispatch_logs.campaign_id` | `campaigns.id` | Identificar a campanha que iniciou a tentativa |
-| `dispatch_logs.group_id` | `groups.id` | Identificar o grupo da tentativa |
-| `dispatch_logs.video_id` | `video_catalog.id` | Identificar o vídeo da tentativa |
+```sql
+select
+    vc.*,
+    tv.ordem
+from public.groups g
+join public.trilha_videos tv
+    on tv.trilha_id = g.trilha_id
+join public.video_catalog vc
+    on vc.id = tv.video_id
+left join public.group_video_progress gvp
+    on gvp.group_id = g.id
+   and gvp.video_id = vc.id
+   and (gvp.trilha_id = g.trilha_id or gvp.trilha_id is null)
+where g.id = 'ID_DO_GRUPO'
+  and g.envia_video = true
+  and vc.status = true
+  and gvp.id is null
+order by tv.ordem asc, vc.ordem_geral asc
+limit 1;
+```
 
----
+## 7. Observações sobre a Evolução do Schema
 
-## 13. Regras Importantes
+A primeira versão do MVP usava campos textuais no `video_catalog`, como `trilha`, `macrotema`, `ordem` e `perfil_da_jornada`. A versão atual migrou essa organização para tabelas próprias:
 
-### Organização
+- `trilhas` guarda o macrotema e o nome da trilha.
+- `trilha_videos` vincula vídeos às trilhas.
+- `trilha_perfis` vincula perfis às trilhas.
+- `groups.trilha_id` aponta diretamente para a trilha operacional do grupo.
 
-O nome da organização deve ser único.
+Essa mudança deixa o modelo mais normalizado e reduz inconsistências causadas por comparação de texto.
 
-### Grupo
+## 8. Cuidados de Manutenção
 
-- `evolution_group_id` deve ser único;
-- grupos com `envia_video = false` não recebem novos vídeos;
-- todo grupo pertence a uma organização;
-- `last_message_sent_at` registra o último envio concluído.
-
-### Vídeo
-
-- `drive_file_id` deve ser único;
-- nenhum conteúdo binário é armazenado no banco;
-- somente vídeos com status `aprovado` podem ser enviados;
-- vídeos aprovados devem possuir `data_aprovacao`;
-- a etapa deve ser maior ou igual a 1.
-
-### Campanha
-
-- toda campanha pertence a uma organização;
-- somente campanhas ativas devem ser executadas;
-- `cron_expression` define quando a campanha será processada.
-
-### Progresso
-
-- o mesmo vídeo não pode ser registrado duas vezes para o mesmo grupo;
-- cada grupo possui seu próprio histórico;
-- grupos diferentes podem avançar em ritmos diferentes.
-
-### Logs
-
-- cada tentativa deve possuir um status válido;
-- em caso de falha, `mensagem_erro` pode guardar a causa;
-- `dispatch_logs` registra tentativas;
-- `group_video_progress` registra apenas vídeos considerados enviados.
-
----
-
-## 14. Diferença entre as Tabelas de Controle
-
-### `campaigns`
-
-Define quando uma rotina de envio deve ser executada.
-
-### `campaign_groups`
-
-Define quais grupos participam da campanha.
-
-### `video_catalog`
-
-Define quais vídeos estão disponíveis e aprovados.
-
-### `dispatch_logs`
-
-Registra cada tentativa de envio, incluindo falhas.
-
-### `group_video_progress`
-
-Registra os vídeos já enviados para cada grupo.
-
----
-
-## 15. Considerações Finais
-
-A estrutura permite:
-
-- cadastrar clientes B2B;
-- descrever o contexto de cada organização;
-- cadastrar grupos de WhatsApp;
-- associar grupos a campanhas;
-- organizar vídeos por etapa e segmento;
-- controlar a aprovação dos vídeos;
-- identificar o próximo vídeo disponível;
-- impedir reenvios duplicados;
-- registrar falhas e sucessos;
-- consultar o último envio feito para cada grupo;
-- permitir que cada grupo avance de forma independente.
-
-A documentação deve ser atualizada sempre que novas tabelas, campos ou regras de negócio forem adicionados ao banco.
+- Aplicar migrations sempre em ordem cronológica.
+- Evitar inserir vídeos diretamente em uma trilha sem preencher `trilha_videos.ordem`.
+- Não armazenar arquivos binários no Supabase; o banco deve guardar apenas identificadores e metadados.
+- Manter `logs` como registro de tentativas e `group_video_progress` como registro de envios considerados concluídos.
+- Atualizar esta documentação sempre que uma nova tabela ou regra relevante for adicionada ao banco.
