@@ -114,6 +114,7 @@
 
     <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       function renderRoles() {
         document.getElementById("roleGrid").innerHTML = MOCK.roles
@@ -125,6 +126,11 @@
             </div>`
           )
           .join("");
+      }
+
+      function roleTip(roleName) {
+        const role = MOCK.roles.find((r) => r.nome === roleName);
+        return role ? role.descricao : "";
       }
 
       function orgsLabel(user) {
@@ -139,9 +145,9 @@
             <tr>
               <td class="strong">${u.nome}</td>
               <td class="mono">${u.email}</td>
-              <td><span class="badge badge-info">${u.papel}</span></td>
+              <td><span class="badge has-tip badge-info" data-tip="${roleTip(u.papel)}" data-tip-tone="info">${u.papel}</span></td>
               <td>${orgsLabel(u)}</td>
-              <td>${u.ativo ? '<span class="badge badge-success">Ativo</span>' : '<span class="badge badge-neutral">Inativo</span>'}</td>
+              <td>${u.ativo ? '<span class="badge has-tip badge-success" data-tip="Usuário pode acessar a plataforma normalmente." data-tip-tone="success">Ativo</span>' : '<span class="badge has-tip badge-neutral" data-tip="Acesso bloqueado — usuário não consegue mais entrar na plataforma." data-tip-tone="neutral">Inativo</span>'}</td>
               <td class="mono">${u.ultimoAcesso}</td>
               <td><button class="btn btn-secondary btn-sm" data-toggle-active="${u.id}">${u.ativo ? "Desativar" : "Ativar"}</button></td>
             </tr>`

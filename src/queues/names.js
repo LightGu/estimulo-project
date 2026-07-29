@@ -5,6 +5,7 @@ const queueNames = {
   dispatchFailureRetry: "dispatch-failure-retry",
   groupSync: "group-sync",
   googleDriveVideoIndex: "google-drive-video-index",
+  mensagensDispatch: "mensagens-dispatch",
 };
 
 module.exports = {

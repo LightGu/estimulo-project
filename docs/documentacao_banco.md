@@ -47,10 +47,18 @@ erDiagram
         uuid organization_id FK
         varchar nome
         text evolution_group_id
-        varchar segmento
         boolean envia_video
+        varchar trilha_override
         timestamptz created_at
         timestamptz updated_at
+        varchar cliente_b2b
+        varchar segmentacao
+        varchar setor
+        varchar regiao
+        varchar cidade
+        varchar nome_projeto
+        integer maturidade
+        integer quantidade_membros
     }
 
     VIDEO_CATALOG {

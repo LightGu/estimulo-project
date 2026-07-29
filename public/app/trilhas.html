@@ -194,6 +194,7 @@
     </div>
 
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const state = {
         trails: [],
@@ -408,7 +409,7 @@
             <tr class="video-row" draggable="true" data-video-id="${escapeHtml(v.id)}">
               <td><span class="drag-handle">⠿</span>${index + 1}</td>
               <td class="mono">${escapeHtml(v.nome_do_arquivo)}</td>
-              <td>${v.status === true ? '<span class="badge badge-success">Aprovado</span>' : '<span class="badge badge-warning">Pendente</span>'}</td>
+              <td>${v.status === true ? '<span class="badge has-tip badge-success" data-tip="Vídeo aprovado — pode ser selecionado automaticamente em campanhas." data-tip-tone="success">Aprovado</span>' : '<span class="badge has-tip badge-warning" data-tip="Aguardando aprovação — ainda não pode ser usado em campanhas automáticas." data-tip-tone="warning">Pendente</span>'}</td>
               <td style="display:flex;gap:6px;flex-wrap:wrap;">
                 <button class="btn btn-secondary btn-sm" data-move="${escapeHtml(v.id)}">Adicionar a outra trilha</button>
                 <button class="btn btn-secondary btn-sm" data-remove="${escapeHtml(v.id)}">Remover desta trilha</button>

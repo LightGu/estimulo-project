@@ -116,6 +116,7 @@
     </div>
 
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const state = {
         organizations: [],
@@ -186,7 +187,7 @@
                                 <tr>
                                   <td class="strong">${escapeHtml(g.nome)}</td>
                                   <td>${g.segmento ? escapeHtml(g.segmento) : '<span class="text-faint">—</span>'}</td>
-                                  <td>${g.envia_video === true ? '<span class="badge badge-info">Habilitado</span>' : '<span class="badge badge-danger">Não envia</span>'}</td>
+                                  <td>${g.envia_video === true ? '<span class="badge has-tip badge-info" data-tip="Este grupo recebe vídeos normalmente nos envios automáticos." data-tip-tone="info">Habilitado</span>' : '<span class="badge has-tip badge-danger" data-tip="Este grupo não recebe vídeos — não entra nos fluxos de envio automático." data-tip-tone="danger">Não envia</span>'}</td>
                                   <td>${g.trilha_override ? escapeHtml(g.trilha_override) : '<span class="text-faint">Sem trilha</span>'}</td>
                                 </tr>`
                                 )

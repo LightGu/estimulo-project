@@ -129,6 +129,7 @@
 
     <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const STATUS_BADGE = {
         ativa: "badge-warning",
@@ -170,7 +171,7 @@
               <td class="mono">${p.inicio} → ${p.fim}</td>
               <td>${p.apenasPilulas ? '<span class="badge badge-info">Sim</span>' : '<span class="badge badge-neutral">Não (pausa tudo)</span>'}</td>
               <td>${AO_ENCERRAR_LABEL[p.aoEncerrar]}</td>
-              <td><span class="badge ${STATUS_BADGE[p.status]}">${p.status}</span></td>
+              <td><span class="badge has-tip ${STATUS_BADGE[p.status]}" data-tip="${p.motivo || ""}" data-tip-tone="${STATUS_BADGE[p.status].replace("badge-", "")}">${p.status}</span></td>
               <td>${p.criadoPor}</td>
               <td>${p.status !== "encerrada" ? `<button class="btn btn-ghost btn-sm" data-end="${p.id}">Encerrar agora</button>` : '<span class="text-faint">—</span>'}</td>
             </tr>`
