@@ -57,6 +57,12 @@
                   <option value="nao-classificados">N&atilde;o classificados</option>
                 </select>
               </div>
+              <div class="field" id="instanceFilterField" hidden>
+                <label for="instanceFilter">N&uacute;mero</label>
+                <select id="instanceFilter">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
               <div class="toolbar-spacer"></div>
               <button class="btn btn-secondary" id="syncButton" type="button">Sincronizar com Evolution API</button>
             </div>
@@ -83,6 +89,7 @@
                     <th>Classifica&ccedil;&atilde;o</th>
                     <th>Envia v&iacute;deo</th>
                     <th>Trilha</th>
+                    <th id="instanceColumnHeader" hidden>N&uacute;mero</th>
                     <th>A&ccedil;&otilde;es</th>
                   </tr>
                 </thead>
@@ -109,10 +116,6 @@
             <label for="editSegmento">Perfil</label>
             <select id="editSegmento">
               <option value="">Sem perfil</option>
-              <option value="Pr&eacute;-Inf&acirc;ncia">Pr&eacute;-Inf&acirc;ncia</option>
-              <option value="Inf&acirc;ncia">Inf&acirc;ncia</option>
-              <option value="Adolescente">Adolescente</option>
-              <option value="Maturidade">Maturidade</option>
             </select>
           </div>
 
@@ -133,10 +136,14 @@
     </div>
 
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const state = {
         groups: [],
         organizations: [],
+        profiles: [],
+        trilhaNameById: new Map(),
+        whatsappInstances: [],
       };
       let editingGroupId = null;
 
@@ -170,31 +177,61 @@
         return org ? org.nome : text(group.organization_id, "-");
       }
 
+      function resolveTrilhaLabel(group) {
+        if (group.trilha_id) {
+          return state.trilhaNameById.get(group.trilha_id) || group.trilha_override || null;
+        }
+
+        return group.trilha_override || null;
+      }
+
       function classificationBadge(group) {
         return group.segmento
-          ? '<span class="badge badge-success">Classificado</span>'
-          : '<span class="badge badge-warning">N&atilde;o classificado</span>';
+          ? '<span class="badge has-tip badge-success" data-tip="Este grupo j&aacute; tem perfil e organiza&ccedil;&atilde;o definidos." data-tip-tone="success">Classificado</span>'
+          : '<span class="badge has-tip badge-warning" data-tip="Faltam informa&ccedil;&otilde;es &mdash; defina o perfil deste grupo em Editar." data-tip-tone="warning">N&atilde;o classificado</span>';
       }
 
       function enviaVideoBadge(group) {
         return group.envia_video === true
-          ? '<span class="badge badge-info">Habilitado</span>'
-          : '<span class="badge badge-danger">N&atilde;o envia v&iacute;deo</span>';
+          ? '<span class="badge has-tip badge-info" data-tip="Este grupo recebe v&iacute;deos normalmente nos envios autom&aacute;ticos." data-tip-tone="info">Habilitado</span>'
+          : '<span class="badge has-tip badge-danger" data-tip="Este grupo n&atilde;o recebe v&iacute;deos &mdash; n&atilde;o entra nos fluxos de envio autom&aacute;tico." data-tip-tone="danger">N&atilde;o envia v&iacute;deo</span>';
       }
 
-      function normalizeSegmentoOption(value) {
-        const normalized = String(value || "")
+      function hasMultipleInstances() {
+        return state.whatsappInstances.length > 1;
+      }
+
+      function instanceLabel(instanceId) {
+        const instance = state.whatsappInstances.find((item) => item.id === instanceId);
+        if (!instance) return instanceId;
+        return instance.phone_number || instance.instance_name;
+      }
+
+      function instanceCell(group) {
+        const linkedIds = Array.isArray(group.whatsapp_instance_ids) ? group.whatsapp_instance_ids : [];
+        const chips = linkedIds.map((id) => escapeHtml(instanceLabel(id))).join(", ") || '<span class="text-faint">-</span>';
+        const missingCount = state.whatsappInstances.length - linkedIds.length;
+        const coverageBadge = missingCount > 0
+          ? `<br><span class="badge badge-warning" title="Faltando em ${missingCount} número(s)">Cobertura incompleta</span>`
+          : "";
+
+        return `${chips}${coverageBadge}`;
+      }
+
+      function normalizeComparable(value) {
+        return String(value || "")
           .normalize("NFD")
           .replace(/[\u0300-\u036f]/g, "")
           .trim()
           .toLowerCase();
+      }
 
+      function normalizeSegmentoOption(value) {
+        const normalized = normalizeComparable(value);
         if (!normalized) return "";
-        if (normalized === "pre-infancia" || normalized === "pre infancia") return "Pr\u00e9-Inf\u00e2ncia";
-        if (normalized === "infancia") return "Inf\u00e2ncia";
-        if (normalized === "adolescente" || (normalized.includes("adolesc") && !normalized.includes("maturidade"))) return "Adolescente";
-        if (normalized === "maturidade") return "Maturidade";
-        return "";
+
+        const match = state.profiles.find((profile) => normalizeComparable(profile) === normalized);
+        return match || "";
       }
 
       function matchesFilters(group) {
@@ -208,12 +245,16 @@
       }
 
       function renderGroups() {
+        const showInstanceColumn = hasMultipleInstances();
+        const colspan = showInstanceColumn ? 8 : 7;
+        document.getElementById("instanceColumnHeader").hidden = !showInstanceColumn;
+
         const filtered = state.groups.filter(matchesFilters);
         document.getElementById("resultCount").textContent = `${filtered.length} grupo(s)`;
 
         if (!filtered.length) {
           document.getElementById("groupsBody").innerHTML = `
-            <tr><td colspan="7"><div class="empty-state"><strong>Nenhum grupo encontrado</strong><span>Ajuste os filtros ou sincronize novamente com a Evolution API.</span></div></td></tr>`;
+            <tr><td colspan="${colspan}"><div class="empty-state"><strong>Nenhum grupo encontrado</strong><span>Ajuste os filtros ou sincronize novamente com a Evolution API.</span></div></td></tr>`;
           return;
         }
 
@@ -235,7 +276,11 @@
                 <td>${group.segmento ? escapeHtml(group.segmento) : '<span class="text-faint">-</span>'}</td>
                 <td>${classificationBadge(group)}</td>
                 <td>${enviaVideoBadge(group)}</td>
-                <td>${group.trilha_override ? escapeHtml(group.trilha_override) : '<span class="text-faint">Sem trilha</span>'}</td>
+                <td>${(() => {
+                  const trilhaLabel = resolveTrilhaLabel(group);
+                  return trilhaLabel ? escapeHtml(trilhaLabel) : '<span class="text-faint">Sem trilha</span>';
+                })()}</td>
+                ${showInstanceColumn ? `<td>${instanceCell(group)}</td>` : ""}
                 <td><button class="btn btn-secondary btn-sm" data-edit="${escapeHtml(group.id)}">Editar</button></td>
               </tr>`;
           })
@@ -257,6 +302,17 @@
         });
       }
 
+      function populateSegmentos(select) {
+        select.innerHTML = '<option value="">Sem perfil</option>';
+
+        state.profiles.forEach((profile) => {
+          const option = document.createElement("option");
+          option.value = profile;
+          option.textContent = profile;
+          select.appendChild(option);
+        });
+      }
+
       function openEdit(groupId) {
         const group = state.groups.find((item) => item.id === groupId);
         if (!group) return;
@@ -265,6 +321,7 @@
         document.getElementById("editTitle").textContent = `Editar - ${group.nome}`;
         populateOrganizations(document.getElementById("editOrg"));
         document.getElementById("editOrg").value = group.organization_id || "";
+        populateSegmentos(document.getElementById("editSegmento"));
         document.getElementById("editSegmento").value = normalizeSegmentoOption(group.segmento);
         document.getElementById("editEnviaVideo").checked = group.envia_video === true;
         document.getElementById("editStatus").textContent = "";
@@ -317,9 +374,10 @@
       }
 
       function renderLoadError(error) {
+        const colspan = hasMultipleInstances() ? 8 : 7;
         document.getElementById("resultCount").textContent = "";
         document.getElementById("groupsBody").innerHTML = `
-          <tr><td colspan="7"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+          <tr><td colspan="${colspan}"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
       }
 
       async function loadOrganizations() {
@@ -327,12 +385,49 @@
         state.organizations = Array.isArray(organizations) ? organizations : [];
       }
 
+      async function loadWhatsappInstances() {
+        const instances = await requestJson("/settings/whatsapp/instances");
+        state.whatsappInstances = Array.isArray(instances) ? instances : [];
+
+        const field = document.getElementById("instanceFilterField");
+        const select = document.getElementById("instanceFilter");
+
+        if (!hasMultipleInstances()) {
+          field.hidden = true;
+          return;
+        }
+
+        field.hidden = false;
+        select.innerHTML = '<option value="todos">Todos</option>' +
+          state.whatsappInstances
+            .map((instance) => `<option value="${escapeHtml(instance.id)}">${escapeHtml(instance.phone_number || instance.instance_name)}</option>`)
+            .join("");
+      }
+
+      async function loadProfiles() {
+        const profiles = await requestJson("/group-profiles");
+        state.profiles = Array.isArray(profiles) ? profiles.map((p) => p.nome) : [];
+      }
+
+      async function loadTrilhas() {
+        const trilhas = await requestJson("/trilhas");
+        const list = Array.isArray(trilhas) ? trilhas : [];
+        list.forEach((trail) => {
+          state.trilhaNameById.set(trail.id, `${trail.macrotema} - ${trail.trilha}`);
+        });
+      }
+
       async function loadGroups() {
+        const colspan = hasMultipleInstances() ? 8 : 7;
         document.getElementById("groupsBody").innerHTML = `
-          <tr><td colspan="7"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
+          <tr><td colspan="${colspan}"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
 
         try {
-          const groups = await requestJson("/groups/search");
+          const instanceFilter = document.getElementById("instanceFilter").value;
+          const query = instanceFilter && instanceFilter !== "todos"
+            ? `?whatsapp_instance_id=${encodeURIComponent(instanceFilter)}`
+            : "";
+          const groups = await requestJson(`/groups/search${query}`);
           state.groups = Array.isArray(groups) ? groups : [];
           renderGroups();
         } catch (error) {
@@ -345,6 +440,24 @@
           await loadOrganizations();
         } catch (error) {
           state.organizations = [];
+        }
+
+        try {
+          await loadProfiles();
+        } catch (error) {
+          state.profiles = [];
+        }
+
+        try {
+          await loadTrilhas();
+        } catch (error) {
+          state.trilhaNameById = new Map();
+        }
+
+        try {
+          await loadWhatsappInstances();
+        } catch (error) {
+          state.whatsappInstances = [];
         }
 
         await loadGroups();
@@ -407,6 +520,7 @@
       document.getElementById("saveEdit").addEventListener("click", saveEdit);
       document.getElementById("searchInput").addEventListener("input", renderGroups);
       document.getElementById("statusFilter").addEventListener("change", renderGroups);
+      document.getElementById("instanceFilter").addEventListener("change", loadGroups);
       document.getElementById("syncButton").addEventListener("click", syncGroups);
 
       initialize();

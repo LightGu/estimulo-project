@@ -1,3 +1,5 @@
+const defaultNotificationsService = require("./notifications.service");
+
 const APPROVED_VIDEO_STATUS = true;
 const END_OF_QUEUE_PAUSE_REASON = "end_of_queue";
 
@@ -70,6 +72,10 @@ function canEvaluateGroupVideoFlow(group = {}) {
   return group.envia_video !== false;
 }
 
+function resolveForcedNextVideoId(group = {}) {
+  return normalizeVideoId(group.forced_next_video_id || group.forcedNextVideoId || "") || null;
+}
+
 function selectNextApprovedUnsentVideo(params = {}) {
   const group = params.group || {};
   const trailId = resolveGroupTrailId(group);
@@ -78,13 +84,25 @@ function selectNextApprovedUnsentVideo(params = {}) {
     return undefined;
   }
 
+  const videos = params.videos || [];
+  const forcedVideoId = resolveForcedNextVideoId(group);
+
+  if (forcedVideoId) {
+    const forcedVideo = videos.find((video) => normalizeVideoId(resolveVideoId(video)) === forcedVideoId);
+
+    if (forcedVideo && isApprovedVideo(forcedVideo)) {
+      return forcedVideo;
+    }
+  }
+
+  const neverRepeatVideo = params.neverRepeatVideo !== false;
   const sentVideoIds = new Set((params.sentVideoIds || []).map(normalizeVideoId).filter(Boolean));
 
   // Quem chama ja filtra params.videos para conter apenas os vinculos daquela trilha
   // (via trilha_videos), com ordem injetada a partir de trilha_videos.ordem.
-  return (params.videos || [])
+  return videos
     .filter((video) => isApprovedVideo(video))
-    .filter((video) => !sentVideoIds.has(normalizeVideoId(resolveVideoId(video))))
+    .filter((video) => neverRepeatVideo === false || !sentVideoIds.has(normalizeVideoId(resolveVideoId(video))))
     .sort((left, right) => {
       const orderDifference = Number(left.ordem ?? left.ordem_geral ?? Number.MAX_SAFE_INTEGER) -
         Number(right.ordem ?? right.ordem_geral ?? Number.MAX_SAFE_INTEGER);
@@ -103,6 +121,16 @@ function selectNextApprovedUnsentVideo(params = {}) {
     })[0];
 }
 
+function resolveNeverRepeatVideo(params = {}) {
+  const dispatchRules = params.dispatchRules || params.dispatch_rules;
+
+  if (dispatchRules && typeof dispatchRules.never_repeat_video === "boolean") {
+    return dispatchRules.never_repeat_video;
+  }
+
+  return params.neverRepeatVideo !== false;
+}
+
 async function findNextApprovedUnsentVideo(params = {}) {
   const { group, repository } = params;
   const groupId = resolveGroupId(group);
@@ -111,9 +139,10 @@ async function findNextApprovedUnsentVideo(params = {}) {
     sentVideoIdsByGroup && groupId
       ? sentVideoIdsByGroup[groupId] || sentVideoIdsByGroup[resolveDispatchGroupId(group)]
       : undefined;
+  const neverRepeatVideo = resolveNeverRepeatVideo(params);
 
   if (repository && typeof repository.findNextApprovedUnsentVideoForGroup === "function") {
-    return repository.findNextApprovedUnsentVideoForGroup(group);
+    return repository.findNextApprovedUnsentVideoForGroup(group, { neverRepeatVideo });
   }
 
   if (repository && typeof repository.findNextEligibleVideoForGroup === "function") {
@@ -122,6 +151,7 @@ async function findNextApprovedUnsentVideo(params = {}) {
 
   return selectNextApprovedUnsentVideo({
     ...params,
+    neverRepeatVideo,
     sentVideoIds: sentVideoIds || params.sentVideoIds,
   });
 }
@@ -140,8 +170,18 @@ function buildEndOfQueueLogPayload(params = {}) {
   };
 }
 
+function resolveNotifyOnTrailFinished(params = {}) {
+  const dispatchRules = params.dispatchRules || params.dispatch_rules;
+
+  if (dispatchRules && typeof dispatchRules.notify_on_trail_finished === "boolean") {
+    return dispatchRules.notify_on_trail_finished;
+  }
+
+  return true;
+}
+
 async function pauseGroupForEndOfQueue(params = {}) {
-  const { group, repository, logger = console } = params;
+  const { group, repository, logger = console, notificationsService = defaultNotificationsService } = params;
   const pausedAt = params.pausedAt || new Date().toISOString();
 
   if (repository && typeof repository.pauseGroupVideoFlowForEndOfQueue === "function") {
@@ -162,6 +202,18 @@ async function pauseGroupForEndOfQueue(params = {}) {
 
   if (!isGroupPausedByEndOfQueue(group) && logger && typeof logger.info === "function") {
     logger.info(JSON.stringify(buildEndOfQueueLogPayload({ ...params, group, pausedAt })));
+  }
+
+  if (
+    notificationsService &&
+    typeof notificationsService.notifyTrailFinished === "function" &&
+    resolveNotifyOnTrailFinished(params)
+  ) {
+    await notificationsService.notifyTrailFinished({
+      groupId: resolveGroupId(group),
+      groupName: group.nome || group.name,
+      trilhaLabel: resolveGroupTrail(group),
+    });
   }
 }
 
@@ -216,6 +268,8 @@ async function resolveGroupVideoFlow(params = {}) {
 
   await resumeGroupVideoFlow(params);
 
+  const dispatchRules = params.dispatchRules || params.dispatch_rules || {};
+
   return {
     status: "eligible",
     group,
@@ -226,6 +280,9 @@ async function resolveGroupVideoFlow(params = {}) {
     trilha_id: resolveGroupTrailId(group),
     drive_file_id: video.drive_file_id || video.driveFileId,
     legenda: params.legenda || video.legenda || video.caption,
+    forced_next_video_id: resolveForcedNextVideoId(group) || undefined,
+    never_repeat_video: dispatchRules.never_repeat_video,
+    auto_generate_caption: dispatchRules.auto_generate_caption,
   };
 }
 

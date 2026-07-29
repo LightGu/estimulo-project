@@ -78,6 +78,7 @@
           <section class="page-section">
             <div class="section-head">
               <h2>Conteúdos enviados <span class="badge badge-neutral" id="resultCount"></span></h2>
+              <span class="text-muted" id="timezoneLabel"></span>
             </div>
             <div class="table-wrap">
               <table>
@@ -127,6 +128,7 @@
         organizations: [],
         groups: [],
         logs: [],
+        timezone: null,
       };
 
       function escapeHtml(value) {
@@ -157,6 +159,19 @@
           <tr><td colspan="7"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
       }
 
+      const DISPATCH_STATUS_TIP = {
+        pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
+        processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
+        enviado: "Entregue com sucesso ao grupo via Evolution API.",
+      };
+
+      function dispatchStatusTip(row) {
+        if (row.status === "erro" || row.status === "falhou") {
+          return row.mensagem_erro || "Falha no envio — motivo não informado.";
+        }
+        return DISPATCH_STATUS_TIP[row.status] || "";
+      }
+
       function campaignLabel(campaign) {
         if (!campaign) return "—";
         if (!campaign.data_envio) return campaign.trilha || "—";
@@ -174,6 +189,7 @@
           year: "numeric",
           hour: "2-digit",
           minute: "2-digit",
+          timeZone: state.timezone || undefined,
         });
       }
 
@@ -254,7 +270,7 @@
               <td class="strong">${escapeHtml(grupo)}</td>
               <td>${escapeHtml(campanha)}</td>
               <td>${escapeHtml(conteudo)}</td>
-              <td><span class="badge ${badgeClass}" title="${escapeHtml(r.mensagem_erro || "")}">${statusLabel}</span></td>
+              <td><span class="badge has-tip ${badgeClass}" data-tip="${escapeHtml(dispatchStatusTip(r))}" data-tip-tone="${badgeClass.replace("badge-", "")}">${statusLabel}</span></td>
             </tr>`;
           })
           .join("");
@@ -326,12 +342,15 @@
         document.getElementById("dataFim").max = todayIso;
 
         try {
-          const [organizations, groups] = await Promise.all([
+          const [organizations, groups, scheduleSettings] = await Promise.all([
             requestJson("/organizations"),
             requestJson("/groups/search"),
+            requestJson("/settings/schedule").catch(() => null),
           ]);
           state.organizations = Array.isArray(organizations) ? organizations : [];
           state.groups = Array.isArray(groups) ? groups : [];
+          state.timezone = (scheduleSettings && scheduleSettings.timezone) || null;
+          updateTimezoneLabel();
           populateFilters();
           await renderAll();
         } catch (error) {

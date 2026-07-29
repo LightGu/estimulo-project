@@ -62,7 +62,7 @@ function createGroupVideoProgressService(dependencies = {}) {
   const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
   const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
 
-  async function recordDelivery(payload) {
+  async function recordDelivery(payload, options = {}) {
     const groupId = payload?.group_id;
     const videoId = payload?.video_id;
 
@@ -88,6 +88,10 @@ function createGroupVideoProgressService(dependencies = {}) {
     const duplicate = await repository.hasDuplicate(groupId, videoId);
 
     if (duplicate) {
+      if (options.neverRepeatVideo === false) {
+        return repository.upsertDelivery(payload);
+      }
+
       throw new Error("Delivery already registered");
     }
 

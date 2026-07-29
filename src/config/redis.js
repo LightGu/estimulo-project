@@ -15,7 +15,15 @@ const redisConfig = {
 let sharedRedisConnection;
 
 function createRedisConnection() {
-  return new IORedis(redisConfig);
+  const connection = new IORedis(redisConfig);
+
+  connection.on("error", () => {
+    // Callers surface Redis availability where it matters (health checks,
+    // enqueue failures). Keeping a listener here avoids noisy unhandled events
+    // when the API is used without a local Redis instance.
+  });
+
+  return connection;
 }
 
 function getRedisConnection() {

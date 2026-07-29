@@ -63,6 +63,14 @@ erDiagram
         integer quantidade_membros
         timestamptz created_at
         timestamptz updated_at
+        varchar cliente_b2b
+        varchar segmentacao
+        varchar setor
+        varchar regiao
+        varchar cidade
+        varchar nome_projeto
+        integer maturidade
+        integer quantidade_membros
     }
 
     CAMPAIGNS {

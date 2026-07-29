@@ -43,28 +43,21 @@ SUPABASE_SERVICE_ROLE_KEY=change-me
 
 A chave `SUPABASE_SERVICE_ROLE_KEY` deve ficar restrita ao backend. Ela não deve ser exposta no frontend, em logs, em screenshots ou em repositórios públicos.
 
-### Provedor de IA
+### IA para legendas (Gemini)
 
-A geração de transcrição e legendas usa um adapter configurável. Defina `AI_PROVIDER` para alternar entre Gemini e GPT/OpenAI:
+A geracao de legenda/transcricao de videos usa exclusivamente o Gemini, via `GeminiAdapter` em `src/services/ai`:
 
 ```env
-AI_PROVIDER=gemini
 GEMINI_API_KEY=change-me
 GEMINI_TRANSCRIPTION_MODEL=gemini-flash-latest
 GEMINI_TEXT_MODEL=gemini-flash-latest
-
-# ou
-AI_PROVIDER=gpt
-OPENAI_API_KEY=change-me
-OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
-OPENAI_TRANSCRIPTION_LANGUAGE=pt
 ```
 
-Valores aceitos: `gemini`, `openai` ou `gpt`. Os adapters ficam em `src/services/ai`.
-
-## Como executar
-
-### Infraestrutura
+Essas variaveis servem apenas como valor inicial (seed). O modelo principal, a
+cascata de fallback e os prompts de geracao/revisao de legenda por agente
+(transcricao, geracao de legenda, revisao de legenda) sao configurados pela
+tela de Configuracoes e persistidos na tabela `settings` (coluna `ai_agents`),
+que passa a ser a fonte de verdade assim que o usuario salvar pela UI.
 
 Suba os serviços locais com Docker Compose:
 
@@ -72,13 +65,81 @@ Suba os serviços locais com Docker Compose:
 docker compose --env-file .env -f infra/docker-compose.yml up -d
 ```
 
-Quando for necessário apenas o Redis, por exemplo para desenvolver a API e os workers sem a Evolution API local, use:
+Se voce quiser subir apenas o Redis, sem Evolution API/Postgres:
 
 ```bash
 docker compose --env-file .env -f infra/docker-compose.yml up -d redis
 ```
 
-Verifique os containers:
+### Abrir o site local
+
+1. Garanta que o Redis esteja rodando.
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.yml up -d redis
+```
+
+2. Em outro terminal, suba a API:
+
+```bash
+npm run api
+```
+
+3. Abra o site pela URL servida pela API:
+
+```txt
+http://127.0.0.1:3000/app/index.html
+```
+
+Paginas uteis:
+
+```txt
+http://127.0.0.1:3000/app/grupos.html
+http://127.0.0.1:3000/app/organizacoes.html
+http://127.0.0.1:3000/app/trilhas.html
+```
+
+Evite abrir os arquivos HTML direto pelo explorador ou por Live Server como primeira opcao. As telas chamam endpoints como `/organizations` e `/groups/search`; quando a pagina e servida pela API na porta `3000`, essas chamadas vao para o lugar certo.
+
+O frontend tambem tem fallback para ambiente local: se voce abrir por outro servidor local, como `http://127.0.0.1:5500`, as chamadas conhecidas de API sao redirecionadas para `http://127.0.0.1:3000`. Mesmo assim, a API precisa estar rodando em `3000`.
+
+### Verificar se esta tudo de pe
+
+Com a API rodando:
+
+```bash
+curl http://127.0.0.1:3000/health
+curl http://127.0.0.1:3000/organizations
+curl http://127.0.0.1:3000/groups/search
+```
+
+Resultado esperado:
+
+- `/health` retorna `status: "ok"` e `checks.redis.status: "ok"`.
+- `/organizations` retorna a lista de organizacoes do Supabase.
+- `/groups/search` retorna a lista de grupos.
+
+Se `/health` responder que o Redis esta indisponivel, suba o Redis antes de testar filas, campanhas ou workers. As listagens simples podem funcionar sem Redis, mas os fluxos de fila dependem dele.
+
+### Fallback sem Docker Desktop
+
+Se o Docker Desktop estiver travado ou sem permissao para subir containers, da para rodar Redis pelo Ubuntu/WSL:
+
+```bash
+wsl -d Ubuntu -u root -- bash -lc "apt-get update && apt-get install -y redis-server"
+wsl -d Ubuntu -u root -- bash -lc "systemctl disable --now redis-server 2>/dev/null || true; systemctl mask redis-server 2>/dev/null || true; service redis-server stop 2>/dev/null || true; pkill -x redis-server 2>/dev/null || true"
+wsl -d Ubuntu -u root -- bash -lc "redis-server --daemonize yes --bind 127.0.0.1 --port 6379 --requirepass redis-local --dir /tmp --dbfilename estimulo-redis.rdb"
+```
+
+Teste no WSL:
+
+```bash
+wsl -d Ubuntu -- bash -lc "redis-cli -h 127.0.0.1 -a redis-local ping"
+```
+
+Se a API do Windows nao conseguir enxergar esse Redis do WSL, a alternativa mais simples continua sendo corrigir/subir o Docker Desktop e usar o Compose. Outra opcao e criar um `portproxy` do Windows para o IP do WSL, mas isso exige terminal como Administrador.
+
+### Verificar status
 
 ```bash
 docker compose --env-file .env -f infra/docker-compose.yml ps

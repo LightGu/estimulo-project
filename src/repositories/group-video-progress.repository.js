@@ -16,6 +16,26 @@ async function registerDelivery(payload, client) {
   return data;
 }
 
+// Usado quando a regra "nunca repetir video" esta desativada: o par (group_id,
+// video_id) e UNIQUE no banco, entao um reenvio forcado precisa atualizar
+// enviado_em na linha existente em vez de tentar inserir uma duplicata.
+async function upsertDelivery(payload, client) {
+  const { data, error } = await getClient(client)
+    .from("group_video_progress")
+    .upsert(
+      { ...payload, enviado_em: payload.enviado_em || new Date().toISOString() },
+      { onConflict: "group_id,video_id" }
+    )
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 async function listDelivered(groupId, client) {
   const { data, error } = await getClient(client)
     .from("group_video_progress")
@@ -80,4 +100,5 @@ module.exports = {
   listDelivered,
   listDeliveredWithVideo,
   registerDelivery,
+  upsertDelivery,
 };

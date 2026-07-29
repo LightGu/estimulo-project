@@ -102,6 +102,24 @@ curl -X POST http://localhost:8080/message/sendText/estimulo-mvp \
 
 Substitua `5511999999999` por um numero autorizado para teste.
 
+## Gerenciamento de instancias (multiplos numeros)
+
+O wrapper `src/services/evolution-instances.js` centraliza as chamadas de gerenciamento de
+instancia usadas pela tela de Configuracoes para conectar/remover numeros de WhatsApp:
+
+- `POST /instance/create` - cria uma nova instancia (`{instanceName, qrcode: true, integration: "WHATSAPP-BAILEYS"}`).
+- `GET /instance/connect/:instance` - retorna o QR Code para conectar a instancia.
+- `GET /instance/connectionState/:instance` - consulta o estado da conexao.
+- `DELETE /instance/logout/:instance` seguido de `DELETE /instance/delete/:instance` - desconecta e remove a instancia.
+- `GET /instance/fetchInstances` - lista instancias existentes.
+
+**Importante:** os nomes exatos dos campos retornados por `/instance/connect/:instance` (QR code)
+e `/instance/connectionState/:instance` (enum de estado) devem ser confirmados com uma chamada
+`curl` real contra o container em execucao antes de assumir o formato em codigo de producao -
+os nomes usados em `evolution-instances.js` (`data.base64`, `data.instance.state`) sao a
+suposicao inicial baseada na documentacao publica da Evolution API v2 e podem variar conforme a
+versao da imagem `evoapicloud/evolution-api`.
+
 ## Uso pela aplicacao
 
 O codigo da aplicacao nao deve chamar a Evolution API diretamente. Toda entrega para WhatsApp deve passar pelo wrapper `src/services/evolution.js`, que centraliza autenticacao, montagem do payload, escolha do endpoint e tratamento basico de erros.

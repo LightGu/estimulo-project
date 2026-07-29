@@ -10,8 +10,6 @@ const MOCK = {
     { id: "org-4", nome: "Cooperativa Eufrásio", grupos: 2 },
   ],
 
-  segments: ["Pré-Infância", "Infância", "Adolescência/Maturidade"],
-
   perfis: ["Maria", "Eufrásio", "Pré-infância"],
 
   groups: [

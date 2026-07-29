@@ -31,7 +31,6 @@
             <p>Visão consolidada dos envios de conteúdo da Estímulo.</p>
           </div>
           <div class="topbar-actions">
-            <span class="badge badge-info">Ambiente de demonstração</span>
             <div class="user-chip"><span class="avatar">LC</span> Lina Chaim</div>
           </div>
         </header>
@@ -70,11 +69,9 @@
                     <th>Organização</th>
                     <th>Grupos</th>
                     <th>Classificados</th>
-                    <th>Campanhas ativas</th>
                     <th>Enviados</th>
                     <th>Processando</th>
                     <th>Erros</th>
-                    <th>Pausas ativas/agendadas</th>
                   </tr>
                 </thead>
                 <tbody id="orgRollupBody"></tbody>
@@ -120,9 +117,9 @@
                 <strong>Classificar grupos</strong>
                 <span class="text-muted">Perfil, organização e trilha por grupo.</span>
               </a>
-              <a class="card card-pad" href="envio-manual.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
-                <strong>Enviar conteúdo agora</strong>
-                <span class="text-muted">Disparo manual para um grupo específico.</span>
+              <a class="card card-pad" href="mensagens.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
+                <strong>Disparador Pontual</strong>
+                <span class="text-muted">Mensagem avulsa para um ou mais grupos.</span>
               </a>
               <a class="card card-pad" href="campanhas.html" style="text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;">
                 <strong>Nova campanha</strong>
@@ -138,34 +135,112 @@
       </div>
     </div>
 
-    <script src="assets/js/mock-data.js"></script>
-    <script src="assets/js/helpers.js"></script>
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
-      const STATUS_BADGE = {
-        enviado: "badge-success",
-        processando: "badge-warning",
-        erro: "badge-danger",
+      const state = {
+        organizations: [],
+        groups: [],
+        campaigns: [],
+        todayDispatches: [],
+        allDispatches: [],
+      };
+
+      function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
+      }
+
+      function formatDateTime(iso) {
+        if (!iso) return "—";
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return iso;
+        return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+      }
+
+      const DISPATCH_STATUS_LABEL = { pendente: "Pendente", processando: "Processando", enviado: "Enviado", erro: "Erro", falhou: "Falhou" };
+      const DISPATCH_STATUS_BADGE = { pendente: "badge-neutral", processando: "badge-warning", enviado: "badge-success", erro: "badge-danger", falhou: "badge-danger" };
+      const DISPATCH_STATUS_TIP = {
+        pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
+        processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
+        enviado: "Entregue com sucesso ao grupo via Evolution API.",
+      };
+      function dispatchStatusTip(d) {
+        if (d.status === "erro" || d.status === "falhou") return d.mensagem_erro || "Falha no envio — motivo não informado.";
+        return DISPATCH_STATUS_TIP[d.status] || "";
+      }
+
+      const CAMPAIGN_STATUS_LABEL = { concluido: "Concluído", programado: "Programado", gerando_legendas: "Gerando legendas" };
+      const CAMPAIGN_STATUS_BADGE = { concluido: "badge-success", programado: "badge-info", gerando_legendas: "badge-warning" };
+      const CAMPAIGN_STATUS_TIP = {
+        concluido: "Todos os grupos já tiveram o envio finalizado (com sucesso ou erro definitivo).",
+        programado: "Aguardando o horário de disparo programado.",
+        gerando_legendas: "Gerando legendas por IA antes de liberar o disparo aos grupos.",
       };
 
       function renderKpis() {
-        const grupos = MOCK.groups;
-        const enviosHoje = MOCK.dispatchLog.filter((d) => d.tentativaEm.startsWith("2026-07-21"));
-        const erros = enviosHoje.filter((d) => d.status === "erro").length;
-        const taxaErro = enviosHoje.length ? Math.round((erros / enviosHoje.length) * 100) : 0;
-        const naoClassificados = grupos.filter((g) => !g.classificado).length;
+        const groups = state.groups;
+        const naoClassificados = groups.filter((g) => !g.segmento).length;
+        const campanhasAtivas = state.campaigns.filter((c) => c.status !== "concluido").length;
+
+        const enviosHoje = state.todayDispatches.length;
+        const errosHoje = state.todayDispatches.filter((d) => d.status === "erro" || d.status === "falhou").length;
+        const taxaErro = enviosHoje ? Math.round((errosHoje / enviosHoje) * 100) : 0;
 
         const cards = [
-          { label: "Grupos sincronizados", value: grupos.length, sub: `${naoClassificados} ainda não classificados`, bar: "var(--brand-blue)" },
-          { label: "Campanhas ativas", value: MOCK.campaigns.filter((c) => c.status !== "concluida").length, sub: `${MOCK.campaigns.length} no total`, bar: "var(--brand-purple)" },
-          { label: "Envios hoje", value: enviosHoje.length, sub: "Registrados no log de tentativas", bar: "var(--brand-teal)" },
-          { label: "Taxa de erro hoje", value: `${taxaErro}%`, sub: `${erros} tentativa(s) com falha`, bar: "var(--danger)" },
+          {
+            label: "Grupos sincronizados",
+            value: groups.length,
+            sub: `${naoClassificados} ainda não classificados`,
+            bar: "var(--brand-blue)",
+            tone: "info",
+            tip: "Total de grupos do WhatsApp já sincronizados via Evolution API, incluindo os que ainda não têm perfil definido.",
+          },
+          {
+            label: "Campanhas ativas",
+            value: campanhasAtivas,
+            sub: `${state.campaigns.length} no total`,
+            bar: "var(--brand-purple)",
+            tone: "info",
+            tip: "Campanhas que ainda não tiveram o envio finalizado para todos os grupos (status diferente de Concluído).",
+          },
+          {
+            label: "Envios hoje",
+            value: enviosHoje,
+            sub: "Registrados no log de tentativas",
+            bar: "var(--brand-teal)",
+            tone: "success",
+            tip: "Quantidade de tentativas de envio registradas hoje, somando todos os status (pendente, processando, enviado, erro e falhou).",
+          },
+          {
+            label: "Taxa de erro hoje",
+            value: `${taxaErro}%`,
+            sub: `${errosHoje} tentativa(s) com falha`,
+            bar: "var(--danger)",
+            tone: "danger",
+            tip: "Percentual das tentativas de hoje que terminaram em erro ou falha, sobre o total de tentativas do dia.",
+          },
         ];
 
         document.getElementById("kpiGrid").innerHTML = cards
           .map(
             (c) => `
-            <div class="card stat-card" style="--accent-bar:${c.bar}">
+            <div class="card stat-card has-tip" style="--accent-bar:${c.bar}" data-tip="${escapeHtml(c.tip)}" data-tip-tone="${c.tone}">
               <span class="stat-label">${c.label}</span>
               <span class="stat-value">${c.value}</span>
               <span class="stat-sub">${c.sub}</span>
@@ -175,49 +250,71 @@
       }
 
       function renderDispatchLog() {
-        const rows = MOCK.dispatchLog.slice(0, 5);
+        const rows = state.allDispatches.slice(0, 5);
+
+        if (!rows.length) {
+          document.getElementById("dispatchBody").innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Nenhuma tentativa de envio registrada ainda</strong></div></td></tr>`;
+          return;
+        }
+
         document.getElementById("dispatchBody").innerHTML = rows
           .map(
             (d) => `
             <tr>
-              <td class="strong">${d.grupo}</td>
-              <td>${d.campanha}</td>
-              <td>${d.video}</td>
-              <td><span class="badge ${STATUS_BADGE[d.status]}">${d.status}</span></td>
-              <td class="mono">${d.tentativaEm}</td>
+              <td class="strong">${escapeHtml(d.groups?.nome || "—")}</td>
+              <td>${escapeHtml(d.campaigns?.trilha || "—")}</td>
+              <td>${escapeHtml(d.video_catalog?.nome_do_arquivo || "—")}</td>
+              <td><span class="badge has-tip ${DISPATCH_STATUS_BADGE[d.status] || "badge-neutral"}" data-tip="${escapeHtml(dispatchStatusTip(d))}" data-tip-tone="${(DISPATCH_STATUS_BADGE[d.status] || "badge-neutral").replace("badge-", "")}">${DISPATCH_STATUS_LABEL[d.status] || escapeHtml(d.status)}</span></td>
+              <td class="mono">${formatDateTime(d.criado_em)}</td>
             </tr>`
           )
           .join("");
       }
 
-      function renderCampaignCards() {
-        const cards = MOCK.campaigns.slice(0, 3).map((c) => {
-          const pct = c.gruposTotal ? Math.round((c.gruposEnviados / c.gruposTotal) * 100) : 0;
-          return `
-            <div class="card card-pad">
-              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                <strong>${campaignLabel(c)}</strong>
-                <span class="badge ${campaignStatusBadgeClass(c.status)}">${campaignStatusLabel(c.status)}</span>
-              </div>
-              <div class="progress" style="margin-top:14px;"><span style="width:${pct}%"></span></div>
-              <p class="text-faint" style="margin-top:6px;">${c.gruposEnviados}/${c.gruposTotal} grupos enviados</p>
-            </div>`;
-        });
-        document.getElementById("campaignCards").innerHTML = cards.join("");
-      }
+      async function renderCampaignCards() {
+        const top = state.campaigns.slice(0, 3);
 
-      function orgIdForGroupName(nome) {
-        const g = MOCK.groups.find((gr) => gr.nome === nome);
-        return g ? g.organizationId : null;
+        if (!top.length) {
+          document.getElementById("campaignCards").innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><strong>Nenhuma campanha cadastrada ainda</strong></div>`;
+          return;
+        }
+
+        const withProgress = await Promise.all(
+          top.map(async (c) => {
+            try {
+              const groupsDetail = await requestJson(`/campaigns/${c.id}/groups`);
+              return { ...c, gruposEnviados: groupsDetail.filter((g) => g.status === "enviado").length };
+            } catch (error) {
+              return { ...c, gruposEnviados: null };
+            }
+          })
+        );
+
+        document.getElementById("campaignCards").innerHTML = withProgress
+          .map((c) => {
+            const total = Number(c.grupos_total || 0);
+            const enviados = c.gruposEnviados ?? 0;
+            const pct = total ? Math.round((enviados / total) * 100) : 0;
+            return `
+              <div class="card card-pad">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                  <strong>${escapeHtml(c.trilha || c.nome || "Campanha")}</strong>
+                  <span class="badge has-tip ${CAMPAIGN_STATUS_BADGE[c.status] || "badge-neutral"}" data-tip="${escapeHtml(CAMPAIGN_STATUS_TIP[c.status] || "")}" data-tip-tone="${(CAMPAIGN_STATUS_BADGE[c.status] || "badge-neutral").replace("badge-", "")}">${CAMPAIGN_STATUS_LABEL[c.status] || escapeHtml(c.status)}</span>
+                </div>
+                <div class="progress" style="margin-top:14px;"><span style="width:${pct}%"></span></div>
+                <p class="text-faint" style="margin-top:6px;">${c.gruposEnviados === null ? "—" : `${enviados}/${total} grupos enviados`}</p>
+              </div>`;
+          })
+          .join("");
       }
 
       function populateRollupFilters() {
         document.getElementById("orgRollupFilter").innerHTML =
-          '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.id}">${o.nome}</option>`).join("");
+          '<option value="todas">Todas</option>' + state.organizations.map((o) => `<option value="${o.id}">${escapeHtml(o.nome)}</option>`).join("");
 
-        const campanhas = Array.from(new Set(MOCK.dispatchLog.map((d) => d.campanha)));
+        const campanhas = Array.from(new Set(state.allDispatches.map((d) => d.campaigns?.trilha).filter(Boolean)));
         document.getElementById("campanhaRollupFilter").innerHTML =
-          '<option value="todas">Todas</option>' + campanhas.map((c) => `<option value="${c}">${c}</option>`).join("");
+          '<option value="todas">Todas</option>' + campanhas.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
       }
 
       function filteredDispatchForRollup() {
@@ -225,9 +322,9 @@
         const dIni = document.getElementById("rollupDataInicio").value;
         const dFim = document.getElementById("rollupDataFim").value;
 
-        return MOCK.dispatchLog.filter((d) => {
-          if (campanha !== "todas" && d.campanha !== campanha) return false;
-          const day = d.tentativaEm.slice(0, 10);
+        return state.allDispatches.filter((d) => {
+          if (campanha !== "todas" && d.campaigns?.trilha !== campanha) return false;
+          const day = (d.criado_em || "").slice(0, 10);
           if (dIni && day < dIni) return false;
           if (dFim && day > dFim) return false;
           return true;
@@ -237,34 +334,27 @@
       function renderOrgRollup() {
         const orgFilter = document.getElementById("orgRollupFilter").value;
         const dispatches = filteredDispatchForRollup();
-        const orgs = MOCK.organizations.filter((o) => orgFilter === "todas" || o.id === orgFilter);
+        const orgs = state.organizations.filter((o) => orgFilter === "todas" || o.id === orgFilter);
+
+        if (!orgs.length) {
+          document.getElementById("orgRollupBody").innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>Nenhuma organização encontrada</strong></div></td></tr>`;
+          return;
+        }
 
         document.getElementById("orgRollupBody").innerHTML = orgs
           .map((org) => {
-            const groups = MOCK.groups.filter((g) => g.organizationId === org.id);
-            const groupNames = groups.map((g) => g.nome);
-            const orgDispatches = dispatches.filter((d) => groupNames.includes(d.grupo));
-
-            const campanhasAtivasCount = MOCK.campaigns.filter(
-              (c) => c.status !== "concluida" && c.status !== "rascunho" && MOCK.groups.some((g) => g.organizationId === org.id && g.trilha === c.trilha)
-            ).length;
-
-            const pausasAtivas = MOCK.pauses.filter((p) => {
-              if (p.status === "encerrada") return false;
-              if (p.escopo === "organizacao") return p.alvoId === org.id;
-              return groups.some((g) => g.id === p.alvoId);
-            }).length;
+            const groups = state.groups.filter((g) => g.organization_id === org.id);
+            const groupIds = new Set(groups.map((g) => g.id));
+            const orgDispatches = dispatches.filter((d) => groupIds.has(d.group_id));
 
             return `
               <tr>
-                <td class="strong">${org.nome}</td>
+                <td class="strong">${escapeHtml(org.nome)}</td>
                 <td>${groups.length}</td>
-                <td>${groups.filter((g) => g.classificado).length}</td>
-                <td>${campanhasAtivasCount}</td>
+                <td>${groups.filter((g) => g.segmento).length}</td>
                 <td>${orgDispatches.filter((d) => d.status === "enviado").length}</td>
                 <td>${orgDispatches.filter((d) => d.status === "processando").length}</td>
-                <td>${orgDispatches.filter((d) => d.status === "erro").length}</td>
-                <td>${pausasAtivas}</td>
+                <td>${orgDispatches.filter((d) => d.status === "erro" || d.status === "falhou").length}</td>
               </tr>`;
           })
           .join("");
@@ -274,11 +364,39 @@
         document.getElementById(id).addEventListener("input", renderOrgRollup)
       );
 
-      renderKpis();
-      renderDispatchLog();
-      renderCampaignCards();
-      populateRollupFilters();
-      renderOrgRollup();
+      async function loadDashboard() {
+        const today = new Date().toISOString().slice(0, 10);
+
+        try {
+          const [organizations, groups, campaigns, todayDispatches, allDispatches] = await Promise.all([
+            requestJson("/organizations"),
+            requestJson("/groups/search"),
+            requestJson("/campaigns"),
+            requestJson(`/reports/dispatches?start_date=${today}&end_date=${today}`),
+            requestJson("/reports/dispatches"),
+          ]);
+
+          state.organizations = organizations;
+          state.groups = groups;
+          state.campaigns = campaigns;
+          state.todayDispatches = todayDispatches;
+          state.allDispatches = allDispatches;
+
+          renderKpis();
+          renderDispatchLog();
+          populateRollupFilters();
+          renderOrgRollup();
+          await renderCampaignCards();
+        } catch (error) {
+          document.getElementById("kpiGrid").innerHTML = `
+            <div class="empty-state" style="grid-column:1/-1;">
+              <strong>Falha ao carregar o painel</strong>
+              <span>${escapeHtml(error.message)}</span>
+            </div>`;
+        }
+      }
+
+      loadDashboard();
     </script>
   </body>
 </html>
