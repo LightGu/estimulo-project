@@ -89,7 +89,7 @@
                 <div class="field-row" style="grid-template-columns:1fr 1fr;">
                   <div class="field">
                     <label>Status da conexão</label>
-                    <div><span class="badge badge-success" id="driveStatusBadge">Conectado</span></div>
+                    <div><span class="badge has-tip badge-success" id="driveStatusBadge" data-tip="Conexão ativa e funcionando normalmente." data-tip-tone="success">Conectado</span></div>
                   </div>
                   <div class="field">
                     <label for="driveIndexTime">Horário da indexação diária</label>
@@ -260,6 +260,7 @@
 
     <script src="assets/js/mock-data.js"></script>
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       function simulateAction(buttonId, statusId, runningText, doneText) {
         const button = document.getElementById(buttonId);

@@ -107,6 +107,7 @@
     </div>
 
     <script src="assets/js/nav.js"></script>
+    <script src="assets/js/tooltip.js"></script>
     <script>
       const state = {
         campaigns: [],
@@ -144,6 +145,11 @@
 
       function statusBadgeClass(status) {
         return status === "concluido" ? "badge-success" : "badge-info";
+      }
+
+      function statusTip(status) {
+        if (status === "concluido") return "Todos os grupos já tiveram o envio finalizado (com sucesso ou erro definitivo).";
+        return "Aguardando o horário de disparo programado.";
       }
 
       function dispatchStatusLabel(status) {
@@ -262,7 +268,7 @@
                 <tr class="group-row" data-group-id="${escapeHtml(g.group_id)}" data-video-id="${escapeHtml(g.video_id || "")}">
                   <td class="strong">${escapeHtml(g.nome || g.group_id)}</td>
                   <td class="mono">${escapeHtml(g.video_id || "—")}</td>
-                  <td><span class="badge ${dispatchStatusBadgeClass(g.status)}">${dispatchStatusLabel(g.status)}</span></td>
+                  <td><span class="badge has-tip ${dispatchStatusBadgeClass(g.status)}" data-tip="${escapeHtml(dispatchStatusTip(g.status))}" data-tip-tone="${dispatchStatusBadgeClass(g.status).replace("badge-", "")}">${dispatchStatusLabel(g.status)}</span></td>
                   <td class="mono">${escapeHtml(g.criado_em || "—")}</td>
                 </tr>`
             )

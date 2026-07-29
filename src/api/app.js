@@ -1,4 +1,5 @@
 const express = require("express");
+const cors = require("cors");
 const path = require("node:path");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createCampaignVideoCaptionsController = require("./controllers/campaign-video-captions.controller");
@@ -6,6 +7,7 @@ const createGroupProfilesController = require("./controllers/group-profiles.cont
 const createGroupsController = require("./controllers/groups.controller");
 const createGroupVideoProgressController = require("./controllers/group-video-progress.controller");
 const createHealthController = require("./controllers/health.controller");
+const createMensagensController = require("./controllers/mensagens.controller");
 const createOrganizationsController = require("./controllers/organizations.controller");
 const createReportController = require("./controllers/report.controller");
 const createSettingsController = require("./controllers/settings.controller");
@@ -18,6 +20,7 @@ const dispatchLogsService = require("../services/dispatch-logs.service");
 const groupProfilesService = require("../services/group-profiles.service");
 const groupsService = require("../services/groups.service");
 const groupVideoProgressService = require("../services/group-video-progress.service");
+const mensagensService = require("../services/mensagens.service");
 const organizationsService = require("../services/organizations.service");
 const settingsService = require("../services/settings.service");
 const trilhasService = require("../services/trilhas.service");
@@ -26,6 +29,23 @@ const whatsappInstancesService = require("../services/whatsapp-instances.service
 
 function createApp(dependencies = {}) {
   const app = express();
+  app.use(
+    cors({
+      origin(origin, callback) {
+        if (!origin || origin === "null") {
+          callback(null, true);
+          return;
+        }
+
+        try {
+          const url = new URL(origin);
+          callback(null, ["localhost", "127.0.0.1", "::1"].includes(url.hostname));
+        } catch (error) {
+          callback(null, false);
+        }
+      },
+    })
+  );
   app.use(express.json());
   app.use(express.static(path.join(__dirname, "../../public")));
 
@@ -52,6 +72,7 @@ function createApp(dependencies = {}) {
     groupVideoProgressService: groupVideoProgressServiceDependency,
   });
   const healthController = createHealthController(dependencies.healthController || {});
+  const mensagensController = createMensagensController({ mensagensService: mensagensServiceDependency });
   const organizationsController = createOrganizationsController({ organizationService });
   const reportController = createReportController({ dispatchLogsService: dispatchLogsServiceDependency });
   const settingsController = createSettingsController({ settingsService: settingsServiceDependency });
