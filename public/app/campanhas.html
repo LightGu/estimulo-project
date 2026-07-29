@@ -52,7 +52,7 @@
                     <th>Campanha</th>
                     <th>Quantidade de grupos</th>
                     <th>Status</th>
-                    <th>Data de disparo</th>
+                    <th>Período de envio</th>
                   </tr>
                 </thead>
                 <tbody id="campaignsBody"></tbody>
@@ -170,15 +170,25 @@
         return "badge-warning";
       }
 
-      function dispatchStatusTip(status) {
-        const tips = {
-          pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
-          processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
-          enviado: "Entregue com sucesso ao grupo via Evolution API.",
-          erro: "Falha no envio. Veja o relatório operacional para mais detalhes.",
-          falhou: "Falha no envio. Veja o relatório operacional para mais detalhes.",
-        };
-        return tips[status] || "";
+      function formatDispatchDateTime(value) {
+        if (!value) return null;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return null;
+        return date.toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+      }
+
+      function dispatchPeriodLabel(campaign) {
+        const start = formatDispatchDateTime(campaign.window_start);
+        const end = formatDispatchDateTime(campaign.window_end);
+
+        if (!start && !end) return "—";
+        if (start && end) return `${start} – ${end}`;
+        return start || end;
       }
 
       function captionStatusLabel(status) {
@@ -203,8 +213,8 @@
               <tr class="campaign-row" data-campaign-id="${escapeHtml(c.id)}">
                 <td class="strong">${escapeHtml(campaignName(c))}</td>
                 <td>${Number(c.grupos_total || 0)}</td>
-                <td><span class="badge has-tip ${statusBadgeClass(c.status)}" data-tip="${escapeHtml(statusTip(c.status))}" data-tip-tone="${statusBadgeClass(c.status).replace("badge-", "")}">${statusLabel(c.status)}</span></td>
-                <td class="mono">${escapeHtml(c.data_envio || "—")}</td>
+                <td><span class="badge ${statusBadgeClass(c.status)}">${statusLabel(c.status)}</span></td>
+                <td class="mono">${escapeHtml(dispatchPeriodLabel(c))}</td>
               </tr>`
           )
           .join("");

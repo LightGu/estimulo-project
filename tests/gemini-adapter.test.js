@@ -116,10 +116,98 @@ async function testGenerateCaptionDeletesFileEvenWhenUploadQuotaExceeded() {
   assert.equal(fetchImplementation.calls.length, 1);
 }
 
+async function testGenerateCaptionFallsBackWhenModelOverloaded() {
+  // Erro "high demand" (modelo sobrecarregado, status 503) deve ser tratado como
+  // skippable e acionar o proximo modelo da cascata de fallback, em vez de falhar.
+  const previousFallbacks = process.env.GEMINI_TRANSCRIPTION_MODEL_FALLBACKS;
+  process.env.GEMINI_TRANSCRIPTION_MODEL_FALLBACKS = "gemini-flash-latest";
+
+  try {
+    const fetchImplementation = createFetchSequence([
+      // upload start
+      async () =>
+        jsonResponse({}, { headers: { "x-goog-upload-url": "https://upload.example/resumable" } }),
+      // upload bytes
+      async () => jsonResponse({ file: { name: "files/hd", uri: "https://files.example/hd", state: "ACTIVE" } }),
+      // generateContent no primeiro modelo -> sobrecarregado
+      async () =>
+        jsonResponse(
+          { error: { message: "This model is currently experiencing high demand. Please try again later." } },
+          { ok: false, status: 503, statusText: "Service Unavailable" }
+        ),
+      // generateContent no modelo de fallback -> sucesso
+      async () =>
+        jsonResponse({
+          candidates: [{ content: { parts: [{ text: "Transcricao via fallback" }] } }],
+        }),
+      // delete
+      async (url, init) => {
+        assert.equal(init.method, "DELETE");
+        return jsonResponse({});
+      },
+    ]);
+
+    const adapter = new GeminiAdapter({ apiKey: "test-key", fetch: fetchImplementation, model: "gemini-3.5-flash" });
+    const text = await adapter.generateCaption(createDownloadedVideo());
+
+    assert.equal(text, "Transcricao via fallback");
+    // upload + wait + generate(fail) + generate(fallback ok) + delete
+    assert.equal(fetchImplementation.calls.length, 5);
+  } finally {
+    if (previousFallbacks === undefined) {
+      delete process.env.GEMINI_TRANSCRIPTION_MODEL_FALLBACKS;
+    } else {
+      process.env.GEMINI_TRANSCRIPTION_MODEL_FALLBACKS = previousFallbacks;
+    }
+  }
+}
+
+async function testGenerateTextFallsBackWhenQuotaExceeded() {
+  // Reproduz o erro reportado em producao: GEMINI_TEXT_MODEL (usado para gerar o
+  // texto da legenda a partir da transcricao) estourou a cota do free tier. Antes
+  // desse fix generateText nao tinha cascata de fallback, entao o dispatch falhava
+  // em vez de cair para o proximo modelo configurado em GEMINI_TEXT_MODEL_FALLBACKS.
+  const previousFallbacks = process.env.GEMINI_TEXT_MODEL_FALLBACKS;
+  process.env.GEMINI_TEXT_MODEL_FALLBACKS = "gemini-flash-latest";
+
+  try {
+    const fetchImplementation = createFetchSequence([
+      async () =>
+        jsonResponse(
+          {
+            error: {
+              message:
+                "You exceeded your current quota, please check your plan and billing details.\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3.6-flash",
+            },
+          },
+          { ok: false, status: 429, statusText: "Too Many Requests" }
+        ),
+      async () =>
+        jsonResponse({
+          candidates: [{ content: { parts: [{ text: "Legenda gerada pelo modelo de fallback" }] } }],
+        }),
+    ]);
+
+    const adapter = new GeminiAdapter({ apiKey: "test-key", fetch: fetchImplementation, model: "gemini-3.6-flash" });
+    const text = await adapter.generateText("gere a legenda");
+
+    assert.equal(text, "Legenda gerada pelo modelo de fallback");
+    assert.equal(fetchImplementation.calls.length, 2);
+  } finally {
+    if (previousFallbacks === undefined) {
+      delete process.env.GEMINI_TEXT_MODEL_FALLBACKS;
+    } else {
+      process.env.GEMINI_TEXT_MODEL_FALLBACKS = previousFallbacks;
+    }
+  }
+}
+
 async function main() {
   await testGenerateCaptionDeletesFileAfterSuccess();
   await testGenerateCaptionDeletesFileEvenWhenGenerateContentFails();
   await testGenerateCaptionDeletesFileEvenWhenUploadQuotaExceeded();
+  await testGenerateCaptionFallsBackWhenModelOverloaded();
+  await testGenerateTextFallsBackWhenQuotaExceeded();
 
   console.log("gemini-adapter tests OK");
 }

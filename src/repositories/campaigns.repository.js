@@ -41,18 +41,18 @@ async function listActive(client) {
   return data || [];
 }
 
-async function findByData(dataEnvio, client) {
+async function listByStatusOlderThan(status, cutoffDate, client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
     .select("*")
-    .eq("data_envio", dataEnvio)
-    .maybeSingle();
+    .eq("status", status)
+    .lt("status_changed_at", cutoffDate instanceof Date ? cutoffDate.toISOString() : cutoffDate);
 
   if (error) {
     throw error;
   }
 
-  return data || null;
+  return data || [];
 }
 
 async function create(payload, client) {
@@ -103,9 +103,9 @@ module.exports = {
   create,
   delete: remove,
   findAll,
-  findByData,
   findById,
   listActive,
+  listByStatusOlderThan,
   remove,
   update,
 };
