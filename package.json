@@ -1,8 +1,8 @@
 {
   "name": "estimulo-project",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend de disparo automatizado de trilhas de video no WhatsApp (API Express + workers BullMQ + Supabase).",
+  "main": "scripts/start-api.js",
   "directories": {
     "doc": "docs",
     "test": "tests"
@@ -15,6 +15,7 @@
     "queue:dispatch:worker": "node scripts/start-dispatch-worker.js",
     "queue:dispatch-review-timeout:worker": "node scripts/start-dispatch-review-timeout-worker.js",
     "queue:dispatch-failure-retry:worker": "node scripts/start-dispatch-failure-retry-worker.js",
+    "queue:mensagens-dispatch:worker": "node scripts/start-mensagens-dispatch-worker.js",
     "queue:group-sync:worker": "node scripts/start-group-sync-worker.js",
     "queue:drive-video-index:test": "node scripts/enqueue-google-drive-video-index.js",
     "queue:drive-video-index:worker": "node scripts/start-google-drive-video-index-worker.js",
@@ -35,7 +36,7 @@
     "seed": "node scripts/seed.js",
     "transcribe-videos": "node scripts/transcribe-all-videos.js",
     "gemini:files-cleanup": "node scripts/gemini-files-cleanup.js",
-    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/trilhas-repository.test.js && node tests/services.test.js && node tests/gemini-adapter.test.js && node tests/ai-settings-service.test.js && node tests/video-transcription-service.test.js && node tests/video-captions-service.test.js && node tests/google-drive-video-indexer.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/dispatch-google-drive-video.test.js && node tests/campaign-trigger-processor.test.js && node tests/group-sync-schedule.test.js && node tests/settings-repository.test.js && node tests/settings-service.test.js && node tests/group-profiles-repository.test.js && node tests/group-profiles-service.test.js && node tests/whatsapp-instances-repository.test.js && node tests/whatsapp-instances-service.test.js && node tests/dispatch-jitter-instance-rotation.test.js && node tests/dispatch-instance-sender-resolution.test.js && node tests/notifications-service.test.js && node tests/campaign-groups-repository.test.js && node tests/dispatch-notifications.test.js && node tests/campaign-video-captions-service.test.js"
+    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/trilhas-repository.test.js && node tests/services.test.js && node tests/gemini-adapter.test.js && node tests/ai-settings-service.test.js && node tests/video-transcription-service.test.js && node tests/video-captions-service.test.js && node tests/google-drive-video-indexer.test.js && node tests/google-drive-video-download.test.js && node tests/google-drive-video-index-state.test.js && node tests/google-drive-video-index-schedule.test.js && node tests/network-config.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/dispatch-google-drive-video.test.js && node tests/campaign-trigger-processor.test.js && node tests/group-sync-schedule.test.js && node tests/settings-repository.test.js && node tests/settings-service.test.js && node tests/group-profiles-repository.test.js && node tests/group-profiles-service.test.js && node tests/whatsapp-instances-repository.test.js && node tests/whatsapp-instances-service.test.js && node tests/dispatch-jitter-instance-rotation.test.js && node tests/dispatch-instance-sender-resolution.test.js && node tests/notifications-service.test.js && node tests/campaign-groups-repository.test.js && node tests/dispatch-notifications.test.js && node tests/campaign-video-captions-service.test.js"
   },
   "repository": {
     "type": "git",
@@ -50,10 +51,6 @@
   },
   "homepage": "https://github.com/LightGu/estimulo-project#readme",
   "dependencies": {
-    "@langchain/core": "^1.2.2",
-    "@langchain/langgraph": "^1.4.7",
-    "@langchain/openai": "^1.5.4",
-    "@prisma/client": "^7.8.0",
     "@supabase/supabase-js": "^2.49.1",
     "axios": "^1.18.1",
     "bullmq": "^5.79.3",
@@ -61,9 +58,6 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "googleapis": "^173.0.0",
-    "helmet": "^8.2.0",
-    "ioredis": "^5.11.1",
-    "pino": "^10.3.1",
-    "zod": "^4.4.3"
+    "ioredis": "^5.11.1"
   }
 }

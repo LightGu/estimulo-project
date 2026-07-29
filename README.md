@@ -169,13 +169,24 @@ A service role key deve ser usada apenas no backend. Nunca exponha `SUPABASE_SER
 
 1. Crie um projeto no Supabase.
 2. Copie o URL e as chaves para o arquivo `.env`.
-3. Execute a migration contida em `supabase/migrations/202607140001_create_mvp_schema.sql` no SQL Editor do Supabase, na mesma instância do projeto.
+3. Aplique as migrations de `supabase/migrations/` no projeto, em ordem de nome de arquivo.
 
-### Como executar a migration
+### Como aplicar as migrations
+
+Com o Supabase CLI, apontando para o projeto correto:
 
 ```bash
-npm run db:test
+supabase link --project-ref SEU_PROJECT_REF
+supabase db push
 ```
+
+`supabase/migrations/` é a única fonte de verdade do schema. As migrations são
+incrementais e dependentes de ordem: aplicar só a primeira (`202607140001_create_mvp_schema.sql`)
+não deixa o banco no estado que a aplicação espera. Depois de aplicar, confirme
+a conexão com `npm run db:test`.
+
+O diretório `supabase/.temp/` é cache local do CLI e não deve ser versionado:
+ele guarda o project ref e a URL do pooler do banco.
 
 ### Como executar o seed
 
@@ -207,3 +218,22 @@ npm run db:test
 
 - `POST /campaigns`: cria campanhas usando o serviço existente.
 - `GET /health`: devolve status geral do sistema, Redis, fila BullMQ e último dispatch.
+
+## Processos em produção
+
+A API não executa fila nenhuma. Cada worker é um processo separado e todos
+precisam estar de pé, além do Redis:
+
+| Processo | Comando | Papel |
+| --- | --- | --- |
+| API | `npm run api` | HTTP + frontend estático em `/app` |
+| Campaign trigger | `npm run queue:campaign-trigger:worker` | Agenda e dispara campanhas recorrentes |
+| Dispatch | `npm run queue:dispatch:worker` | Envio de vídeo/legenda para os grupos |
+| Dispatch review timeout | `npm run queue:dispatch-review-timeout:worker` | Expira revisões de legenda pendentes |
+| Dispatch failure retry | `npm run queue:dispatch-failure-retry:worker` | Reprocessa envios que falharam |
+| Mensagens (disparo pontual) | `npm run queue:mensagens-dispatch:worker` | Fila da tela "Disparador Pontual" |
+| Group sync | `npm run queue:group-sync:worker` | Sincroniza grupos e contagem de membros |
+| Drive video index | `npm run queue:drive-video-index:worker` | Indexa e transcreve vídeos do Google Drive |
+
+Sem o worker de `mensagens-dispatch`, a tela de Disparador Pontual enfileira o
+envio e nada acontece.

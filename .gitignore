@@ -31,12 +31,24 @@ tmp/
 storage/*
 !storage/.gitkeep
 
-# Prisma/local database artifacts
+# Supabase CLI local state (contem project ref e pooler URL)
+supabase/.temp/
+supabase/.branches/
+
+# Local database artifacts
 *.db
 *.db-journal
+
+# Arquivos temporarios de investigacao manual
+scratch_*
+*.inspect.ndjson
+
+# Staging da refatoracao: codigo legado a ser removido manualmente
+_codigo-sem-uso/
 
 # OS/editor files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+.claude/settings.local.json
