@@ -1,10 +1,18 @@
 const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const groupProfilesService = require("./group-profiles.service");
 const { normalizePerfis } = require("../domain/trail-profiles");
 
 function createTrilhasService(dependencies = {}) {
   const repository = dependencies.repository || trilhasRepository;
   const videoRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
+  const profilesService = dependencies.groupProfilesService || groupProfilesService;
+
+  async function listValidPerfilNames() {
+    const profiles = await profilesService.list();
+
+    return profiles.map((profile) => profile.nome);
+  }
 
   async function requireTrilha(trilhaId) {
     const trimmed = String(trilhaId || "").trim();
@@ -152,7 +160,10 @@ function createTrilhasService(dependencies = {}) {
     const videoIds = Array.isArray(payload?.video_ids)
       ? payload.video_ids.map((id) => String(id || "").trim()).filter(Boolean)
       : [];
-    const perfis = normalizePerfis(payload?.perfis !== undefined ? payload.perfis : [payload?.perfil_da_jornada]);
+    const validPerfis = await listValidPerfilNames();
+    const perfis = normalizePerfis(payload?.perfis !== undefined ? payload.perfis : [payload?.perfil_da_jornada], {
+      validPerfis,
+    });
 
     if (!macrotema) {
       throw new Error("Macrotema is required");
@@ -308,7 +319,8 @@ function createTrilhasService(dependencies = {}) {
 
   async function updateTrailPerfis(trilhaId, perfis) {
     const trilha = await requireTrilha(trilhaId);
-    const normalizedPerfis = normalizePerfis(perfis);
+    const validPerfis = await listValidPerfilNames();
+    const normalizedPerfis = normalizePerfis(perfis, { validPerfis });
 
     await repository.setTrailPerfis(trilha.id, normalizedPerfis);
 

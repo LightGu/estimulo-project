@@ -55,6 +55,21 @@ const noCaptionsRepository = {
   listByCampaign: async () => [],
 };
 
+// Nenhum teste deste arquivo cadastra multiplas instancias WhatsApp - o
+// comportamento esperado (e o unico exercitado aqui) e o modo legado de
+// numero unico, onde nenhum grupo e filtrado e nenhuma instancia e resolvida.
+const fakeWhatsappInstancesRepository = {
+  listActive: async () => [],
+};
+const fakeWhatsappInstancesService = {
+  filterDispatchableGroups: async (groupIds) => ({ eligible: groupIds, ineligible: [] }),
+  getRotationSettings: async () => ({ whatsapp_rotation_group_count: 1 }),
+};
+const defaultWhatsappTestDependencies = {
+  whatsappInstancesRepository: fakeWhatsappInstancesRepository,
+  whatsappInstancesService: fakeWhatsappInstancesService,
+};
+
 async function testVideoFlowRepositoryUsesGroupProgress() {
   const repository = buildCampaignVideoFlowRepository({
     videoCatalogRepository: {
@@ -90,6 +105,7 @@ async function testVideoFlowRepositoryUsesGroupProgress() {
 async function testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch() {
   const dispatchJobs = [];
   const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
     logger: {},
     campaigns: fakeCampaignsRepository,
     campaignVideoCaptionsRepository: noCaptionsRepository,
@@ -138,6 +154,7 @@ async function testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch() {
 async function testProcessorPrefersGeneratedCaptionOverManualText() {
   const dispatchJobs = [];
   const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
     logger: {},
     campaigns: fakeCampaignsRepository,
     campaignVideoCaptionsRepository: {
@@ -182,6 +199,7 @@ async function testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent() 
   const jitterCalls = [];
   const campaignUpdates = [];
   const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
     logger: {},
     campaigns: {
       findById: fakeCampaignsRepository.findById,
@@ -233,6 +251,7 @@ async function testProcessorUsesJitteredDispatchWhenWindowAndJitterArePresent() 
 async function testProcessorUsesCampaignNameAsTrailFallback() {
   const dispatchJobs = [];
   const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
     logger: {},
     campaigns: {
       findById: async () => ({ id: "campaign-1", nome: "Trilha Campanha" }),
@@ -278,6 +297,7 @@ async function testProcessorUsesCampaignNameAsTrailFallback() {
 async function testProcessorResolvesTrilhaIdFromCampaignNameFallback() {
   const dispatchJobs = [];
   const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
     logger: {},
     campaigns: {
       findById: async () => ({ id: "campaign-1", nome: "Trilha Campanha" }),
@@ -326,6 +346,7 @@ async function testProcessorResolvesTrilhaIdFromCampaignNameFallback() {
 async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
   const createdLogs = [];
   const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
     logger: {},
     campaigns: fakeCampaignsRepository,
     campaignVideoCaptionsRepository: noCaptionsRepository,
@@ -367,6 +388,97 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
   ]);
 }
 
+async function testProcessorNotifiesCampaignStartedWhenDispatchesEnqueued() {
+  const notifyCalls = [];
+  const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
+    logger: {},
+    campaigns: { findById: async (id) => ({ id, trilha: "Pre infancia" }) },
+    campaignVideoCaptionsRepository: noCaptionsRepository,
+    dispatchLogs: null,
+    campaignGroups: {
+      listGroups: async () => [
+        { groups: createGroup({ id: "group-1", evolution_group_id: "enabled@g.us" }) },
+      ],
+    },
+    videoFlowRepository: {
+      findNextApprovedUnsentVideoForGroup: async () => createVideo({ id: "video-1", drive_file_id: "drive-1" }),
+    },
+    addDispatchJob: async (payload) => ({ id: "dispatch-1", data: payload }),
+    notificationsService: {
+      notifyCampaignStarted: async (payload) => {
+        notifyCalls.push(payload);
+        return { sent: true };
+      },
+    },
+  });
+
+  await processor(createJob());
+
+  assert.equal(notifyCalls.length, 1);
+  assert.equal(notifyCalls[0].campaignId, "campaign-1");
+  assert.equal(notifyCalls[0].campaignLabel, "Pre infancia");
+  assert.equal(notifyCalls[0].groupsCount, 1);
+}
+
+async function testProcessorSkipsNotificationWhenNoDispatchesEnqueued() {
+  let notifyCalled = false;
+  const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
+    logger: {},
+    campaigns: fakeCampaignsRepository,
+    campaignVideoCaptionsRepository: noCaptionsRepository,
+    dispatchLogs: null,
+    campaignGroups: {
+      listGroups: async () => [
+        { groups: createGroup({ id: "group-1", evolution_group_id: "disabled@g.us", envia_video: false }) },
+      ],
+    },
+    videoFlowRepository: {
+      findNextApprovedUnsentVideoForGroup: async () => createVideo(),
+    },
+    addDispatchJob: async (payload) => ({ id: "dispatch-1", data: payload }),
+    notificationsService: {
+      notifyCampaignStarted: async () => {
+        notifyCalled = true;
+        return { sent: true };
+      },
+    },
+  });
+
+  await processor(createJob());
+
+  assert.equal(notifyCalled, false);
+}
+
+async function testProcessorSurvivesNotificationFailure() {
+  const processor = createCampaignTriggerProcessor({
+    ...defaultWhatsappTestDependencies,
+    logger: {},
+    campaigns: fakeCampaignsRepository,
+    campaignVideoCaptionsRepository: noCaptionsRepository,
+    dispatchLogs: null,
+    campaignGroups: {
+      listGroups: async () => [
+        { groups: createGroup({ id: "group-1", evolution_group_id: "enabled@g.us" }) },
+      ],
+    },
+    videoFlowRepository: {
+      findNextApprovedUnsentVideoForGroup: async () => createVideo({ id: "video-1", drive_file_id: "drive-1" }),
+    },
+    addDispatchJob: async (payload) => ({ id: "dispatch-1", data: payload }),
+    notificationsService: {
+      notifyCampaignStarted: async () => {
+        throw new Error("Evolution indisponivel");
+      },
+    },
+  });
+
+  const result = await processor(createJob());
+
+  assert.equal(result.status, "processed");
+}
+
 async function main() {
   await testVideoFlowRepositoryUsesGroupProgress();
   await testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch();
@@ -375,6 +487,9 @@ async function main() {
   await testProcessorUsesCampaignNameAsTrailFallback();
   await testProcessorResolvesTrilhaIdFromCampaignNameFallback();
   await testProcessorCreatesPendingDispatchLogAfterEnqueue();
+  await testProcessorNotifiesCampaignStartedWhenDispatchesEnqueued();
+  await testProcessorSkipsNotificationWhenNoDispatchesEnqueued();
+  await testProcessorSurvivesNotificationFailure();
 
   console.log("campaign-trigger-processor tests OK");
 }

@@ -1,13 +1,19 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
-const { sendToEvolution } = require("../services/evolution");
+const { EvolutionDeliveryProvider, sendToEvolution } = require("../services/evolution");
+const { evolutionConfig } = require("../config/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
 const defaultCaptionReviewService = require("../services/caption-review.service");
 const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
 const defaultVideoCaptionsService = require("../services/video-captions.service");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
+const defaultGroupsRepository = require("../repositories/groups.repository");
+const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
+const defaultCampaignsRepository = require("../repositories/campaigns.repository");
+const defaultCampaignGroupsRepository = require("../repositories/campaign-groups.repository");
+const defaultNotificationsService = require("../services/notifications.service");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
 const DISPATCH_INITIAL_STATUS = "pending";
@@ -34,7 +40,6 @@ function getDispatchQueue() {
     dispatchQueueInstance = createQueue(queueNames.dispatch, {
       defaultJobOptions: {
         attempts: 1,
-        timeout: resolveDispatchJobTimeoutMs(),
       },
     });
   }
@@ -89,6 +94,10 @@ function buildDispatchJobData(params) {
     dispatch_order: params.dispatch_order,
     jitter_delay_ms: params.jitter_delay_ms,
     cumulative_delay_ms: params.cumulative_delay_ms,
+    whatsapp_instance_id: params.whatsapp_instance_id,
+    forced_next_video_id: params.forced_next_video_id || (params.group && params.group.forced_next_video_id) || undefined,
+    never_repeat_video: params.never_repeat_video,
+    auto_generate_caption: params.auto_generate_caption,
   };
 }
 
@@ -147,9 +156,16 @@ function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
 async function resolveDispatchCaption(jobData, captionSelector, logger = console, options = {}) {
   const fallbackCaption = jobData.legenda || "";
 
-  if (jobData.caption_id && fallbackCaption) {
+  // caption_generated=true indica que a legenda ja foi gerada/revisada na Etapa 2
+  // (tela envio-automatizado, tabela campaign_video_captions) e o usuario ja viu
+  // esse texto especifico. Nesse caso ela e definitiva e nao deve ser trocada por
+  // outra no dispatch — mesmo quando caption_id vem nulo (legenda de teste inserida
+  // manualmente, ou linha sem video_captions.id associado). Sem essa checagem por
+  // caption_generated, o dispatch chamava a IA de novo para "sortear" uma legenda
+  // diferente, gerando texto novo e consumindo cota desnecessariamente.
+  if ((jobData.caption_id || jobData.caption_generated) && fallbackCaption) {
     return {
-      caption: { id: jobData.caption_id },
+      caption: jobData.caption_id ? { id: jobData.caption_id } : null,
       generated: Boolean(jobData.caption_generated),
       text: fallbackCaption,
     };
@@ -356,6 +372,31 @@ function canUseDispatchConsistency(jobData = {}, dispatchConsistencyService) {
   );
 }
 
+// Resolve o sender a ser usado no envio deste job: sem whatsapp_instance_id
+// (instalacoes com um unico numero, ou compatibilidade retroativa), usa o
+// sender global padrao; com um id valido, monta um EvolutionDeliveryProvider
+// apontando para a instancia especifica. Se a instancia nao existir mais,
+// falha aberto para o sender padrao em vez de derrubar o job em andamento.
+async function resolveDispatchSender(whatsappInstanceId, options = {}) {
+  const repository = options.whatsappInstancesRepository || defaultWhatsappInstancesRepository;
+
+  if (!whatsappInstanceId) {
+    return sendToEvolution;
+  }
+
+  const instance = await repository.findById(whatsappInstanceId);
+
+  if (!instance) {
+    return sendToEvolution;
+  }
+
+  const provider = new EvolutionDeliveryProvider({
+    config: { ...evolutionConfig, instanceName: instance.instance_name },
+  });
+
+  return (params) => provider.send(params);
+}
+
 function createDeliveryExecutor(params = {}) {
   const {
     drive,
@@ -427,6 +468,7 @@ function createDeliveryExecutor(params = {}) {
           transcript: transcriptPromise,
           requireCaptionReview: Boolean(jobData.video_id && captionReviewService),
           failOnCaptionError: Boolean(jobData.video_id && videoCaptionsService && !jobData.legenda),
+          autoGenerateCaption: jobData.auto_generate_caption,
           campaign_id: jobData.campaign_id,
           group_id: jobData.group_id,
           progress_group_id: jobData.progress_group_id,
@@ -505,7 +547,12 @@ async function addJitteredDispatchJobs(params, options = {}) {
   return jobs;
 }
 
-async function registerDispatchProgress(jobData, repository = groupVideoProgressRepository) {
+async function registerDispatchProgress(
+  jobData,
+  repository = groupVideoProgressRepository,
+  groupsRepository = defaultGroupsRepository,
+  options = {}
+) {
   const groupId = jobData.progress_group_id;
   const videoId = jobData.video_id;
 
@@ -514,19 +561,44 @@ async function registerDispatchProgress(jobData, repository = groupVideoProgress
   }
 
   const duplicate = await repository.hasDuplicate(groupId, videoId);
+  const trilhaId = jobData.trilha_id || jobData.trilhaId || null;
+  let record;
+  let wasDuplicate = false;
 
   if (duplicate) {
+    if (options.neverRepeatVideo === false) {
+      record = await repository.upsertDelivery({
+        group_id: groupId,
+        video_id: videoId,
+        trilha_id: trilhaId,
+      });
+    } else {
+      wasDuplicate = true;
+    }
+  } else {
+    record = await repository.registerDelivery({
+      group_id: groupId,
+      video_id: videoId,
+      trilha_id: trilhaId,
+    });
+  }
+
+  if (wasDuplicate) {
     return {
       duplicate: true,
       record: null,
     };
   }
 
-  const record = await repository.registerDelivery({
-    group_id: groupId,
-    video_id: videoId,
-    trilha_id: jobData.trilha_id || jobData.trilhaId || null,
-  });
+  const groupUpdate = { ...(trilhaId ? { trilha_id: trilhaId } : {}) };
+
+  if (jobData.forced_next_video_id && jobData.forced_next_video_id === videoId) {
+    groupUpdate.forced_next_video_id = null;
+  }
+
+  if (Object.keys(groupUpdate).length > 0) {
+    await groupsRepository.update(groupId, groupUpdate);
+  }
 
   return {
     duplicate: false,
@@ -534,29 +606,67 @@ async function registerDispatchProgress(jobData, repository = groupVideoProgress
   };
 }
 
+async function maybeNotifyCampaignFinished(jobData, dependencies = {}) {
+  const {
+    campaignsRepository = defaultCampaignsRepository,
+    campaignGroupsRepository = defaultCampaignGroupsRepository,
+    notificationsService = defaultNotificationsService,
+    logger = console,
+  } = dependencies;
+
+  try {
+    const isFinished = await campaignGroupsRepository.isCampaignFullyTerminal(jobData.campaign_id);
+
+    if (!isFinished) {
+      return;
+    }
+
+    const campaign = await campaignsRepository.findById(jobData.campaign_id);
+
+    await notificationsService.notifyCampaignFinished({
+      campaignId: jobData.campaign_id,
+      campaignLabel: campaign && campaign.trilha,
+    });
+  } catch (error) {
+    logger.error &&
+      logger.error(
+        JSON.stringify({
+          event: "dispatch.campaign_finished_check_failed",
+          campaign_id: jobData.campaign_id,
+          error_message: error.message,
+        })
+      );
+  }
+}
+
 function createDispatchProcessor(options = {}) {
   const {
-    sender = sendToEvolution,
+    sender: explicitSender,
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
+    groupsRepository = defaultGroupsRepository,
+    whatsappInstancesRepository,
     dispatchConsistencyService,
     captionReviewService,
     videoCaptionsService,
+    campaignsRepository = defaultCampaignsRepository,
+    campaignGroupsRepository = defaultCampaignGroupsRepository,
+    notificationsService = defaultNotificationsService,
     logger = console,
   } = options;
 
   return async function dispatchWorker(job) {
     const startedAt = new Date().toISOString();
 
-    await job.updateData({
-      ...job.data,
-      status: DISPATCH_PROCESSING_STATUS,
-      started_at: startedAt,
-    });
-
     try {
+      await job.updateData({
+        ...job.data,
+        status: DISPATCH_PROCESSING_STATUS,
+        started_at: startedAt,
+      });
+
       console.info(
         JSON.stringify({
           event: "dispatch.started",
@@ -570,11 +680,13 @@ function createDispatchProcessor(options = {}) {
         })
       );
 
+      const resolvedSender =
+        explicitSender || (await resolveDispatchSender(job.data.whatsapp_instance_id, { whatsappInstancesRepository }));
       const executeDelivery = createDeliveryExecutor({
         drive,
         jobData: job.data,
         logger,
-        sender,
+        sender: resolvedSender,
         captionReviewService,
         videoCatalogRepository,
         videoCaptionsService,
@@ -590,6 +702,8 @@ function createDispatchProcessor(options = {}) {
           groupId: job.data.progress_group_id,
           videoId: job.data.video_id,
           trilhaId: job.data.trilha_id,
+          neverRepeatVideo: job.data.never_repeat_video,
+          forcedNextVideoId: job.data.forced_next_video_id,
           sender: executeDelivery,
         });
 
@@ -597,7 +711,9 @@ function createDispatchProcessor(options = {}) {
         progress = result.progress;
       } else {
         delivery = await executeDelivery();
-        progress = await registerDispatchProgress(job.data, progressRepository);
+        progress = await registerDispatchProgress(job.data, progressRepository, groupsRepository, {
+          neverRepeatVideo: job.data.never_repeat_video,
+        });
       }
 
       const completedAt = new Date().toISOString();
@@ -626,6 +742,13 @@ function createDispatchProcessor(options = {}) {
         })
       );
 
+      await maybeNotifyCampaignFinished(job.data, {
+        campaignsRepository,
+        campaignGroupsRepository,
+        notificationsService,
+        logger,
+      });
+
       return {
         status: DISPATCH_SUCCESS_STATUS,
         delivery,
@@ -636,13 +759,23 @@ function createDispatchProcessor(options = {}) {
     } catch (error) {
       const failedAt = new Date().toISOString();
 
-      await job.updateData({
-        ...job.data,
-        status: DISPATCH_FAILED_STATUS,
-        started_at: startedAt,
-        failed_at: failedAt,
-        error_message: error.message,
-      });
+      await job
+        .updateData({
+          ...job.data,
+          status: DISPATCH_FAILED_STATUS,
+          started_at: startedAt,
+          failed_at: failedAt,
+          error_message: error.message,
+        })
+        .catch((updateDataError) => {
+          console.error(
+            JSON.stringify({
+              event: "dispatch.update_data_failed",
+              job_id: job.id,
+              error_message: updateDataError.message,
+            })
+          );
+        });
 
       console.error(
         JSON.stringify({
@@ -655,6 +788,30 @@ function createDispatchProcessor(options = {}) {
           error_message: error.message,
         })
       );
+
+      await notificationsService
+        .notifyDispatchFailure({
+          campaignId: job.data.campaign_id,
+          groupId: job.data.group_id,
+          videoId: job.data.video_id,
+          errorMessage: error.message,
+        })
+        .catch((notifyError) => {
+          console.error(
+            JSON.stringify({
+              event: "dispatch.notification_failed",
+              job_id: job.id,
+              error_message: notifyError.message,
+            })
+          );
+        });
+
+      await maybeNotifyCampaignFinished(job.data, {
+        campaignsRepository,
+        campaignGroupsRepository,
+        notificationsService,
+        logger,
+      });
 
       throw error;
     }
@@ -669,14 +826,18 @@ const dispatchWorker = createDispatchProcessor({
 
 function createDispatchWorker(options = {}) {
   const {
-    sender = sendToEvolution,
+    sender,
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
     progressRepository = groupVideoProgressRepository,
+    whatsappInstancesRepository,
     dispatchConsistencyService = defaultDispatchConsistencyService,
     captionReviewService = defaultCaptionReviewService,
     videoCaptionsService = defaultVideoCaptionsService,
+    campaignsRepository,
+    campaignGroupsRepository,
+    notificationsService,
     logger = console,
     ...workerOptions
   } = options;
@@ -689,12 +850,19 @@ function createDispatchWorker(options = {}) {
       drive,
       videoCatalogRepository,
       progressRepository,
+      whatsappInstancesRepository,
       dispatchConsistencyService,
       captionReviewService,
       videoCaptionsService,
+      campaignsRepository,
+      campaignGroupsRepository,
+      notificationsService,
       logger,
     }),
-    workerOptions
+    {
+      lockDuration: resolveDispatchJobTimeoutMs(),
+      ...workerOptions,
+    }
   );
 }
 
@@ -718,9 +886,11 @@ module.exports = {
   createDispatchEvents,
   createDispatchWorker,
   dispatchWorker,
+  maybeNotifyCampaignFinished,
   markDispatchCaptionUsed,
   prepareDispatchCaptionBeforeQueue,
   registerDispatchProgress,
+  resolveDispatchSender,
   resolveVideoTranscript,
   resolveDispatchCaption,
   get dispatchQueue() {

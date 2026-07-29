@@ -84,7 +84,8 @@ Aguarde o comando do usuário indicando o tema e o formato (Divulgação ou Educ
 Esteja aberto a fazer ajustes conforme as instruções do usuário. REVISE E NÃO COMETA ERROS.
 
 OBS:
-QUANDO EU PEDIR PARA COLOCAR EM NEGRITO, VOCÊ COLOCA ASTERISCOS ANTES E DEPOIS DAS INFORMAÇÕES MAIS IMPORTANTES DA MENSAGEM, PARA QUE QUANDO EU COLE NO WHATSAPP ESSAS PARTES FIQUEM EM NEGRITO AUTOMATICAMENTE.`;
+QUANDO EU PEDIR PARA COLOCAR EM NEGRITO, VOCÊ COLOCA ASTERISCOS ANTES E DEPOIS DAS INFORMAÇÕES MAIS IMPORTANTES DA MENSAGEM, PARA QUE QUANDO EU COLE NO WHATSAPP ESSAS PARTES FIQUEM EM NEGRITO AUTOMATICAMENTE.
+NUNCA PEÇA PARA O USUÁRIO INSERIR RESPOSTAR NO CHAT DO WHATSAPP, POIS O GRUPO É FECHADO E SÓ ADMS PODEM RESOLVER.`;
 
 const DEFAULT_CAPTION_REVIEW_PROMPT =
   "Voce e um agente de revisao factual de legendas. Compare a legenda com a transcricao do video. Aprove apenas se a legenda for coerente com a transcricao, representar corretamente o conteudo e nao contiver informacoes incorretas, inventadas ou incompativeis. Responda somente JSON valido no formato {\"approved\":true|false,\"reason\":\"motivo curto\"}.";
