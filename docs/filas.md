@@ -103,10 +103,12 @@ npm run queue:campaign-trigger:worker
 ### Resolucao do proximo video por grupo
 
 Antes de enfileirar jobs na `dispatch`, o processador da campanha deve resolver
-o fluxo de videos com `src/services/group-video-flow.js`. O servico identifica a
-trilha efetiva do grupo com `coalesce(trilha_override, segmento)`, considera
-apenas videos com `status = "aprovado"`, ignora videos ja enviados ao grupo e
-retorna o primeiro disponivel por `etapa`.
+o fluxo de videos com `src/services/group-video-flow.js`. A versao atual prioriza
+`groups.trilha_id` e usa a tabela `trilha_videos` para descobrir quais videos
+fazem parte da trilha e em qual ordem aparecem. O servico considera apenas
+videos aprovados (`video_catalog.status = true`), ignora videos ja enviados ao
+grupo em `group_video_progress` e retorna o primeiro disponivel de acordo com
+`trilha_videos.ordem`.
 
 Quando nao existe mais video aprovado e ainda nao enviado para a trilha do
 grupo, o servico pausa o grupo no fluxo de videos com o motivo
