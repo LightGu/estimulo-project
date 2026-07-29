@@ -41,6 +41,16 @@ function createWhatsappInstancesService(dependencies = {}) {
     return repository.findAll();
   }
 
+  async function testConnection() {
+    try {
+      await listInstances();
+
+      return { connected: true };
+    } catch (error) {
+      return { connected: false, reason: error.message };
+    }
+  }
+
   // Backfill idempotente: se nenhuma instancia estiver cadastrada, registra a
   // instancia unica ja configurada via env como prioridade 0, preservando o
   // comportamento atual para quem so tem um numero, sem chamar a Evolution API
@@ -257,6 +267,7 @@ function createWhatsappInstancesService(dependencies = {}) {
     registerInstance,
     removeInstance,
     reorderPriority,
+    testConnection,
     updateRotationSettings,
   };
 }

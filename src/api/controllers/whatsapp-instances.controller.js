@@ -99,6 +99,16 @@ function createWhatsappInstancesController(dependencies = {}) {
     }
   }
 
+  async function testConnection(req, res) {
+    try {
+      const result = await service.testConnection();
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   async function getRotation(req, res) {
     try {
       const result = await service.getRotationSettings();
@@ -133,6 +143,7 @@ function createWhatsappInstancesController(dependencies = {}) {
     register,
     remove,
     reorder,
+    testConnection,
     updateRotation,
   };
 }

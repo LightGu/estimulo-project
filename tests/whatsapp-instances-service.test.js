@@ -40,6 +40,26 @@ async function main() {
     );
   }
 
+  // ---------- testConnection ----------
+  {
+    const connectedService = createWhatsappInstancesService({
+      listEvolutionInstances: async () => ({ status: 200, data: [] }),
+    });
+
+    const connectedResult = await connectedService.testConnection();
+    assert.equal(connectedResult.connected, true);
+
+    const failingService = createWhatsappInstancesService({
+      listEvolutionInstances: async () => {
+        throw new Error("Evolution indisponivel");
+      },
+    });
+
+    const failingResult = await failingService.testConnection();
+    assert.equal(failingResult.connected, false);
+    assert.equal(failingResult.reason, "Evolution indisponivel");
+  }
+
   // ---------- generateQrCode ----------
   {
     const updateCalls = [];

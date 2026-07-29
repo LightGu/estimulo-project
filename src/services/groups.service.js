@@ -1,11 +1,13 @@
 const groupsRepository = require("../repositories/groups.repository");
 const organizationsRepository = require("../repositories/organizations.repository");
 const trilhasRepository = require("../repositories/trilhas.repository");
+const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const whatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
 const groupWhatsappInstancesRepository = require("../repositories/group-whatsapp-instances.repository");
 const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
 const whatsappInstancesService = require("./whatsapp-instances.service");
+const defaultSettingsService = require("./settings.service");
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
@@ -105,6 +107,8 @@ function createGroupsService(dependencies = {}) {
   const instancesService = dependencies.whatsappInstancesService || whatsappInstancesService;
   const fetchEvolutionGroups = dependencies.fetchEvolutionGroups || fetchAllGroupsFromEvolution;
   const enqueueDispatch = dependencies.addDispatchJob || addDispatchJob;
+  const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
+  const settingsService = dependencies.settingsService || defaultSettingsService;
 
   async function create(payload) {
     const nome = payload?.nome?.trim();
@@ -548,9 +552,52 @@ function createGroupsService(dependencies = {}) {
     };
   }
 
+  async function forceNextVideo(id, payload = {}) {
+    if (!id) {
+      throw new Error("Group id is required");
+    }
+
+    const videoId = payload.video_id || payload.videoId;
+
+    if (!videoId) {
+      throw new Error("Video id is required");
+    }
+
+    const dispatchRules = await settingsService.getDispatchRulesSettings();
+
+    if (dispatchRules.never_repeat_video !== false) {
+      throw new Error("A regra 'Nunca repetir vídeo' precisa estar desativada para forçar o reenvio");
+    }
+
+    const group = await repository.findById(id);
+
+    if (!group) {
+      throw new Error("Group not found");
+    }
+
+    if (!group.trilha_id) {
+      throw new Error("Group has no trilha selected");
+    }
+
+    const trailVideoLinks = await trilhasRepositoryDependency.listVideoLinksByTrilha(group.trilha_id);
+
+    if (!trailVideoLinks.some((link) => link.video_id === videoId)) {
+      throw new Error("Video does not belong to the group's current trilha");
+    }
+
+    const video = await videoCatalogRepositoryDependency.findById(videoId);
+
+    if (!video) {
+      throw new Error("Video not found");
+    }
+
+    return repository.update(id, { forced_next_video_id: videoId });
+  }
+
   return {
     create,
     delete: remove,
+    forceNextVideo,
     getById,
     list,
     listByInstance,

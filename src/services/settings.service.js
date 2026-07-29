@@ -2,6 +2,19 @@ const settingsRepository = require("../repositories/settings.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const groupsRepository = require("../repositories/groups.repository");
 const {
+  ALLOWED_GEMINI_MODELS,
+  normalizeAgentSettings,
+} = require("./ai/ai-settings.service");
+const {
+  DEFAULT_CAPTION_GENERATION_PROMPT,
+  DEFAULT_CAPTION_REVIEW_PROMPT,
+} = require("./ai/constants");
+
+const DEFAULT_AGENT_PROMPTS = {
+  caption_generation: DEFAULT_CAPTION_GENERATION_PROMPT,
+  caption_review: DEFAULT_CAPTION_REVIEW_PROMPT,
+};
+const {
   buildDriveFolderUrl,
   createGoogleDriveClient,
   extractDriveFolderId,
@@ -20,6 +33,7 @@ function pad2(value) {
   return String(value).padStart(2, "0");
 }
 
+const DEFAULT_PROFILE_NAME = "Lina Chaim";
 const DEFAULT_SCHEDULE_TIMEZONE = "America/Sao_Paulo";
 const DEFAULT_SCHEDULE_MIN_INTERVAL_MIN = 4;
 const DEFAULT_SCHEDULE_MAX_INTERVAL_MIN = 12;
@@ -28,6 +42,15 @@ const DEFAULT_NOTIFICATION_EVENTS = {
   campaignFinished: true,
   dispatchFailure: true,
   aiError: true,
+  trailFinished: true,
+};
+const DEFAULT_DISPATCH_RULES = {
+  never_repeat_video: true,
+  notify_on_trail_finished: true,
+  auto_generate_caption: true,
+  require_human_review: true,
+  auto_send_after_timeout: { enabled: false, minutes: 60 },
+  auto_retry_failures: true,
 };
 
 function buildDailyCronExpression(hour, minute) {
@@ -179,6 +202,26 @@ function createSettingsService(dependencies = {}) {
     await scheduleIndexJob({ cron_expression: cronExpression, timezone });
 
     return getDriveSettings();
+  }
+
+  async function getProfileSettings() {
+    const settings = await repository.getSettings();
+
+    return {
+      profile_name: (settings && settings.profile_name) || DEFAULT_PROFILE_NAME,
+    };
+  }
+
+  async function updateProfileSettings(input = {}) {
+    const profileName = String(input.profile_name || "").trim();
+
+    if (!profileName) {
+      throw new Error("profile_name is required");
+    }
+
+    await repository.updateSettings({ profile_name: profileName });
+
+    return getProfileSettings();
   }
 
   async function getScheduleSettings() {
@@ -338,16 +381,147 @@ function createSettingsService(dependencies = {}) {
     return getNotificationSettings();
   }
 
+  async function getAIAgentsSettings() {
+    const settings = await repository.getSettings();
+    const stored = (settings && settings.ai_agents) || {};
+
+    return {
+      transcription: normalizeAgentSettings("transcription", stored.transcription),
+      caption_generation: {
+        ...normalizeAgentSettings("caption_generation", stored.caption_generation),
+        default_prompt: DEFAULT_AGENT_PROMPTS.caption_generation,
+      },
+      caption_review: {
+        ...normalizeAgentSettings("caption_review", stored.caption_review),
+        default_prompt: DEFAULT_AGENT_PROMPTS.caption_review,
+      },
+    };
+  }
+
+  function assertValidAgentInput(agentKey, agentInput) {
+    if (!Array.isArray(agentInput.models) || !agentInput.models.length) {
+      throw new Error(`${agentKey}.models must be a non-empty array`);
+    }
+
+    const invalidModel = agentInput.models.find((model) => !ALLOWED_GEMINI_MODELS.includes(model));
+
+    if (invalidModel) {
+      throw new Error(`${agentKey}.models contains an unsupported model: ${invalidModel}`);
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(agentInput, "prompt") &&
+      agentInput.prompt !== null &&
+      typeof agentInput.prompt !== "string"
+    ) {
+      throw new Error(`${agentKey}.prompt must be a string or null`);
+    }
+  }
+
+  async function updateAIAgentsSettings(input = {}) {
+    const current = await getAIAgentsSettings();
+    const next = { ...current };
+
+    for (const agentKey of ["transcription", "caption_generation", "caption_review"]) {
+      const agentInput = input[agentKey];
+
+      if (!agentInput) {
+        continue;
+      }
+
+      assertValidAgentInput(agentKey, agentInput);
+
+      next[agentKey] = {
+        models: agentInput.models,
+        ...(agentKey === "transcription"
+          ? {}
+          : { prompt: Object.prototype.hasOwnProperty.call(agentInput, "prompt") ? agentInput.prompt : current[agentKey].prompt }),
+      };
+    }
+
+    await repository.updateSettings({ ai_agents: next });
+
+    return getAIAgentsSettings();
+  }
+
+  async function getDispatchRulesSettings() {
+    const settings = await repository.getSettings();
+
+    return {
+      ...DEFAULT_DISPATCH_RULES,
+      ...((settings && settings.dispatch_rules) || {}),
+    };
+  }
+
+  function assertValidDispatchRulesInput(input) {
+    const booleanFields = [
+      "never_repeat_video",
+      "notify_on_trail_finished",
+      "auto_generate_caption",
+      "require_human_review",
+      "auto_retry_failures",
+    ];
+
+    for (const field of booleanFields) {
+      if (Object.prototype.hasOwnProperty.call(input, field) && typeof input[field] !== "boolean") {
+        throw new Error(`${field} must be a boolean`);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(input, "auto_send_after_timeout")) {
+      const timeout = input.auto_send_after_timeout;
+
+      if (!timeout || typeof timeout !== "object") {
+        throw new Error("auto_send_after_timeout must be an object");
+      }
+
+      if (Object.prototype.hasOwnProperty.call(timeout, "enabled") && typeof timeout.enabled !== "boolean") {
+        throw new Error("auto_send_after_timeout.enabled must be a boolean");
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(timeout, "minutes") &&
+        (!Number.isInteger(timeout.minutes) || timeout.minutes < 1)
+      ) {
+        throw new Error("auto_send_after_timeout.minutes must be an integer greater than or equal to 1");
+      }
+    }
+  }
+
+  async function updateDispatchRulesSettings(input = {}) {
+    assertValidDispatchRulesInput(input);
+
+    const current = await getDispatchRulesSettings();
+    const next = { ...current, ...input };
+
+    if (input.auto_send_after_timeout) {
+      next.auto_send_after_timeout = {
+        ...current.auto_send_after_timeout,
+        ...input.auto_send_after_timeout,
+      };
+    }
+
+    await repository.updateSettings({ dispatch_rules: next });
+
+    return getDispatchRulesSettings();
+  }
+
   return {
+    getAIAgentsSettings,
+    getDispatchRulesSettings,
     getDriveSettings,
     getNotificationSettings,
+    getProfileSettings,
     getScheduleSettings,
     reindexDriveNow,
     testDatabaseConnection,
     testDriveConnection,
+    updateAIAgentsSettings,
+    updateDispatchRulesSettings,
     updateDriveIndexSchedule,
     updateDriveRootFolder,
     updateNotificationSettings,
+    updateProfileSettings,
     updateScheduleSettings,
   };
 }

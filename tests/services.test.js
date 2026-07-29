@@ -58,21 +58,25 @@ async function main() {
     },
   };
 
-  const persistedCampaignsByDate = new Map();
+  const persistedCampaigns = [];
   const campaignRepository = {
     create: async (payload) => {
-      const campaign = { id: "campaign-1", status: "programado", ...payload };
-      if (payload.data_envio) {
-        persistedCampaignsByDate.set(payload.data_envio, campaign);
-      }
+      const campaign = { id: `campaign-${persistedCampaigns.length + 1}`, status: "programado", ...payload };
+      persistedCampaigns.push(campaign);
       return campaign;
     },
     delete: async () => ({ id: "campaign-1" }),
-    findAll: async () => [{ id: "campaign-1", trilha: "Campanha", ativo: true }],
-    findByData: async (dataEnvio) => persistedCampaignsByDate.get(dataEnvio) || null,
-    findById: async (id) => (id === "campaign-1" ? { id, nome: "Campanha", ativo: true } : null),
+    findAll: async () => persistedCampaigns,
+    findById: async (id) => persistedCampaigns.find((campaign) => campaign.id === id) || null,
     listActive: async () => [{ id: "campaign-1", ativo: true }],
-    update: async (id, payload) => ({ id, ...payload }),
+    update: async (id, payload) => {
+      const index = persistedCampaigns.findIndex((campaign) => campaign.id === id);
+      if (index === -1) {
+        return { id, ...payload };
+      }
+      persistedCampaigns[index] = { ...persistedCampaigns[index], ...payload };
+      return persistedCampaigns[index];
+    },
   };
 
   const videoCatalogRepository = {
@@ -438,15 +442,6 @@ async function main() {
   assert.equal(dispatchByTrilhaId.video.id, "video-trilha-1");
   assert.equal(dispatchByTrilhaId.group.trilha_id, "trilha-1");
 
-  const createdCampaign = await campaignService.create({
-    nome: "Campanha",
-    execution_at: "2026-07-17T09:30:00.000Z",
-  });
-  assert.ok(createdCampaign.id);
-  assert.equal(createdCampaign.trilha, "Campanha");
-  assert.equal(createdCampaign.data_envio, null);
-  assert.equal(createdCampaign.horario_envio, null);
-  await assert.rejects(() => campaignService.create({}), /required/);
   const queuedCampaign = await campaignService.createAndQueue({
     group_ids: ["group-1"],
     execution_at: "2026-07-17T10:00:00.000Z",
@@ -460,39 +455,53 @@ async function main() {
   assert.equal(campaignTriggerJobs[0].data.window_end, "2026-07-17T11:00:00.000Z");
   assert.equal(campaignTriggerJobs[0].data.jitter_delay_min_ms, 60000);
 
+  const createdCampaign = await campaignService.create({
+    nome: "Campanha",
+    execution_at: "2026-07-17T09:30:00.000Z",
+  });
+  assert.ok(createdCampaign.id);
+  assert.equal(createdCampaign.trilha, "Campanha");
+  assert.equal(createdCampaign.data_envio, null);
+  assert.equal(createdCampaign.horario_envio, null);
+  await assert.rejects(() => campaignService.create({}), /required/);
+
   const queuedCampaignSecondGroup = await campaignService.createAndQueue({
     group_ids: ["group-with-progress"],
     execution_at: "2026-07-17T11:00:00.000Z",
     defer_dispatch: true,
   });
-  assert.equal(queuedCampaignSecondGroup.campaign.id, queuedCampaign.campaign.id);
+  assert.notEqual(queuedCampaignSecondGroup.campaign.id, queuedCampaign.campaign.id);
+  assert.match(queuedCampaignSecondGroup.campaign.trilha, /Campanha do dia 17\/07/);
   assert.equal(queuedCampaignSecondGroup.trigger_job, null);
   assert.equal(associatedCampaignGroups.length, 2);
   assert.equal(associatedCampaignGroups[1].group_id, "group-with-progress");
 
   const campaignsSummary = await campaignService.listWithSummary();
-  assert.equal(campaignsSummary[0].grupos_total, 2);
-  assert.equal(campaignsSummary[0].status, "programado");
+  const queuedCampaignSummary = campaignsSummary.find((campaign) => campaign.id === queuedCampaign.campaign.id);
+  assert.equal(queuedCampaignSummary.grupos_total, 1);
+  assert.equal(queuedCampaignSummary.status, "concluido");
 
-  const groupsDetail = await campaignService.getGroupsDetail("campaign-1");
-  assert.equal(groupsDetail.length, 2);
+  const groupsDetail = await campaignService.getGroupsDetail(queuedCampaign.campaign.id);
+  assert.equal(groupsDetail.length, 1);
   assert.equal(groupsDetail[0].group_id, "group-1");
   assert.equal(groupsDetail[0].nome, "Grupo");
   assert.equal(groupsDetail[0].status, "enviado");
   assert.equal(groupsDetail[0].video_id, "video-1");
-  assert.equal(groupsDetail[1].group_id, "group-with-progress");
-  assert.equal(groupsDetail[1].status, "pendente");
   await assert.rejects(() => campaignService.getGroupsDetail("campaign-missing"), /not found/);
 
-  const todayCampaign = await campaignService.findOrCreateForToday({
+  const todayCampaign = await campaignService.createForToday({
     reference_date: "2026-07-21T12:00:00.000Z",
+    window_start: "2026-07-21T12:00:00.000Z",
+    window_end: "2026-07-21T13:00:00.000Z",
   });
   assert.match(todayCampaign.trilha, /Campanha do dia 21\/07/);
   assert.equal(todayCampaign.data_envio, "2026-07-21");
-  const sameDayCampaign = await campaignService.findOrCreateForToday({
+  assert.equal(todayCampaign.window_start, "2026-07-21T12:00:00.000Z");
+  assert.equal(todayCampaign.window_end, "2026-07-21T13:00:00.000Z");
+  const sameDayCampaign = await campaignService.createForToday({
     reference_date: "2026-07-21T18:00:00.000Z",
   });
-  assert.equal(sameDayCampaign.id, todayCampaign.id);
+  assert.notEqual(sameDayCampaign.id, todayCampaign.id);
 
   const createdVideo = await videoService.create({ drive_file_id: "drive-service-1", etapa: 1, status: true });
   assert.ok(createdVideo.id);
@@ -599,10 +608,18 @@ async function main() {
     execution_at: "2026-07-18T10:00:00.000Z",
   });
   assert.equal(dispatchedCampaign.trigger_job, null);
-  await new Promise((resolve) => setImmediate(resolve));
-  const progressAfterDispatch = await campaignVideoCaptionsServiceInstance.getCaptionProgress(
+  // generateCaptionsForCampaign roda em background (fire-and-forget) e agora tambem
+  // consulta dispatch_rules via IO real antes de decidir sobre auto-confirmacao;
+  // um unico setImmediate nao e mais garantia suficiente de que a geracao terminou.
+  let progressAfterDispatch = await campaignVideoCaptionsServiceInstance.getCaptionProgress(
     dispatchedCampaign.campaign.id
   );
+  for (let attempt = 0; attempt < 20 && progressAfterDispatch.total === 0; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    progressAfterDispatch = await campaignVideoCaptionsServiceInstance.getCaptionProgress(
+      dispatchedCampaign.campaign.id
+    );
+  }
   assert.equal(progressAfterDispatch.pendente, 0);
   assert.ok(progressAfterDispatch.total >= 1);
 

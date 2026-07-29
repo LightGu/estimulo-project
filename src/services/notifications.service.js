@@ -100,6 +100,15 @@ function createNotificationsService(dependencies = {}) {
     );
   }
 
+  async function notifyTrailFinished({ groupId, groupName, trilhaLabel } = {}) {
+    const groupLabel = groupName || groupId;
+    const message = trilhaLabel
+      ? `A trilha "${trilhaLabel}" foi concluída no grupo "${groupLabel}". Selecione uma nova trilha para continuar os envios.`
+      : `A trilha do grupo "${groupLabel}" foi concluída. Selecione uma nova trilha para continuar os envios.`;
+
+    return dispatchMessage(message, { event: "trail_finished", group_id: groupId }, "trailFinished");
+  }
+
   async function notifyAiError({ campaignId, groupId, videoId, stage, errorMessage, campaignLabel } = {}) {
     const label = campaignLabel || campaignId;
     const stageLabel = AI_STAGE_LABELS[stage] || stage || "IA";
@@ -117,6 +126,7 @@ function createNotificationsService(dependencies = {}) {
     notifyCampaignFinished,
     notifyDispatchFailure,
     notifyAiError,
+    notifyTrailFinished,
   };
 }
 

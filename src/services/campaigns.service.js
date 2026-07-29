@@ -187,7 +187,12 @@ function createCampaignsService(dependencies = {}) {
 
     const scheduleSettings = await resolveScheduleSettings();
     const scheduleOptions = resolveDispatchScheduleOptions(payload, executionDate, scheduleSettings);
-    const campaign = await findOrCreateForToday({ reference_date: executionDate, schedule_settings: scheduleSettings });
+    const campaign = await createForToday({
+      reference_date: executionDate,
+      schedule_settings: scheduleSettings,
+      window_start: scheduleOptions.window_start,
+      window_end: scheduleOptions.window_end,
+    });
 
     if (deferDispatch && campaign.status !== "gerando_legendas") {
       await repository.update(campaign.id, { status: "gerando_legendas" });
@@ -247,11 +252,39 @@ function createCampaignsService(dependencies = {}) {
     };
   }
 
+  async function maybeAutoConfirmDispatch(campaignId, payload) {
+    let dispatchRules;
+
+    try {
+      dispatchRules = await settingsServiceDependency.getDispatchRulesSettings();
+    } catch (error) {
+      return;
+    }
+
+    if (dispatchRules.require_human_review !== false) {
+      return;
+    }
+
+    try {
+      await confirmDispatch(campaignId, payload);
+    } catch (error) {
+      console.error &&
+        console.error(
+          JSON.stringify({
+            event: "campaigns.auto_confirm_dispatch_failed",
+            campaign_id: campaignId,
+            error_message: error.message,
+          })
+        );
+    }
+  }
+
   async function dispatchCampaign(payload = {}) {
     const result = await createAndQueue({ ...payload, defer_dispatch: true });
 
     campaignVideoCaptionsServiceDependency
       .generateCaptionsForCampaign(result.campaign.id)
+      .then(() => maybeAutoConfirmDispatch(result.campaign.id, payload))
       .catch((error) => {
         console.error &&
           console.error(
@@ -426,17 +459,11 @@ function createCampaignsService(dependencies = {}) {
     return repository.listActive();
   }
 
-  async function findOrCreateForToday(payload = {}) {
+  async function createForToday(payload = {}) {
     const referenceDate = payload.reference_date ? new Date(payload.reference_date) : new Date();
     const scheduleSettings = payload.schedule_settings || (await resolveScheduleSettings());
     const timezone = scheduleSettings.timezone;
     const dataEnvio = formatDateOnlyInTimezone(referenceDate, timezone);
-
-    const existing = await repository.findByData(dataEnvio);
-
-    if (existing) {
-      return existing;
-    }
 
     return repository.create({
       ativo: true,
@@ -444,6 +471,8 @@ function createCampaignsService(dependencies = {}) {
       trilha: formatCampaignDayName(referenceDate, timezone),
       data_envio: dataEnvio,
       horario_envio: payload.horario_envio || payload.horarioEnvio || null,
+      window_start: payload.window_start || null,
+      window_end: payload.window_end || null,
     });
   }
 
@@ -519,7 +548,7 @@ function createCampaignsService(dependencies = {}) {
     delete: remove,
     dispatchCampaign,
     remove,
-    findOrCreateForToday,
+    createForToday,
     getById,
     getGroupsDetail,
     list,

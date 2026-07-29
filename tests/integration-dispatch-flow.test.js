@@ -63,6 +63,11 @@ async function main() {
     campaignsRepository,
     groupsRepository,
     videoCatalogRepository,
+    // Com auto_retry_failures desligado, uma falha de envio desativa a campanha
+    // (comportamento legado, sem o worker de reprocessamento automatico).
+    settingsService: {
+      getDispatchRulesSettings: async () => ({ auto_retry_failures: false }),
+    },
   });
 
   const firstRun = await service.executeDispatch({

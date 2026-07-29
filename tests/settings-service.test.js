@@ -83,6 +83,36 @@ async function main() {
     await assert.rejects(() => service.updateDriveIndexSchedule({ hour: 0, minute: 60 }), /minute must be an integer/);
   }
 
+  // ---------- getProfileSettings / updateProfileSettings ----------
+  {
+    const defaultService = createSettingsService({
+      settingsRepository: { getSettings: async () => ({}) },
+    });
+
+    const defaultSettings = await defaultService.getProfileSettings();
+    assert.equal(defaultSettings.profile_name, "Lina Chaim");
+
+    const updateCalls = [];
+    const settingsRepository = {
+      getSettings: async () => ({ profile_name: "Ana Souza" }),
+      updateSettings: async (payload) => {
+        updateCalls.push(payload);
+        return payload;
+      },
+    };
+
+    const service = createSettingsService({ settingsRepository });
+
+    const settings = await service.getProfileSettings();
+    assert.equal(settings.profile_name, "Ana Souza");
+
+    await service.updateProfileSettings({ profile_name: "  Bruno Lima  " });
+    assert.equal(updateCalls[0].profile_name, "Bruno Lima");
+
+    await assert.rejects(() => service.updateProfileSettings({}), /profile_name is required/);
+    await assert.rejects(() => service.updateProfileSettings({ profile_name: "   " }), /profile_name is required/);
+  }
+
   // ---------- testDriveConnection ----------
   {
     const settingsRepository = {
@@ -318,6 +348,7 @@ async function main() {
       campaignFinished: true,
       dispatchFailure: true,
       aiError: true,
+      trailFinished: true,
     });
   }
 
@@ -361,6 +392,90 @@ async function main() {
     assert.equal(afterPartialUpdate.events.campaignStarted, true);
     assert.equal(afterPartialUpdate.events.campaignFinished, true);
     assert.equal(afterPartialUpdate.events.aiError, true);
+  }
+
+  // ---------- getAIAgentsSettings ----------
+  {
+    const service = createSettingsService({
+      settingsRepository: {
+        getSettings: async () => ({
+          ai_agents: {
+            transcription: { models: ["gemini-2.5-pro"] },
+            caption_generation: { models: ["gemini-3.5-flash"], prompt: "Prompt customizado" },
+          },
+        }),
+      },
+    });
+
+    const settings = await service.getAIAgentsSettings();
+    assert.deepEqual(settings.transcription.models, ["gemini-2.5-pro"]);
+    assert.equal(settings.transcription.prompt, null);
+    assert.deepEqual(settings.caption_generation.models, ["gemini-3.5-flash"]);
+    assert.equal(settings.caption_generation.prompt, "Prompt customizado");
+    // caption_review nao configurado -> cai no default
+    assert.deepEqual(settings.caption_review.models, ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]);
+    assert.equal(settings.caption_review.prompt, null);
+    // default_prompt sempre exposto (texto do sistema) para a UI mostrar antes de customizar,
+    // independente de haver ou nao um prompt customizado salvo
+    assert.ok(settings.caption_generation.default_prompt.includes("Copywriter"));
+    assert.ok(settings.caption_review.default_prompt.includes("revisao factual"));
+
+    const defaultsService = createSettingsService({
+      settingsRepository: { getSettings: async () => ({}) },
+    });
+
+    const defaults = await defaultsService.getAIAgentsSettings();
+    assert.deepEqual(defaults.transcription.models, [
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-flash-latest",
+    ]);
+  }
+
+  // ---------- updateAIAgentsSettings ----------
+  {
+    const updateCalls = [];
+    let storedSettings = {};
+    const settingsRepository = {
+      getSettings: async () => storedSettings,
+      updateSettings: async (payload) => {
+        updateCalls.push(payload);
+        storedSettings = { ...storedSettings, ...payload };
+        return storedSettings;
+      },
+    };
+
+    const service = createSettingsService({ settingsRepository });
+
+    const updated = await service.updateAIAgentsSettings({
+      transcription: { models: ["gemini-2.5-pro", "gemini-2.5-flash"] },
+      caption_generation: { models: ["gemini-3.5-flash"], prompt: "Novo prompt" },
+    });
+
+    assert.deepEqual(updated.transcription.models, ["gemini-2.5-pro", "gemini-2.5-flash"]);
+    assert.deepEqual(updated.caption_generation.models, ["gemini-3.5-flash"]);
+    assert.equal(updated.caption_generation.prompt, "Novo prompt");
+    // caption_review nao foi enviado no payload -> permanece com o default
+    assert.deepEqual(updated.caption_review.models, ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]);
+
+    await assert.rejects(
+      () => service.updateAIAgentsSettings({ transcription: { models: [] } }),
+      /transcription\.models must be a non-empty array/
+    );
+    await assert.rejects(
+      () => service.updateAIAgentsSettings({ transcription: { models: ["gemini-1.0-unknown"] } }),
+      /transcription\.models contains an unsupported model/
+    );
+    await assert.rejects(
+      () => service.updateAIAgentsSettings({ caption_review: { models: ["gemini-2.5-flash"], prompt: 123 } }),
+      /caption_review\.prompt must be a string or null/
+    );
+
+    // prompt: null explicito limpa o prompt customizado (volta ao default do sistema)
+    const cleared = await service.updateAIAgentsSettings({
+      caption_generation: { models: ["gemini-2.5-flash"], prompt: null },
+    });
+    assert.equal(cleared.caption_generation.prompt, null);
   }
 
   console.log("settings service tests OK");
