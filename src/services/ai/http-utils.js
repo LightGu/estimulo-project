@@ -17,7 +17,10 @@ function assertFetch(fetchImplementation, providerName) {
 }
 
 function isRateLimitStatus(status) {
-  return status === 429 || status === 404;
+  // 429/404: cota/modelo indisponivel. 500/503: modelo sobrecarregado ou
+  // indisponivel temporariamente ("high demand"/"overloaded") — nesses casos
+  // tambem faz sentido tentar o proximo modelo da cascata de fallback.
+  return status === 429 || status === 404 || status === 500 || status === 503;
 }
 
 function isRateLimitMessage(message) {
@@ -30,7 +33,11 @@ function isRateLimitMessage(message) {
     normalized.includes("resource exhausted") ||
     normalized.includes("no longer available") ||
     normalized.includes("not found") ||
-    normalized.includes("not supported")
+    normalized.includes("not supported") ||
+    normalized.includes("high demand") ||
+    normalized.includes("overloaded") ||
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("try again later")
   );
 }
 

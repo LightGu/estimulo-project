@@ -36,8 +36,37 @@ function createCampaignVideoCaptionsController(dependencies = {}) {
     }
   }
 
+  async function regenerateCaption(req, res) {
+    try {
+      const updated = await campaignVideoCaptionsService.regenerateCaption(req.params.captionRowId);
+
+      return res.status(200).json(updated);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Campaign video caption id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Campaign video caption not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      console.error(
+        JSON.stringify({
+          event: "campaign_video_captions.regenerate.failed",
+          caption_row_id: req.params.captionRowId,
+          error_message: message,
+        })
+      );
+
+      return res.status(422).json({ error: `Falha ao gerar legenda: ${message}` });
+    }
+  }
+
   return {
     getProgress,
+    regenerateCaption,
     updateCaption,
   };
 }

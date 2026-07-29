@@ -5,6 +5,7 @@ const {
   googleDriveVideoIndexQueue,
   scheduleGoogleDriveVideoIndexJob,
 } = require("../src/queues/google-drive-video-index");
+const settingsRepository = require("../src/repositories/settings.repository");
 
 const worker = createGoogleDriveVideoIndexWorker();
 const events = createGoogleDriveVideoIndexEvents();
@@ -57,7 +58,22 @@ events.on("failed", ({ jobId, failedReason }) => {
 });
 
 async function scheduleRecurringIndexJob() {
-  const job = await scheduleGoogleDriveVideoIndexJob();
+  const settings = await settingsRepository.getSettings().catch(() => null);
+  const scheduleParams = {};
+
+  if (settings && settings.drive_index_cron) {
+    scheduleParams.cron_expression = settings.drive_index_cron;
+  }
+
+  if (settings && settings.drive_index_timezone) {
+    scheduleParams.timezone = settings.drive_index_timezone;
+  }
+
+  if (settings && settings.drive_root_folder_id) {
+    scheduleParams.root_folder_id = settings.drive_root_folder_id;
+  }
+
+  const job = await scheduleGoogleDriveVideoIndexJob(scheduleParams);
 
   console.log(
     JSON.stringify({

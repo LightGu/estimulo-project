@@ -195,11 +195,10 @@
 
     <script src="assets/js/nav.js"></script>
     <script>
-      const TRAIL_PROFILES = ["Pré-infância", "Infância", "Adolescência", "Maturidade"];
-
       const state = {
         trails: [],
         selectableVideos: [],
+        profiles: [],
       };
       const NEW_MACROTEMA_OPTION = "__new_macrotema__";
       let activePerfil = "todos";
@@ -264,7 +263,7 @@
       function renderPerfilTabs() {
         document.getElementById("perfilTabs").innerHTML = [
           `<button class="${activePerfil === "todos" ? "active" : ""}" data-perfil="todos">Todos</button>`,
-          ...TRAIL_PROFILES.map(
+          ...state.profiles.map(
             (p) => `<button class="${activePerfil === p ? "active" : ""}" data-perfil="${escapeHtml(p)}">${escapeHtml(p)}</button>`
           ),
         ].join("");
@@ -425,7 +424,8 @@
       }
 
       async function removeVideoFromCurrentTrail(trail, videoId) {
-        if (!confirm("Remover este vídeo da trilha atual?")) {
+        const confirmed = await window.estimuloConfirm("Remover este vídeo da trilha atual?", { title: "Remover vídeo", confirmLabel: "Remover" });
+        if (!confirmed) {
           return;
         }
 
@@ -436,14 +436,14 @@
 
           await initialize();
         } catch (error) {
-          alert(error.message);
+          window.estimuloAlert(error.message);
         }
       }
 
       function renderPerfisPanel(trail) {
         const perfis = trail.perfis || [];
 
-        document.getElementById("trailPerfisCheckboxes").innerHTML = TRAIL_PROFILES.map(
+        document.getElementById("trailPerfisCheckboxes").innerHTML = state.profiles.map(
           (perfil) => `
           <label>
             <input type="checkbox" data-trail-perfil value="${escapeHtml(perfil)}" ${perfis.includes(perfil) ? "checked" : ""}>
@@ -540,7 +540,7 @@
 
               renderTrailDetail();
             } catch (error) {
-              alert(error.message);
+              window.estimuloAlert(error.message);
             }
 
             draggingVideoId = null;
@@ -567,7 +567,7 @@
       }
 
       function renderNewTrailPerfilCheckboxes() {
-        document.getElementById("newTrailPerfil").innerHTML = TRAIL_PROFILES.map(
+        document.getElementById("newTrailPerfil").innerHTML = state.profiles.map(
           (p) => `
           <label>
             <input type="checkbox" data-new-trail-perfil value="${escapeHtml(p)}">
@@ -728,8 +728,8 @@
         document.getElementById("moveVideoLabel").textContent = `Vídeo: ${video.nome_do_arquivo}`;
 
         const perfilSelect = document.getElementById("moveTargetPerfil");
-        perfilSelect.innerHTML = TRAIL_PROFILES.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-        perfilSelect.value = (trail.perfis && trail.perfis[0]) || TRAIL_PROFILES[0];
+        perfilSelect.innerHTML = state.profiles.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+        perfilSelect.value = (trail.perfis && trail.perfis[0]) || state.profiles[0];
 
         renderMoveMacrotemaSelect(trail.macrotema);
 
@@ -861,6 +861,13 @@
       });
 
       async function initialize() {
+        try {
+          const profiles = await requestJson("/group-profiles");
+          state.profiles = Array.isArray(profiles) ? profiles.map((p) => p.nome) : [];
+        } catch (error) {
+          state.profiles = [];
+        }
+
         try {
           const trails = await requestJson("/trilhas/overview");
           state.trails = Array.isArray(trails) ? trails : [];

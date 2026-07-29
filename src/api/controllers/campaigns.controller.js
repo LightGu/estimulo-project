@@ -184,6 +184,20 @@ function createCampaignsController(dependencies = {}) {
         return res.status(404).json({ error: message });
       }
 
+      if (error?.code === "CAMPAIGN_HAS_DELIVERIES") {
+        return res.status(409).json({
+          error: "Este disparo já teve envios realizados e não pode ser apagado, para preservar o histórico.",
+        });
+      }
+
+      console.error(
+        JSON.stringify({
+          event: "campaigns.remove.failed",
+          campaign_id: req.params.id,
+          error_message: message,
+        })
+      );
+
       return res.status(500).json({ error: "Internal server error" });
     }
   }
