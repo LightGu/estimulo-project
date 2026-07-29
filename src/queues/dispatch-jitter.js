@@ -225,6 +225,9 @@ function buildJitteredDispatchSchedule(params = {}) {
       jitter_delay_ms: jitterDelayMs,
       cumulative_delay_ms: cumulativeDelayMs,
       whatsapp_instance_id: resolveInstanceForOrder(group.order, params.whatsapp_instances, params.rotation_group_count),
+      forced_next_video_id: group.forced_next_video_id ?? params.forced_next_video_id,
+      never_repeat_video: group.never_repeat_video ?? params.never_repeat_video,
+      auto_generate_caption: group.auto_generate_caption ?? params.auto_generate_caption,
     };
   });
 }

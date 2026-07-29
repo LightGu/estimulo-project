@@ -1,6 +1,7 @@
 const videoCaptionsRepository = require("../repositories/video-captions.repository");
 const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
 const { createAIProviderAdapter } = require("./ai");
+const defaultAISettingsService = require("./ai/ai-settings.service");
 const defaultCaptionReviewService = require("./caption-review.service");
 
 const DEFAULT_CAPTION_TIMEZONE = "America/Bahia";
@@ -113,14 +114,20 @@ function createVideoCaptionsService(dependencies = {}) {
   const captionReviewService = dependencies.captionReviewService || defaultCaptionReviewService;
   const logger = dependencies.logger || console;
   const timeZone = dependencies.timeZone || process.env.VIDEO_CAPTION_TIMEZONE || process.env.TZ || DEFAULT_CAPTION_TIMEZONE;
+  const aiSettingsService = dependencies.aiSettingsService || defaultAISettingsService;
   const configuredAIOptions = {
     ...(dependencies.ai || {}),
     gemini: dependencies.gemini,
-    openai: dependencies.openai,
   };
 
-  function getAIProviderAdapter() {
-    return dependencies.aiProviderAdapter || createAIProviderAdapter(configuredAIOptions);
+  async function getAIProviderAdapter(agentKey) {
+    if (dependencies.aiProviderAdapter) {
+      return dependencies.aiProviderAdapter;
+    }
+
+    const agentOptions = await aiSettingsService.getAgentAIOptions(agentKey);
+
+    return createAIProviderAdapter({ ...configuredAIOptions, ...agentOptions });
   }
 
   async function selectCaptionForVideo(videoId, options = {}) {
@@ -219,6 +226,12 @@ function createVideoCaptionsService(dependencies = {}) {
       }
     }
 
+    // "Gerar legenda automaticamente" desativado: nao ha legenda pronta e reaproveitavel
+    // no banco, entao a legenda fica vazia para edicao manual, sem chamar a IA.
+    if (options.autoGenerateCaption === false) {
+      return null;
+    }
+
     const hasDownloadedVideoOption = Object.prototype.hasOwnProperty.call(options, "downloadedVideo");
     const downloadedVideo = hasDownloadedVideoOption ? await Promise.resolve(options.downloadedVideo) : undefined;
     let transcript = await getTranscript();
@@ -227,10 +240,9 @@ function createVideoCaptionsService(dependencies = {}) {
       return null;
     }
 
-    const adapter = getAIProviderAdapter();
-
     if (!transcript) {
-      transcript = String(await transcribeVideo(adapter, downloadedVideo, options.ai || {})).trim();
+      const transcriptionAdapter = await getAIProviderAdapter("transcription");
+      transcript = String(await transcribeVideo(transcriptionAdapter, downloadedVideo, options.ai || {})).trim();
 
       if (!transcript) {
         return null;
@@ -246,7 +258,10 @@ function createVideoCaptionsService(dependencies = {}) {
       await persistTranscript(videoCatalogRepository, videoId, transcript);
     }
 
-    const generatedText = String(await generateCaptionFromTranscript(adapter, transcript, options.ai || {})).trim();
+    const captionAdapter = await getAIProviderAdapter("caption_generation");
+    const generatedText = String(
+      await generateCaptionFromTranscript(captionAdapter, transcript, options.ai || {})
+    ).trim();
 
     if (!generatedText) {
       return null;

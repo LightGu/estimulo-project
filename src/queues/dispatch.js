@@ -95,6 +95,9 @@ function buildDispatchJobData(params) {
     jitter_delay_ms: params.jitter_delay_ms,
     cumulative_delay_ms: params.cumulative_delay_ms,
     whatsapp_instance_id: params.whatsapp_instance_id,
+    forced_next_video_id: params.forced_next_video_id || (params.group && params.group.forced_next_video_id) || undefined,
+    never_repeat_video: params.never_repeat_video,
+    auto_generate_caption: params.auto_generate_caption,
   };
 }
 
@@ -465,6 +468,7 @@ function createDeliveryExecutor(params = {}) {
           transcript: transcriptPromise,
           requireCaptionReview: Boolean(jobData.video_id && captionReviewService),
           failOnCaptionError: Boolean(jobData.video_id && videoCaptionsService && !jobData.legenda),
+          autoGenerateCaption: jobData.auto_generate_caption,
           campaign_id: jobData.campaign_id,
           group_id: jobData.group_id,
           progress_group_id: jobData.progress_group_id,
@@ -546,7 +550,8 @@ async function addJitteredDispatchJobs(params, options = {}) {
 async function registerDispatchProgress(
   jobData,
   repository = groupVideoProgressRepository,
-  groupsRepository = defaultGroupsRepository
+  groupsRepository = defaultGroupsRepository,
+  options = {}
 ) {
   const groupId = jobData.progress_group_id;
   const videoId = jobData.video_id;
@@ -556,24 +561,43 @@ async function registerDispatchProgress(
   }
 
   const duplicate = await repository.hasDuplicate(groupId, videoId);
+  const trilhaId = jobData.trilha_id || jobData.trilhaId || null;
+  let record;
+  let wasDuplicate = false;
 
   if (duplicate) {
+    if (options.neverRepeatVideo === false) {
+      record = await repository.upsertDelivery({
+        group_id: groupId,
+        video_id: videoId,
+        trilha_id: trilhaId,
+      });
+    } else {
+      wasDuplicate = true;
+    }
+  } else {
+    record = await repository.registerDelivery({
+      group_id: groupId,
+      video_id: videoId,
+      trilha_id: trilhaId,
+    });
+  }
+
+  if (wasDuplicate) {
     return {
       duplicate: true,
       record: null,
     };
   }
 
-  const trilhaId = jobData.trilha_id || jobData.trilhaId || null;
+  const groupUpdate = { ...(trilhaId ? { trilha_id: trilhaId } : {}) };
 
-  const record = await repository.registerDelivery({
-    group_id: groupId,
-    video_id: videoId,
-    trilha_id: trilhaId,
-  });
+  if (jobData.forced_next_video_id && jobData.forced_next_video_id === videoId) {
+    groupUpdate.forced_next_video_id = null;
+  }
 
-  if (trilhaId) {
-    await groupsRepository.update(groupId, { trilha_id: trilhaId });
+  if (Object.keys(groupUpdate).length > 0) {
+    await groupsRepository.update(groupId, groupUpdate);
   }
 
   return {
@@ -678,6 +702,8 @@ function createDispatchProcessor(options = {}) {
           groupId: job.data.progress_group_id,
           videoId: job.data.video_id,
           trilhaId: job.data.trilha_id,
+          neverRepeatVideo: job.data.never_repeat_video,
+          forcedNextVideoId: job.data.forced_next_video_id,
           sender: executeDelivery,
         });
 
@@ -685,7 +711,9 @@ function createDispatchProcessor(options = {}) {
         progress = result.progress;
       } else {
         delivery = await executeDelivery();
-        progress = await registerDispatchProgress(job.data, progressRepository, groupsRepository);
+        progress = await registerDispatchProgress(job.data, progressRepository, groupsRepository, {
+          neverRepeatVideo: job.data.never_repeat_video,
+        });
       }
 
       const completedAt = new Date().toISOString();

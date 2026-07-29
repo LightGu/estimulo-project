@@ -114,8 +114,37 @@ function createGroupsController(dependencies = {}) {
     }
   }
 
+  async function forceNextVideo(req, res) {
+    try {
+      const group = await groupService.forceNextVideo(req.params.id, req.body || {});
+
+      return res.status(200).json(group);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (
+        [
+          "Group id is required",
+          "Video id is required",
+          "A regra 'Nunca repetir vídeo' precisa estar desativada para forçar o reenvio",
+          "Group has no trilha selected",
+          "Video does not belong to the group's current trilha",
+        ].includes(message)
+      ) {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Group not found" || message === "Video not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   return {
     dispatchTestVideo,
+    forceNextVideo,
     listWithoutSegment,
     search,
     syncFromEvolution,

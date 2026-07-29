@@ -6,14 +6,7 @@ const {
   normalizeForce,
   resolveGeminiModelPath,
 } = require("../src/services/video-transcription.service");
-const {
-  GeminiAdapter,
-  OpenAIAdapter,
-  createAIProviderAdapter,
-  normalizeAIProvider,
-} = require("../src/services/ai");
-const { getAIProviderConfig } = require("../src/config/ai");
-const { extractOpenAITranscriptionText } = require("../src/services/ai/openai-adapter");
+const { GeminiAdapter, createAIProviderAdapter } = require("../src/services/ai");
 
 function createRepository(initialVideos) {
   const videos = initialVideos.map((video) => ({ ...video }));
@@ -192,66 +185,9 @@ async function testUsesAIProviderAdapterGenerateCaption() {
   assert.deepEqual(repository.updates, [{ id: "video-1", payload: { transcript: "Legenda via adapter" } }]);
 }
 
-function testAIProviderFactorySelectsConfiguredProvider() {
-  const originalProvider = process.env.AI_PROVIDER;
-
-  process.env.AI_PROVIDER = "openai";
-  assert.ok(createAIProviderAdapter() instanceof OpenAIAdapter);
-
-  process.env.AI_PROVIDER = "gemini";
+function testAIProviderFactoryAlwaysReturnsGeminiAdapter() {
   assert.ok(createAIProviderAdapter() instanceof GeminiAdapter);
-
-  process.env.AI_PROVIDER = "gpt";
-  assert.ok(createAIProviderAdapter() instanceof OpenAIAdapter);
-  assert.equal(getAIProviderConfig().provider, "openai");
-
-  if (originalProvider === undefined) {
-    delete process.env.AI_PROVIDER;
-  } else {
-    process.env.AI_PROVIDER = originalProvider;
-  }
-
-  assert.equal(normalizeAIProvider("OPEN_AI"), "openai");
-  assert.equal(normalizeAIProvider("GOOGLE_GEMINI"), "gemini");
-}
-
-async function testOpenAIAdapterGeneratesCaptionWithMultipartRequest() {
-  const requests = [];
-  const adapter = new OpenAIAdapter({
-    apiKey: "openai-key",
-    baseUrl: "https://api.openai.test",
-    fetch: async (url, options) => {
-      requests.push({ url, options });
-
-      assert.equal(url, "https://api.openai.test/v1/audio/transcriptions");
-      assert.equal(options.method, "POST");
-      assert.equal(options.headers.Authorization, "Bearer openai-key");
-      assert.equal(options.body.get("model"), "test-transcribe");
-      assert.equal(options.body.get("prompt"), "Prompt teste");
-      assert.equal(options.body.get("response_format"), "json");
-      assert.ok(options.body.get("file"));
-
-      return {
-        ok: true,
-        text: async () => JSON.stringify({ text: "Legenda OpenAI" }),
-      };
-    },
-    model: "test-transcribe",
-  });
-
-  const caption = await adapter.generateCaption(
-    {
-      bytes: Buffer.from("video"),
-      drive_file_id: "drive-1",
-      mime_type: "video/mp4",
-      name: "aula.mp4",
-    },
-    { prompt: "Prompt teste" }
-  );
-
-  assert.equal(caption, "Legenda OpenAI");
-  assert.equal(requests.length, 1);
-  assert.equal(extractOpenAITranscriptionText({ text: " Texto " }), "Texto");
+  assert.ok(createAIProviderAdapter({ apiKey: "test-key" }) instanceof GeminiAdapter);
 }
 
 async function main() {
@@ -278,8 +214,7 @@ async function main() {
   await testForceRetranscribesVideoWithExistingTranscript();
   await testRejectsEmptyTranscript();
   await testUsesAIProviderAdapterGenerateCaption();
-  testAIProviderFactorySelectsConfiguredProvider();
-  await testOpenAIAdapterGeneratesCaptionWithMultipartRequest();
+  testAIProviderFactoryAlwaysReturnsGeminiAdapter();
 
   console.log("video-transcription-service tests OK");
 }

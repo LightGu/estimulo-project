@@ -2,6 +2,7 @@ require("dotenv").config({ quiet: true });
 
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const { createAIProviderAdapter } = require("./ai");
+const defaultAISettingsService = require("./ai/ai-settings.service");
 const {
   GeminiAdapter,
   extractGeminiText,
@@ -44,18 +45,20 @@ async function generateCaption(adapter, downloadedVideo, options = {}) {
 function createVideoTranscriptionService(dependencies = {}) {
   const repository = dependencies.repository || videoCatalogRepository;
   const downloadVideo = dependencies.downloadFromDrive || downloadFromDrive;
+  const aiSettingsService = dependencies.aiSettingsService || defaultAISettingsService;
   const configuredAIOptions = {
     ...(dependencies.ai || {}),
     gemini: dependencies.gemini,
-    openai: dependencies.openai,
   };
 
-  function getAIProviderAdapter() {
-    return (
-      dependencies.aiProviderAdapter ||
-      dependencies.transcriber ||
-      createAIProviderAdapter(configuredAIOptions)
-    );
+  async function getAIProviderAdapter() {
+    if (dependencies.aiProviderAdapter || dependencies.transcriber) {
+      return dependencies.aiProviderAdapter || dependencies.transcriber;
+    }
+
+    const agentOptions = await aiSettingsService.getAgentAIOptions("transcription");
+
+    return createAIProviderAdapter({ ...configuredAIOptions, ...agentOptions });
   }
 
   async function transcribeRecord(videoCatalogRecord, options = {}) {
@@ -83,7 +86,7 @@ function createVideoTranscriptionService(dependencies = {}) {
       videoCatalogRecord,
       videoCatalogRepository: repository,
     });
-    const transcript = String(await generateCaption(getAIProviderAdapter(), downloadedVideo, options)).trim();
+    const transcript = String(await generateCaption(await getAIProviderAdapter(), downloadedVideo, options)).trim();
 
     if (!transcript) {
       throw new Error("Transcricao gerada esta vazia");

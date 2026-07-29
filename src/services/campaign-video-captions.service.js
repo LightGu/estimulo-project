@@ -16,6 +16,7 @@ const {
 const { resolveVideoTranscript } = require("../queues/dispatch");
 const { downloadFromDrive } = require("./google-drive-video-download");
 const defaultNotificationsService = require("./notifications.service");
+const defaultSettingsService = require("./settings.service");
 
 function createCampaignVideoCaptionsService(dependencies = {}) {
   const repository = dependencies.repository || campaignVideoCaptionsRepository;
@@ -29,7 +30,16 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
   const groupVideoProgressRepository = dependencies.groupVideoProgressRepository || defaultGroupVideoProgressRepository;
   const videoDownloader = dependencies.videoDownloader || downloadFromDrive;
   const notificationsService = dependencies.notificationsService || defaultNotificationsService;
+  const settingsService = dependencies.settingsService || defaultSettingsService;
   const logger = dependencies.logger || console;
+
+  async function resolveDispatchRules() {
+    try {
+      return await settingsService.getDispatchRulesSettings();
+    } catch (error) {
+      return {};
+    }
+  }
 
   async function filterOutDeliveredRows(rows) {
     if (!rows.length) {
@@ -63,28 +73,32 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
         .map((group) => applyCampaignTrailFallback(group, campaign, { trilhasRepository }))
     );
     const groups = groupsWithFallback.filter(isVideoEnabledGroup);
+    const dispatchRules = await resolveDispatchRules();
 
     const flow = await resolveGroupsVideoFlow({
       campaign_id: campaignId,
       groups,
       repository: videoFlowRepository,
+      dispatchRules,
+      notificationsService,
       logger,
     });
 
-    return { campaign, dispatchGroups: flow.dispatchGroups };
+    return { campaign, dispatchGroups: flow.dispatchGroups, dispatchRules };
   }
 
-  async function resolveGeneratedCaption(item, campaignId, usedCaptionIds) {
+  async function resolveGeneratedCaption(item, campaignId, usedCaptionIds, options = {}) {
     const transcript = await resolveVideoTranscript(
       { video_catalog: item.video_catalog, video_id: item.video_id },
       videoCatalogRepository
     );
+    const autoGenerateCaption = options.autoGenerateCaption !== false;
 
     // Quando o video ainda nao tem transcricao persistida, baixamos o arquivo do
     // Drive para que selectCaptionForVideo consiga transcrever e gerar a legenda
     // (mesmo fluxo do dispatch). Sem isso a selecao retorna null e a legenda e
     // reprovada como "Legenda vazia".
-    const shouldDownloadVideo = !transcript && Boolean(item.drive_file_id || item.video_id);
+    const shouldDownloadVideo = autoGenerateCaption && !transcript && Boolean(item.drive_file_id || item.video_id);
     const downloadedVideo = shouldDownloadVideo
       ? Promise.resolve(
           videoDownloader({
@@ -108,6 +122,7 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
       transcript,
       downloadedVideo,
       requireCaptionReview: true,
+      autoGenerateCaption,
       campaign_id: campaignId,
       group_id: item.group_id,
       progress_group_id: item.progress_group_id,
@@ -115,6 +130,12 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
     });
 
     if (!selected || !selected.text) {
+      // "Gerar legenda automaticamente" desativado: sem legenda pronta reaproveitavel,
+      // a legenda fica vazia para o usuario editar manualmente, sem marcar como erro.
+      if (!autoGenerateCaption) {
+        return { caption_id: undefined, caption_text: "" };
+      }
+
       await captionReviewService.assertCaptionApproved({
         caption: item.legenda,
         transcript,
@@ -137,7 +158,7 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
     };
   }
 
-  async function generateCaptionForItem(item, campaignId, usedCaptionIds) {
+  async function generateCaptionForItem(item, campaignId, usedCaptionIds, options = {}) {
     const pendingRow = await repository.createPending({
       campaign_id: campaignId,
       group_id: item.progress_group_id,
@@ -145,7 +166,7 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
     });
 
     try {
-      const generated = await resolveGeneratedCaption(item, campaignId, usedCaptionIds);
+      const generated = await resolveGeneratedCaption(item, campaignId, usedCaptionIds, options);
 
       return repository.markGenerated(pendingRow.id, generated);
     } catch (error) {
@@ -179,13 +200,17 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
       throw new Error("Campaign id is required");
     }
 
-    const { dispatchGroups } = await resolveCampaignDispatchGroups(campaignId);
+    const { dispatchGroups, dispatchRules } = await resolveCampaignDispatchGroups(campaignId);
     const usedCaptionIds = new Set();
     const results = [];
 
     for (const item of dispatchGroups) {
       try {
-        results.push(await generateCaptionForItem(item, campaignId, usedCaptionIds));
+        results.push(
+          await generateCaptionForItem(item, campaignId, usedCaptionIds, {
+            autoGenerateCaption: dispatchRules.auto_generate_caption,
+          })
+        );
       } catch (error) {
         logger.error &&
           logger.error(

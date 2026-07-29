@@ -11,6 +11,7 @@ const videoCatalogRepository = require("../repositories/video-catalog.repository
 const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
 const defaultWhatsappInstancesService = require("../services/whatsapp-instances.service");
 const defaultNotificationsService = require("../services/notifications.service");
+const defaultSettingsService = require("../services/settings.service");
 const {
   resolveGroupTrailId,
   resolveGroupsVideoFlow,
@@ -403,13 +404,21 @@ async function applyCampaignTrailFallback(group, campaign, dependencies = {}) {
   };
 }
 
+async function resolveDispatchRules(settingsService = defaultSettingsService) {
+  try {
+    return await settingsService.getDispatchRulesSettings();
+  } catch (error) {
+    return {};
+  }
+}
+
 function buildCampaignVideoFlowRepository(dependencies = {}) {
   const videosRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
   const progressRepository = dependencies.groupVideoProgressRepository || groupVideoProgressRepository;
   const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
 
   return {
-    async findNextApprovedUnsentVideoForGroup(group) {
+    async findNextApprovedUnsentVideoForGroup(group, options = {}) {
       const trailId = resolveGroupTrailId(group);
 
       if (!trailId) {
@@ -437,6 +446,7 @@ function buildCampaignVideoFlowRepository(dependencies = {}) {
         group,
         sentVideoIds,
         videos,
+        neverRepeatVideo: options.neverRepeatVideo,
       });
     },
   };
@@ -725,6 +735,8 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     dispatchLogs = dispatchLogsRepository,
     trilhasRepository: trilhasRepositoryOption = trilhasRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
+    settingsService: settingsServiceOption = defaultSettingsService,
+    notificationsService: notificationsServiceOption = defaultNotificationsService,
     logger = console,
   } = options;
 
@@ -742,10 +754,13 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
       .map((group) => applyCampaignTrailFallback(group, campaign, { trilhasRepository: trilhasRepositoryOption }))
   );
   const groups = groupsWithFallback.filter(isVideoEnabledGroup);
+  const dispatchRules = await resolveDispatchRules(settingsServiceOption);
   const flow = await resolveGroupsVideoFlow({
     campaign_id: campaignId,
     groups,
     repository: videoFlowRepository,
+    dispatchRules,
+    notificationsService: notificationsServiceOption,
     logger,
   });
   const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);
@@ -816,6 +831,7 @@ function createCampaignTriggerProcessor(options = {}) {
     trilhasRepository: trilhasRepositoryOption = trilhasRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     notificationsService = defaultNotificationsService,
+    settingsService: settingsServiceOption = defaultSettingsService,
     logger = console,
   } = options;
   const validateCampaignId = options.validateCampaignId ?? campaigns === campaignsRepository;
@@ -870,10 +886,13 @@ function createCampaignTriggerProcessor(options = {}) {
           .map((group) => applyCampaignTrailFallback(group, campaign, { trilhasRepository: trilhasRepositoryOption }))
       );
       const groups = groupsWithFallback.filter(isVideoEnabledGroup);
+      const dispatchRules = await resolveDispatchRules(settingsServiceOption);
       const flow = await resolveGroupsVideoFlow({
         campaign_id: job.data.campaign_id,
         groups,
         repository: videoFlowRepository,
+        dispatchRules,
+        notificationsService,
         logger,
       });
       const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);

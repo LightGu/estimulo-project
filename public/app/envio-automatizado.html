@@ -138,6 +138,11 @@
                     <p class="field-hint">Mínimo e máximo entre envios.</p>
                   </div>
 
+                  <div class="field field-timezone">
+                    <label>Fuso horário</label>
+                    <p class="field-hint" id="scheduleTimezoneHint">Carregando…</p>
+                  </div>
+
                   <div class="field field-action">
                     <label>Ação</label>
                     <button class="btn" id="dispatchButton" type="button">Disparar campanha</button>
@@ -326,6 +331,8 @@
         trilhaNameById: new Map(),
         progressByGroup: new Map(),
         currentCampaignIds: [],
+        timezone: null,
+        dispatchRules: null,
       };
 
       let selectedGroupId = null;
@@ -599,10 +606,12 @@
                 <div class="progress"><span style="width:${pct}%"></span></div>
               </div>`;
 
+            const canForceResend = state.dispatchRules && state.dispatchRules.never_repeat_video === false;
+
             videosTableHtml = `
               <div class="table-wrap table-flat" style="margin-top:14px;">
                 <table class="table-compact">
-                  <thead><tr><th>#</th><th>Vídeo</th><th>Status</th><th>Enviado em</th></tr></thead>
+                  <thead><tr><th>#</th><th>Vídeo</th><th>Status</th><th>Enviado em</th>${canForceResend ? "<th></th>" : ""}</tr></thead>
                   <tbody>
                     ${status.rows
                       .map(
@@ -618,6 +627,15 @@
                             : '<span class="badge badge-neutral">Pendente</span>'
                         }</td>
                         <td class="mono">${escapeHtml(v.enviado_em || "—")}</td>
+                        ${
+                          canForceResend
+                            ? `<td>${
+                                v.status === "proximo"
+                                  ? '<span class="text-faint" style="font-size:11px;">Já é o próximo</span>'
+                                  : `<button class="btn btn-secondary btn-sm" data-force-next-video="${escapeHtml(v.id)}" data-force-next-group="${escapeHtml(group.id)}">Enviar agora</button>`
+                              }</td>`
+                            : ""
+                        }
                       </tr>`
                       )
                       .join("")}
@@ -644,6 +662,10 @@
             ${progressHtml}
             ${videosTableHtml}
           </div>`;
+
+        document.querySelectorAll("[data-force-next-video]").forEach((button) =>
+          button.addEventListener("click", () => forceNextVideo(button.dataset.forceNextGroup, button.dataset.forceNextVideo, button))
+        );
 
         if (editingThis) {
           document.getElementById("confirmTrilhaChange").addEventListener("click", async () => {
@@ -680,6 +702,33 @@
             editingTrilhaGroupId = group.id;
             renderDetail();
           });
+        }
+      }
+
+      async function forceNextVideo(groupId, videoId, button) {
+        button.disabled = true;
+
+        try {
+          await requestJson(`/groups/${encodeURIComponent(groupId)}/force-next-video`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ video_id: videoId }),
+          });
+
+          state.progressByGroup.delete(groupId);
+          await loadProgressForGroup(groupId);
+          renderDetail();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          button.disabled = false;
+        }
+      }
+
+      async function loadDispatchRules() {
+        try {
+          state.dispatchRules = await requestJson("/settings/dispatch-rules");
+        } catch (error) {
+          state.dispatchRules = null;
         }
       }
 
@@ -771,6 +820,7 @@
               },
               jitter_delay_min_ms: delayMinMin * 60000,
               jitter_delay_max_ms: delayMaxMin * 60000,
+              timezone: state.timezone || undefined,
             }),
           });
 
@@ -1037,6 +1087,7 @@
                   },
                   jitter_delay_min_ms: delayMinMin * 60000,
                   jitter_delay_max_ms: delayMaxMin * 60000,
+                  timezone: state.timezone || undefined,
                 }),
               })
             )
@@ -1110,6 +1161,7 @@
       }
 
       async function loadDefaultScheduleSettings() {
+        const timezoneHint = document.getElementById("scheduleTimezoneHint");
         try {
           const settings = await requestJson("/settings/schedule");
           if (settings.min_interval_min !== undefined) {
@@ -1118,14 +1170,20 @@
           if (settings.max_interval_min !== undefined) {
             document.getElementById("delayMax").value = settings.max_interval_min;
           }
+          state.timezone = settings.timezone || null;
+          timezoneHint.textContent = state.timezone
+            ? `Horários registrados em ${state.timezone}.`
+            : "Não foi possível carregar o fuso configurado.";
         } catch (error) {
           // mantém os valores padrão exibidos no HTML caso a chamada falhe
+          timezoneHint.textContent = "Não foi possível carregar o fuso configurado.";
         }
       }
 
       async function initialize() {
         renderPeriodChips();
         loadDefaultScheduleSettings();
+        await loadDispatchRules();
 
         try {
           const [groups, organizations] = await Promise.all([

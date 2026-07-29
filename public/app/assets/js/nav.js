@@ -180,9 +180,46 @@
     actions.insertBefore(btn, actions.firstChild);
   }
 
+  // ---------- User chip (topbar) ----------
+  // Loads the current user's display name from /settings/profile and fills
+  // in the topbar chip (avatar initials + name) on every page.
+  function initialsFor(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+
+    if (!parts.length) {
+      return "?";
+    }
+
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+  }
+
+  function applyUserChipName(name) {
+    const chip = document.querySelector(".user-chip");
+    if (!chip) return;
+
+    const avatar = chip.querySelector(".avatar");
+    if (avatar) avatar.textContent = initialsFor(name);
+
+    chip.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) node.remove();
+    });
+    chip.appendChild(document.createTextNode(` ${name}`));
+  }
+
+  window.estimuloRefreshUserChip = async function estimuloRefreshUserChip() {
+    try {
+      const response = await fetch("/settings/profile");
+      const data = await response.json();
+      if (data && data.profile_name) applyUserChipName(data.profile_name);
+    } catch (error) {
+      /* mantém o nome já exibido no HTML caso a chamada falhe */
+    }
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     render();
     initThemeToggle();
+    window.estimuloRefreshUserChip();
   });
 
   // ---------- Confirm modal ----------

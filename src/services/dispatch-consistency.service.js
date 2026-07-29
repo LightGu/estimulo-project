@@ -3,6 +3,7 @@ const groupVideoProgressRepository = require("../repositories/group-video-progre
 const campaignsRepository = require("../repositories/campaigns.repository");
 const groupsRepository = require("../repositories/groups.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const defaultSettingsService = require("./settings.service");
 
 function isFailureLikeStatus(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -49,6 +50,7 @@ function createDispatchConsistencyService(dependencies = {}) {
   const campaignsRepositoryDependency = dependencies.campaignsRepository || campaignsRepository;
   const groupsRepositoryDependency = dependencies.groupsRepository || groupsRepository;
   const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
+  const settingsService = dependencies.settingsService || defaultSettingsService;
   const logger = dependencies.logger || console;
 
   async function ensureDispatchEntities(campaignId, groupId, videoId) {
@@ -125,31 +127,62 @@ function createDispatchConsistencyService(dependencies = {}) {
     return { log, created: true, skipSend: false };
   }
 
-  async function registerProgress(groupId, videoId, trilhaId) {
+  async function registerProgress(groupId, videoId, trilhaId, options = {}) {
     if (!groupId || !videoId) {
       return null;
     }
 
     const duplicate = await groupVideoProgressRepositoryDependency.hasDuplicate(groupId, videoId);
+    let record;
 
     if (duplicate) {
-      return { duplicate: true, record: null };
+      if (options.neverRepeatVideo === false) {
+        record = await groupVideoProgressRepositoryDependency.upsertDelivery({
+          group_id: groupId,
+          video_id: videoId,
+          trilha_id: trilhaId || null,
+        });
+      } else {
+        return { duplicate: true, record: null };
+      }
+    } else {
+      record = await groupVideoProgressRepositoryDependency.registerDelivery({
+        group_id: groupId,
+        video_id: videoId,
+        trilha_id: trilhaId || null,
+      });
     }
 
-    const record = await groupVideoProgressRepositoryDependency.registerDelivery({
-      group_id: groupId,
-      video_id: videoId,
-      trilha_id: trilhaId || null,
-    });
+    const groupUpdate = { ...(trilhaId ? { trilha_id: trilhaId } : {}) };
 
-    if (trilhaId) {
-      await groupsRepositoryDependency.update(groupId, { trilha_id: trilhaId });
+    if (options.forcedNextVideoId && options.forcedNextVideoId === videoId) {
+      groupUpdate.forced_next_video_id = null;
+    }
+
+    if (Object.keys(groupUpdate).length > 0) {
+      await groupsRepositoryDependency.update(groupId, groupUpdate);
     }
 
     return { duplicate: false, record };
   }
 
   async function markCampaignFailed(campaignId) {
+    let autoRetryFailures = false;
+
+    try {
+      const dispatchRules = await settingsService.getDispatchRulesSettings();
+      autoRetryFailures = Boolean(dispatchRules.auto_retry_failures);
+    } catch (error) {
+      autoRetryFailures = false;
+    }
+
+    // Quando o reprocessamento automatico de falhas esta ativo, o worker de retry
+    // (dispatch-failure-retry.js) e quem decide o destino do log "falhou"; manter a
+    // campanha ativa evita que ela seja desativada antes do proximo reprocessamento.
+    if (autoRetryFailures) {
+      return;
+    }
+
     if (campaignsRepositoryDependency && typeof campaignsRepositoryDependency.update === "function") {
       await campaignsRepositoryDependency.update(campaignId, { ativo: false });
     }
@@ -163,6 +196,8 @@ function createDispatchConsistencyService(dependencies = {}) {
       trilhaId,
       sender,
       deliveryPayload,
+      neverRepeatVideo,
+      forcedNextVideoId,
     } = options;
 
     writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.started", {
@@ -276,7 +311,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         video_id: videoId,
         log_id: log.id,
       });
-      const progress = await registerProgress(groupId, videoId, trilhaId);
+      const progress = await registerProgress(groupId, videoId, trilhaId, { neverRepeatVideo, forcedNextVideoId });
       writeStageLog(logger, "info", "dispatch_consistency.progress.completed", {
         campaign_id: campaignId,
         group_id: groupId,
