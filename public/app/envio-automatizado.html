@@ -138,6 +138,11 @@
                     <p class="field-hint">Mínimo e máximo entre envios.</p>
                   </div>
 
+                  <div class="field field-timezone">
+                    <label>Fuso horário</label>
+                    <p class="field-hint" id="scheduleTimezoneHint">Carregando…</p>
+                  </div>
+
                   <div class="field field-action">
                     <label>Ação</label>
                     <button class="btn" id="dispatchButton" type="button">Disparar campanha</button>
@@ -327,6 +332,8 @@
         trilhaNameById: new Map(),
         progressByGroup: new Map(),
         currentCampaignIds: [],
+        timezone: null,
+        dispatchRules: null,
       };
 
       let selectedGroupId = null;
@@ -600,10 +607,12 @@
                 <div class="progress"><span style="width:${pct}%"></span></div>
               </div>`;
 
+            const canForceResend = state.dispatchRules && state.dispatchRules.never_repeat_video === false;
+
             videosTableHtml = `
               <div class="table-wrap table-flat" style="margin-top:14px;">
                 <table class="table-compact">
-                  <thead><tr><th>#</th><th>Vídeo</th><th>Status</th><th>Enviado em</th></tr></thead>
+                  <thead><tr><th>#</th><th>Vídeo</th><th>Status</th><th>Enviado em</th>${canForceResend ? "<th></th>" : ""}</tr></thead>
                   <tbody>
                     ${status.rows
                       .map(
@@ -619,6 +628,15 @@
                             : '<span class="badge has-tip badge-neutral" data-tip="Ainda não é a vez deste vídeo — está na fila após o próximo a enviar." data-tip-tone="neutral">Pendente</span>'
                         }</td>
                         <td class="mono">${escapeHtml(v.enviado_em || "—")}</td>
+                        ${
+                          canForceResend
+                            ? `<td>${
+                                v.status === "proximo"
+                                  ? '<span class="text-faint" style="font-size:11px;">Já é o próximo</span>'
+                                  : `<button class="btn btn-secondary btn-sm" data-force-next-video="${escapeHtml(v.id)}" data-force-next-group="${escapeHtml(group.id)}">Enviar agora</button>`
+                              }</td>`
+                            : ""
+                        }
                       </tr>`
                       )
                       .join("")}
@@ -646,6 +664,10 @@
             ${videosTableHtml}
           </div>`;
 
+        document.querySelectorAll("[data-force-next-video]").forEach((button) =>
+          button.addEventListener("click", () => forceNextVideo(button.dataset.forceNextGroup, button.dataset.forceNextVideo, button))
+        );
+
         if (editingThis) {
           document.getElementById("confirmTrilhaChange").addEventListener("click", async () => {
             const novaTrilhaId = document.getElementById("trilhaChangeSelect").value || null;
@@ -668,7 +690,7 @@
               renderGroupList();
               renderDetail();
             } catch (error) {
-              alert(error.message);
+              window.estimuloAlert(error.message);
               confirmButton.disabled = false;
             }
           });
@@ -681,6 +703,33 @@
             editingTrilhaGroupId = group.id;
             renderDetail();
           });
+        }
+      }
+
+      async function forceNextVideo(groupId, videoId, button) {
+        button.disabled = true;
+
+        try {
+          await requestJson(`/groups/${encodeURIComponent(groupId)}/force-next-video`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ video_id: videoId }),
+          });
+
+          state.progressByGroup.delete(groupId);
+          await loadProgressForGroup(groupId);
+          renderDetail();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          button.disabled = false;
+        }
+      }
+
+      async function loadDispatchRules() {
+        try {
+          state.dispatchRules = await requestJson("/settings/dispatch-rules");
+        } catch (error) {
+          state.dispatchRules = null;
         }
       }
 
@@ -772,6 +821,7 @@
               },
               jitter_delay_min_ms: delayMinMin * 60000,
               jitter_delay_max_ms: delayMaxMin * 60000,
+              timezone: state.timezone || undefined,
             }),
           });
 
@@ -924,7 +974,12 @@
               <td>${captionStatusBadge(item)}</td>
               <td>${
                 item.status !== "processando"
-                  ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>`
+                  ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>
+                     ${
+                       item.status === "erro"
+                         ? `<button class="btn-icon btn-secondary" data-regenerate="${item.id}" title="Tentar gerar legenda novamente">${icon("refresh")}</button>`
+                         : ""
+                     }`
                   : '<span class="text-faint">—</span>'
               }</td>
             </tr>`;
@@ -932,6 +987,7 @@
           .join("");
 
         document.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openCaptionModal(btn.dataset.edit)));
+        document.querySelectorAll("[data-regenerate]").forEach((btn) => btn.addEventListener("click", () => regenerateCaption(btn.dataset.regenerate, btn)));
       }
 
       document.getElementById("captionFilterTabs").addEventListener("click", (e) => {
@@ -976,11 +1032,27 @@
           closeCaptionModal();
           await refreshCaptionProgress();
         } catch (error) {
-          alert(error.message);
+          window.estimuloAlert(error.message);
         } finally {
           saveButton.disabled = false;
         }
       });
+
+      async function regenerateCaption(itemId, button) {
+        const item = captionItems.find((i) => i.id === itemId);
+        if (!item) return;
+
+        button.disabled = true;
+        try {
+          await requestJson(`/campaigns/${encodeURIComponent(item.campaignId)}/captions/${encodeURIComponent(itemId)}/regenerate`, {
+            method: "POST",
+          });
+          await refreshCaptionProgress();
+        } catch (error) {
+          window.estimuloAlert(`Falha ao tentar gerar a legenda novamente: ${error.message}`);
+          button.disabled = false;
+        }
+      }
 
       document.getElementById("startSendButton").addEventListener("click", async () => {
         const pendentes = captionItems.filter((i) => i.status !== "gerado").length;
@@ -1020,6 +1092,7 @@
                   },
                   jitter_delay_min_ms: delayMinMin * 60000,
                   jitter_delay_max_ms: delayMaxMin * 60000,
+                  timezone: state.timezone || undefined,
                 }),
               })
             )
@@ -1066,7 +1139,12 @@
           closeBackToConfigModal();
           goToStep(1);
         } catch (error) {
-          alert(`Falha ao apagar o disparo: ${error.message}`);
+          // Mensagens de regra de negocio (ex.: disparo ja enviado) ja vem prontas
+          // do backend; nesse caso mostramos direto, sem o prefixo de falha tecnica.
+          const isBusinessRuleMessage = /já teve envios|não pode ser apagado/i.test(error.message || "");
+          window.estimuloAlert(
+            isBusinessRuleMessage ? error.message : `Falha ao apagar o disparo: ${error.message}`
+          );
         } finally {
           confirmButton.disabled = false;
         }
@@ -1087,8 +1165,30 @@
           <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
       }
 
+      async function loadDefaultScheduleSettings() {
+        const timezoneHint = document.getElementById("scheduleTimezoneHint");
+        try {
+          const settings = await requestJson("/settings/schedule");
+          if (settings.min_interval_min !== undefined) {
+            document.getElementById("delayMin").value = settings.min_interval_min;
+          }
+          if (settings.max_interval_min !== undefined) {
+            document.getElementById("delayMax").value = settings.max_interval_min;
+          }
+          state.timezone = settings.timezone || null;
+          timezoneHint.textContent = state.timezone
+            ? `Horários registrados em ${state.timezone}.`
+            : "Não foi possível carregar o fuso configurado.";
+        } catch (error) {
+          // mantém os valores padrão exibidos no HTML caso a chamada falhe
+          timezoneHint.textContent = "Não foi possível carregar o fuso configurado.";
+        }
+      }
+
       async function initialize() {
         renderPeriodChips();
+        loadDefaultScheduleSettings();
+        await loadDispatchRules();
 
         try {
           const [groups, organizations] = await Promise.all([

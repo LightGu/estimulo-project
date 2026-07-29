@@ -1,4 +1,5 @@
 const { createAIProviderAdapter } = require("./ai");
+const defaultAISettingsService = require("./ai/ai-settings.service");
 
 class CaptionReviewRejectedError extends Error {
   constructor(message, review = {}) {
@@ -71,12 +72,18 @@ function createCaptionReviewService(dependencies = {}) {
   const configuredAIOptions = {
     ...(dependencies.ai || {}),
     gemini: dependencies.gemini,
-    openai: dependencies.openai,
   };
   const logger = dependencies.logger || console;
+  const aiSettingsService = dependencies.aiSettingsService || defaultAISettingsService;
 
-  function getAIProviderAdapter() {
-    return dependencies.aiProviderAdapter || createAIProviderAdapter(configuredAIOptions);
+  async function getAIProviderAdapter() {
+    if (dependencies.aiProviderAdapter) {
+      return dependencies.aiProviderAdapter;
+    }
+
+    const agentOptions = await aiSettingsService.getAgentAIOptions("caption_review");
+
+    return createAIProviderAdapter({ ...configuredAIOptions, ...agentOptions });
   }
 
   async function reviewCaption(params = {}) {
@@ -88,7 +95,7 @@ function createCaptionReviewService(dependencies = {}) {
     if (inputError) {
       review = inputError;
     } else {
-      const adapter = params.aiProviderAdapter || getAIProviderAdapter();
+      const adapter = params.aiProviderAdapter || (await getAIProviderAdapter());
 
       if (!adapter || typeof adapter.reviewCaptionConsistency !== "function") {
         throw new Error("AIProviderAdapter invalido: reviewCaptionConsistency e obrigatorio");

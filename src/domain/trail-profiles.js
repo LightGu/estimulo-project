@@ -1,6 +1,4 @@
-const TRAIL_PROFILES = ["Pré-infância", "Infância", "Adolescência", "Maturidade"];
-
-function normalizePerfis(rawPerfis, { required = true } = {}) {
+function normalizePerfis(rawPerfis, { required = true, validPerfis } = {}) {
   const perfis = Array.isArray(rawPerfis)
     ? Array.from(new Set(rawPerfis.map((perfil) => String(perfil || "").trim()).filter(Boolean)))
     : [];
@@ -9,13 +7,15 @@ function normalizePerfis(rawPerfis, { required = true } = {}) {
     throw new Error("At least one perfil is required");
   }
 
-  const invalid = perfis.find((perfil) => !TRAIL_PROFILES.includes(perfil));
+  if (Array.isArray(validPerfis)) {
+    const invalid = perfis.find((perfil) => !validPerfis.includes(perfil));
 
-  if (invalid) {
-    throw new Error(`Invalid perfil: ${invalid}`);
+    if (invalid) {
+      throw new Error(`Invalid perfil: ${invalid}`);
+    }
   }
 
   return perfis;
 }
 
-module.exports = { TRAIL_PROFILES, normalizePerfis };
+module.exports = { normalizePerfis };

@@ -6,6 +6,7 @@ async function main() {
   const createdLogs = [];
   const createdProgress = [];
   const campaignUpdates = [];
+  const groupUpdates = [];
   const operationOrder = [];
 
   const dispatchLogsRepository = {
@@ -46,10 +47,14 @@ async function main() {
 
   const groupsRepository = {
     findById: async (id) => (id === "group-1" ? { id, nome: "Grupo" } : null),
+    update: async (id, payload) => {
+      groupUpdates.push({ id, payload });
+      return { id, ...payload };
+    },
   };
 
   const videoCatalogRepository = {
-    findById: async (id) => (["video-1", "video-2"].includes(id) ? { id, drive_file_id: "drive-1" } : null),
+    findById: async (id) => (["video-1", "video-2", "video-3"].includes(id) ? { id, drive_file_id: "drive-1" } : null),
   };
 
   const service = createDispatchConsistencyService({
@@ -58,6 +63,11 @@ async function main() {
     campaignsRepository,
     groupsRepository,
     videoCatalogRepository,
+    // Com auto_retry_failures desligado, uma falha de envio desativa a campanha
+    // (comportamento legado, sem o worker de reprocessamento automatico).
+    settingsService: {
+      getDispatchRulesSettings: async () => ({ auto_retry_failures: false }),
+    },
   });
 
   const firstRun = await service.executeDispatch({
@@ -74,6 +84,7 @@ async function main() {
   assert.equal(createdLogs[0].status, "enviado");
   assert.ok(operationOrder.indexOf("log:enviado") < operationOrder.indexOf("progress:register"));
   assert.equal(campaignUpdates.length, 0);
+  assert.equal(groupUpdates.length, 0);
 
   const secondRun = await service.executeDispatch({
     campaignId: "campaign-1",
@@ -126,6 +137,18 @@ async function main() {
 
   assert.match(unconfirmedSend.message, /status 500/);
   assert.equal(createdProgress.length, 1);
+
+  const withTrailRun = await service.executeDispatch({
+    campaignId: "campaign-1",
+    groupId: "group-1",
+    videoId: "video-3",
+    trilhaId: "trilha-1",
+    sender: async () => ({ ok: true }),
+    deliveryPayload: { message: "ok" },
+  });
+
+  assert.equal(withTrailRun.status, "enviado");
+  assert.deepEqual(groupUpdates, [{ id: "group-1", payload: { trilha_id: "trilha-1" } }]);
 
   console.log("integration-dispatch-flow tests OK");
 }

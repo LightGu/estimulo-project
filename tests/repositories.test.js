@@ -118,7 +118,6 @@ async function main() {
     await campaignsRepository.findById("camp-1", client);
     await campaignsRepository.findAll(client);
     await campaignsRepository.listActive(client);
-    await campaignsRepository.findByData("2026-07-21", client);
     await campaignsRepository.delete("camp-1", client);
 
     await campaignGroupsRepository.associateGroup("camp-1", "group-1", "org-1", client);

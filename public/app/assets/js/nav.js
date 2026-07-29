@@ -238,8 +238,251 @@
     actions.insertBefore(btn, actions.firstChild);
   }
 
+  // ---------- User chip (topbar) ----------
+  // Loads the current user's display name from /settings/profile and fills
+  // in the topbar chip (avatar initials + name) on every page.
+  function initialsFor(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+
+    if (!parts.length) {
+      return "?";
+    }
+
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+  }
+
+  function applyUserChipName(name) {
+    const chip = document.querySelector(".user-chip");
+    if (!chip) return;
+
+    const avatar = chip.querySelector(".avatar");
+    if (avatar) avatar.textContent = initialsFor(name);
+
+    chip.childNodes.forEach((node) => {
+      if (node.nodeType === Node.TEXT_NODE) node.remove();
+    });
+    chip.appendChild(document.createTextNode(` ${name}`));
+  }
+
+  window.estimuloRefreshUserChip = async function estimuloRefreshUserChip() {
+    try {
+      const response = await fetch("/settings/profile");
+      const data = await response.json();
+      if (data && data.profile_name) applyUserChipName(data.profile_name);
+    } catch (error) {
+      /* mantém o nome já exibido no HTML caso a chamada falhe */
+    }
+  };
+
   document.addEventListener("DOMContentLoaded", () => {
     render();
     initThemeToggle();
+    window.estimuloRefreshUserChip();
   });
+
+  // ---------- Confirm modal ----------
+  // Replaces the native window.confirm() with an in-app modal that matches the
+  // rest of the UI (overlay/.modal already styled in components.css), so
+  // destructive actions never trigger the browser's own popup.
+  let confirmOverlay = null;
+  let confirmResolve = null;
+
+  function ensureConfirmModal() {
+    if (confirmOverlay) return confirmOverlay;
+
+    confirmOverlay = document.createElement("div");
+    confirmOverlay.className = "overlay";
+    confirmOverlay.id = "estimuloConfirmOverlay";
+    confirmOverlay.hidden = true;
+    confirmOverlay.innerHTML = `
+      <div class="modal" style="width:min(420px, 100%);" role="alertdialog" aria-modal="true" aria-labelledby="estimuloConfirmTitle">
+        <div class="modal-header">
+          <h3 id="estimuloConfirmTitle">Confirmar ação</h3>
+          <button class="icon-btn-close" type="button" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="estimuloConfirmMessage" style="margin:0;"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" type="button" data-action="cancel">Cancelar</button>
+          <button class="btn btn-danger" type="button" data-action="confirm">Confirmar</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(confirmOverlay);
+
+    const settle = (result) => {
+      confirmOverlay.hidden = true;
+      if (confirmResolve) {
+        const resolve = confirmResolve;
+        confirmResolve = null;
+        resolve(result);
+      }
+    };
+
+    confirmOverlay.querySelector('[data-action="cancel"]').addEventListener("click", () => settle(false));
+    confirmOverlay.querySelector('[data-action="confirm"]').addEventListener("click", () => settle(true));
+    confirmOverlay.querySelector(".icon-btn-close").addEventListener("click", () => settle(false));
+    confirmOverlay.addEventListener("click", (event) => {
+      if (event.target === confirmOverlay) settle(false);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !confirmOverlay.hidden) settle(false);
+    });
+
+    return confirmOverlay;
+  }
+
+  // Usage: const ok = await window.estimuloConfirm("Remover este item?");
+  window.estimuloConfirm = function estimuloConfirm(message, options) {
+    const overlay = ensureConfirmModal();
+    const opts = options || {};
+    overlay.querySelector("#estimuloConfirmMessage").textContent = message || "Tem certeza?";
+    overlay.querySelector("#estimuloConfirmTitle").textContent = opts.title || "Confirmar ação";
+    overlay.querySelector('[data-action="confirm"]').textContent = opts.confirmLabel || "Confirmar";
+    overlay.querySelector('[data-action="cancel"]').textContent = opts.cancelLabel || "Cancelar";
+
+    return new Promise((resolve) => {
+      confirmResolve = resolve;
+      overlay.hidden = false;
+      overlay.querySelector('[data-action="confirm"]').focus();
+    });
+  };
+
+  // ---------- Alert modal ----------
+  // Replaces window.alert() so informational/error messages also render as an
+  // in-app modal instead of the browser's own popup.
+  let alertOverlay = null;
+  let alertResolve = null;
+
+  function ensureAlertModal() {
+    if (alertOverlay) return alertOverlay;
+
+    alertOverlay = document.createElement("div");
+    alertOverlay.className = "overlay";
+    alertOverlay.id = "estimuloAlertOverlay";
+    alertOverlay.hidden = true;
+    alertOverlay.innerHTML = `
+      <div class="modal" style="width:min(420px, 100%);" role="alertdialog" aria-modal="true" aria-labelledby="estimuloAlertTitle">
+        <div class="modal-header">
+          <h3 id="estimuloAlertTitle">Aviso</h3>
+          <button class="icon-btn-close" type="button" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="estimuloAlertMessage" style="margin:0;"></p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" type="button" data-action="ok">OK</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(alertOverlay);
+
+    const settle = () => {
+      alertOverlay.hidden = true;
+      if (alertResolve) {
+        const resolve = alertResolve;
+        alertResolve = null;
+        resolve();
+      }
+    };
+
+    alertOverlay.querySelector('[data-action="ok"]').addEventListener("click", settle);
+    alertOverlay.querySelector(".icon-btn-close").addEventListener("click", settle);
+    alertOverlay.addEventListener("click", (event) => {
+      if (event.target === alertOverlay) settle();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !alertOverlay.hidden) settle();
+    });
+
+    return alertOverlay;
+  }
+
+  // Usage: await window.estimuloAlert("Algo deu errado.");
+  window.estimuloAlert = function estimuloAlert(message, options) {
+    const overlay = ensureAlertModal();
+    const opts = options || {};
+    overlay.querySelector("#estimuloAlertMessage").textContent = message || "";
+    overlay.querySelector("#estimuloAlertTitle").textContent = opts.title || "Aviso";
+
+    return new Promise((resolve) => {
+      alertResolve = resolve;
+      overlay.hidden = false;
+      overlay.querySelector('[data-action="ok"]').focus();
+    });
+  };
+
+  // ---------- Prompt modal ----------
+  // Replaces window.prompt() with an in-app modal with a text field.
+  let promptOverlay = null;
+  let promptResolve = null;
+
+  function ensurePromptModal() {
+    if (promptOverlay) return promptOverlay;
+
+    promptOverlay = document.createElement("div");
+    promptOverlay.className = "overlay";
+    promptOverlay.id = "estimuloPromptOverlay";
+    promptOverlay.hidden = true;
+    promptOverlay.innerHTML = `
+      <div class="modal" style="width:min(420px, 100%);" role="dialog" aria-modal="true" aria-labelledby="estimuloPromptTitle">
+        <div class="modal-header">
+          <h3 id="estimuloPromptTitle">Informe um valor</h3>
+          <button class="icon-btn-close" type="button" aria-label="Fechar">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="estimuloPromptMessage" style="margin:0;"></p>
+          <input id="estimuloPromptInput" type="text">
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" type="button" data-action="cancel">Cancelar</button>
+          <button class="btn" type="button" data-action="ok">OK</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(promptOverlay);
+
+    const input = promptOverlay.querySelector("#estimuloPromptInput");
+
+    const settle = (result) => {
+      promptOverlay.hidden = true;
+      if (promptResolve) {
+        const resolve = promptResolve;
+        promptResolve = null;
+        resolve(result);
+      }
+    };
+
+    promptOverlay.querySelector('[data-action="cancel"]').addEventListener("click", () => settle(null));
+    promptOverlay.querySelector('[data-action="ok"]').addEventListener("click", () => settle(input.value.trim() || null));
+    promptOverlay.querySelector(".icon-btn-close").addEventListener("click", () => settle(null));
+    promptOverlay.addEventListener("click", (event) => {
+      if (event.target === promptOverlay) settle(null);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") settle(input.value.trim() || null);
+      if (event.key === "Escape") settle(null);
+    });
+
+    return promptOverlay;
+  }
+
+  // Usage: const value = await window.estimuloPrompt("Nome da instância:");
+  window.estimuloPrompt = function estimuloPrompt(message, options) {
+    const overlay = ensurePromptModal();
+    const opts = options || {};
+    const input = overlay.querySelector("#estimuloPromptInput");
+    overlay.querySelector("#estimuloPromptMessage").textContent = message || "";
+    overlay.querySelector("#estimuloPromptTitle").textContent = opts.title || "Informe um valor";
+    input.value = opts.defaultValue || "";
+    input.placeholder = opts.placeholder || "";
+
+    return new Promise((resolve) => {
+      promptResolve = resolve;
+      overlay.hidden = false;
+      overlay.querySelector('[data-action="ok"]').focus();
+      input.focus();
+    });
+  };
 })();

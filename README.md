@@ -39,24 +39,21 @@ Para entregas no WhatsApp, use `src/services/evolution.js`; nenhuma outra parte 
 
 Mais detalhes e exemplos estao em `docs/filas.md` e `docs/evolution-api.md`.
 
-### Provedor de IA para legendas
+### IA para legendas (Gemini)
 
-A geracao de legenda/transcricao de videos usa um adapter configuravel. Defina o provedor em `AI_PROVIDER` para alternar entre Gemini e GPT/OpenAI sem alterar codigo ou fazer novo deploy:
+A geracao de legenda/transcricao de videos usa exclusivamente o Gemini, via `GeminiAdapter` em `src/services/ai`:
 
 ```env
-AI_PROVIDER=gemini
 GEMINI_API_KEY=change-me
 GEMINI_TRANSCRIPTION_MODEL=gemini-flash-latest
 GEMINI_TEXT_MODEL=gemini-flash-latest
-
-# ou
-AI_PROVIDER=gpt
-OPENAI_API_KEY=change-me
-OPENAI_TRANSCRIPTION_MODEL=gpt-4o-mini-transcribe
-OPENAI_TRANSCRIPTION_LANGUAGE=pt
 ```
 
-Valores aceitos: `gemini`, `openai` ou `gpt`. Os adapters disponiveis ficam em `src/services/ai`: `GeminiAdapter` e `OpenAIAdapter`.
+Essas variaveis servem apenas como valor inicial (seed). O modelo principal, a
+cascata de fallback e os prompts de geracao/revisao de legenda por agente
+(transcricao, geracao de legenda, revisao de legenda) sao configurados pela
+tela de Configuracoes e persistidos na tabela `settings` (coluna `ai_agents`),
+que passa a ser a fonte de verdade assim que o usuario salvar pela UI.
 
 ### Iniciar ambiente local
 

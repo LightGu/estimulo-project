@@ -34,6 +34,7 @@ class EvolutionApiError extends Error {
     this.status = details.status;
     this.response = details.response;
     this.cause = details.cause;
+    this.code = details.code;
   }
 }
 
@@ -42,11 +43,13 @@ function normalizeBaseUrl(baseUrl) {
   return baseUrl.replace(/\/+$/, "");
 }
 
-function createEvolutionClient(config = evolutionConfig) {
+function createEvolutionClient(config = evolutionConfig, options = {}) {
   // Client HTTP isolado para manter autenticacao e timeout fora do fluxo de negocio.
+  const timeout = options.timeoutMs || config.timeoutMs;
+
   return axios.create({
     baseURL: normalizeBaseUrl(config.baseUrl),
-    timeout: config.timeoutMs,
+    timeout,
     headers: {
       apikey: config.apiKey,
       "Content-Type": "application/json",
@@ -153,6 +156,14 @@ function buildFetchAllGroupsRequest(config = evolutionConfig, options = {}) {
   };
 }
 
+const TIMEOUT_ERROR_CODES = new Set(["ECONNABORTED", "ETIMEDOUT"]);
+
+function isAxiosTimeout(error) {
+  // O axios usa ECONNABORTED para timeout de `timeout:` config; ETIMEDOUT vem do socket/DNS.
+  // A mensagem tambem carrega "timeout" em alguns casos sem um `code` definido.
+  return TIMEOUT_ERROR_CODES.has(error.code) || /timeout/i.test(error.message || "");
+}
+
 function parseEvolutionError(error) {
   // Converte erros do axios em um erro unico do modulo, com dados uteis para log/retry.
   if (error.response) {
@@ -164,7 +175,22 @@ function parseEvolutionError(error) {
   }
 
   if (error.request) {
+    // Timeout (`ECONNABORTED`/`ETIMEDOUT`) nao significa que a Evolution API esta fora do
+    // ar: a requisicao pode ter sido processada e a midia entregue mesmo assim, so nao
+    // respondeu dentro do prazo. Diferenciamos aqui para log/notificacao nao afirmarem
+    // "indisponivel" quando na verdade foi so demora (comum em envio de video grande).
+    if (isAxiosTimeout(error)) {
+      return new EvolutionApiError(
+        "Tempo limite excedido aguardando resposta da Evolution API (a midia pode ter sido entregue mesmo assim)",
+        {
+          code: "EVOLUTION_TIMEOUT",
+          cause: error,
+        },
+      );
+    }
+
     return new EvolutionApiError("Evolution API indisponivel ou sem resposta", {
+      code: "EVOLUTION_NO_RESPONSE",
       cause: error,
     });
   }
@@ -185,9 +211,14 @@ class EvolutionDeliveryProvider {
     // Contrato unico de envio: o restante da aplicacao nao conhece endpoints da Evolution.
     const request = buildEvolutionRequest(params, this.config);
     const payload = request.hasContent ? await buildMediaPayload(params) : buildTextPayload(params);
+    // Midia usa um timeout maior (config.mediaTimeoutMs) pois o payload em base64 e o
+    // processamento na Evolution API demoram bem mais do que uma mensagem de texto.
+    const requestTimeout = request.hasContent ? this.config.mediaTimeoutMs : this.config.timeoutMs;
 
     try {
-      const response = await this.client.post(request.endpoint, payload);
+      const response = await this.client.post(request.endpoint, payload, {
+        timeout: requestTimeout,
+      });
 
       return {
         provider: "evolution",
@@ -247,6 +278,8 @@ module.exports = {
   EvolutionDeliveryProvider,
   buildFetchAllGroupsRequest,
   buildEvolutionRequest,
+  createEvolutionClient,
   fetchAllGroupsFromEvolution,
+  parseEvolutionError,
   sendToEvolution,
 };
