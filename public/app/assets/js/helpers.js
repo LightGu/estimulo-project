@@ -17,18 +17,6 @@ function perfilForTrilha(nome) {
   return trail ? trail.perfil : "";
 }
 
-function formatDiaMes(dateStr) {
-  if (!dateStr) return "--/--";
-  const [, m, d] = dateStr.split("-");
-  return `${d}/${m}`;
-}
-
-function campaignLabel(campaign) {
-  const perfil = perfilForTrilha(campaign.trilha);
-  const trilha = trilhaShortName(campaign.trilha);
-  return `${perfil ? `${perfil} - ` : ""}${trilha} - ${formatDiaMes(campaign.dataEnvio)}`;
-}
-
 function campaignStatusLabel(status) {
   return status === "concluida" ? "Concluído" : "Programado";
 }

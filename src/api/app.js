@@ -55,6 +55,7 @@ function createApp(dependencies = {}) {
   const groupProfilesServiceDependency = dependencies.groupProfilesService || groupProfilesService;
   const groupService = dependencies.groupService || groupsService;
   const groupVideoProgressServiceDependency = dependencies.groupVideoProgressService || groupVideoProgressService;
+  const mensagensServiceDependency = dependencies.mensagensService || mensagensService;
   const organizationService = dependencies.organizationService || organizationsService;
   const dispatchLogsServiceDependency = dependencies.dispatchLogsService || dispatchLogsService;
   const settingsServiceDependency = dependencies.settingsService || settingsService;
