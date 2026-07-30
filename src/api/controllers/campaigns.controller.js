@@ -156,6 +156,18 @@ function createCampaignsController(dependencies = {}) {
         return res.status(409).json({ error: message });
       }
 
+      // Erro de configuracao (periodo curto demais para a quantidade de grupos
+      // com o delay minimo escolhido): o usuario consegue corrigir na Etapa 1,
+      // entao a mensagem original vai para a tela em vez de um 500 generico.
+      if (error?.code === "DISPATCH_WINDOW_TOO_SHORT") {
+        return res.status(422).json({
+          error:
+            "O período de envio não comporta todos os grupos com o intervalo mínimo configurado. " +
+            "Aumente o período, reduza o intervalo mínimo entre envios ou envie para menos grupos.",
+          detail: message,
+        });
+      }
+
       if (message === "Execution date is invalid") {
         return res.status(400).json({ error: message });
       }

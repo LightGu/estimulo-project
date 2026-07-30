@@ -244,12 +244,13 @@
             <div class="card">
               <div class="card-header"><h3>Perfis de grupo</h3></div>
               <div class="card-body">
-                <p class="text-muted" style="margin-bottom:12px;">Perfis disponíveis para classificação de grupos e trilhas.</p>
+                <p class="text-muted" style="margin-bottom:12px;">Perfis disponíveis para classificação de grupos e trilhas. Clique no lápis para renomear, ou selecione 2 perfis para fundi-los em um só. Perfis que vieram de uma fusão mostram o ícone <span aria-hidden="true">&#8624;</span> para desfundir e voltar aos dois perfis originais.</p>
                 <div class="chip-list" id="segmentChips" style="margin-bottom:14px;"></div>
-                <div style="display:flex; gap:8px; max-width:360px;">
+                <div style="display:flex; gap:8px; max-width:360px; margin-bottom:8px;">
                   <input id="newProfileInput" type="text" placeholder="Nome do novo perfil" style="flex:1;">
                   <button class="btn btn-secondary" id="addProfileButton" type="button">Adicionar</button>
                 </div>
+                <button class="btn btn-secondary" id="mergeProfilesButton" type="button" disabled>Fundir selecionados</button>
                 <div id="profilesStatus" class="text-muted" style="margin-top:8px; font-size:12.5px;"></div>
               </div>
             </div>
@@ -1284,6 +1285,10 @@
 
       // ---------- Perfis de grupo ----------
       const profilesStatus = document.getElementById("profilesStatus");
+      const mergeProfilesButton = document.getElementById("mergeProfilesButton");
+      const selectedProfileIds = new Set();
+      // survivor_id -> nome do perfil que seria restaurado ao desfundir
+      const unmergeableProfiles = new Map();
 
       function escapeHtml(value) {
         return String(value === null || value === undefined ? "" : value)
@@ -1299,30 +1304,111 @@
         profilesStatus.textContent = text;
       }
 
+      function updateMergeButtonState() {
+        mergeProfilesButton.disabled = selectedProfileIds.size !== 2;
+      }
+
       function renderProfileChips(profiles) {
+        selectedProfileIds.forEach((id) => {
+          if (!profiles.some((profile) => profile.id === id)) selectedProfileIds.delete(id);
+        });
+
         document.getElementById("segmentChips").innerHTML = profiles
-          .map(
-            (profile) => `
-            <span class="chip">
+          .map((profile) => {
+            const restoredNome = unmergeableProfiles.get(profile.id);
+            const unmergeIcon = restoredNome
+              ? `<span class="chip-unmerge" data-unmerge-profile="${escapeHtml(profile.id)}" title="Desfundir — separar &quot;${escapeHtml(restoredNome)}&quot; novamente">&#8624;</span>`
+              : "";
+
+            return `
+            <span class="chip selectable${selectedProfileIds.has(profile.id) ? " selected" : ""}" data-select-profile="${escapeHtml(profile.id)}">
               ${escapeHtml(profile.nome)}
+              <span class="chip-edit" data-edit-profile="${escapeHtml(profile.id)}" data-edit-nome="${escapeHtml(profile.nome)}" title="Renomear perfil">&#9998;</span>
+              ${unmergeIcon}
               <span class="chip-remove" data-remove-profile="${escapeHtml(profile.id)}" title="Remover perfil">&times;</span>
-            </span>`
-          )
+            </span>`;
+          })
           .join("");
 
-        document.querySelectorAll("[data-remove-profile]").forEach((el) =>
-          el.addEventListener("click", () => removeProfile(el.dataset.removeProfile))
+        document.querySelectorAll("[data-unmerge-profile]").forEach((el) =>
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            unmergeProfile(el.dataset.unmergeProfile);
+          })
         );
+
+        document.querySelectorAll("[data-remove-profile]").forEach((el) =>
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            removeProfile(el.dataset.removeProfile);
+          })
+        );
+
+        document.querySelectorAll("[data-edit-profile]").forEach((el) =>
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            renameProfile(el.dataset.editProfile, el.dataset.editNome);
+          })
+        );
+
+        document.querySelectorAll("[data-select-profile]").forEach((el) =>
+          el.addEventListener("click", () => toggleProfileSelection(el.dataset.selectProfile, profiles))
+        );
+
+        updateMergeButtonState();
+      }
+
+      function toggleProfileSelection(id, profiles) {
+        if (selectedProfileIds.has(id)) {
+          selectedProfileIds.delete(id);
+        } else {
+          if (selectedProfileIds.size >= 2) return;
+          selectedProfileIds.add(id);
+        }
+        renderProfileChips(profiles);
       }
 
       async function loadProfiles() {
         try {
-          const response = await fetch("/group-profiles");
-          const profiles = await response.json();
+          const [profilesResponse, mergesResponse] = await Promise.all([
+            fetch("/group-profiles"),
+            fetch("/group-profiles/merges"),
+          ]);
+          const profiles = await profilesResponse.json();
+          const merges = mergesResponse.ok ? await mergesResponse.json().catch(() => []) : [];
+
+          unmergeableProfiles.clear();
+          // A fusao mais recente de cada sobrevivente e a que sera desfeita primeiro.
+          (Array.isArray(merges) ? merges : []).forEach((merge) => {
+            unmergeableProfiles.set(merge.survivor_id, merge.discarded_nome);
+          });
+
           renderProfileChips(Array.isArray(profiles) ? profiles : []);
         } catch (error) {
           setProfilesStatus("Falha ao carregar perfis.", "var(--danger)");
         }
+      }
+
+      async function unmergeProfile(id) {
+        const restoredNome = unmergeableProfiles.get(id) || "o perfil original";
+        const confirmed = await window.estimuloConfirm(
+          `Desfundir este perfil? "${restoredNome}" será recriado e as trilhas e grupos que eram dele voltam para ele.`,
+          { title: "Desfundir perfil", confirmLabel: "Desfundir" }
+        );
+        if (!confirmed) return;
+
+        setProfilesStatus("Desfundindo perfil…");
+        try {
+          const response = await fetch(`/group-profiles/${encodeURIComponent(id)}/unmerge`, { method: "POST" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao desfundir perfil");
+          selectedProfileIds.clear();
+          setProfilesStatus("Fusão desfeita. Os dois perfis originais foram restaurados.", "var(--success)");
+          await loadProfiles();
+        } catch (error) {
+          setProfilesStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setProfilesStatus(""), 4000);
       }
 
       async function removeProfile(id) {
@@ -1341,6 +1427,60 @@
         }
         setTimeout(() => setProfilesStatus(""), 3000);
       }
+
+      async function renameProfile(id, currentNome) {
+        const nome = await window.estimuloPrompt("Novo nome do perfil:", {
+          title: "Renomear perfil",
+          defaultValue: currentNome,
+        });
+        if (!nome || nome === currentNome) return;
+
+        setProfilesStatus("Renomeando perfil…");
+        try {
+          const response = await fetch(`/group-profiles/${encodeURIComponent(id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nome }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao renomear perfil");
+          setProfilesStatus("Perfil renomeado. Trilhas e grupos vinculados foram atualizados.", "var(--success)");
+          await loadProfiles();
+        } catch (error) {
+          setProfilesStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setProfilesStatus(""), 4000);
+      }
+
+      async function mergeSelectedProfiles() {
+        if (selectedProfileIds.size !== 2) return;
+        const profileIds = [...selectedProfileIds];
+
+        const nome = await window.estimuloPrompt("Nome do perfil resultante da fusão:", {
+          title: "Fundir perfis",
+          placeholder: "Ex: Eufrasio",
+        });
+        if (!nome) return;
+
+        setProfilesStatus("Fundindo perfis…");
+        try {
+          const response = await fetch("/group-profiles/merge", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profileIds, nome }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao fundir perfis");
+          selectedProfileIds.clear();
+          setProfilesStatus("Perfis fundidos. Trilhas e grupos dos dois perfis agora usam o perfil unificado.", "var(--success)");
+          await loadProfiles();
+        } catch (error) {
+          setProfilesStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setProfilesStatus(""), 4000);
+      }
+
+      mergeProfilesButton.addEventListener("click", mergeSelectedProfiles);
 
       document.getElementById("addProfileButton").addEventListener("click", async () => {
         const input = document.getElementById("newProfileInput");

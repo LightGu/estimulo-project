@@ -217,6 +217,19 @@ async function main() {
       removeTrilha: async (id) => ({ id }),
       updateTrailPerfis: async (id, perfis) => perfis,
     },
+    groupProfilesService: {
+      list: async () => [{ id: "profile-1", nome: "Eufrasio" }],
+      listMergeRecords: async () => [
+        { id: "merge-1", survivor_id: "profile-1", discarded_id: "profile-2", discarded_nome: "Maturidade" },
+      ],
+      unmerge: async (id) => {
+        if (id === "profile-sem-fusao") {
+          throw new Error("Profile was not created from a merge");
+        }
+
+        return { restored: { id: "profile-2", nome: "Maturidade" }, survivor: { id, nome: "Adolescência" } };
+      },
+    },
     groupService: {
       listWithoutSegment: async () => [
         {
@@ -399,6 +412,15 @@ async function main() {
     assert.match(envioAutomatizadoPage, /\/captions\/progress/);
     assert.match(envioAutomatizadoPage, /\/dispatch\/confirm/);
     assert.match(envioAutomatizadoPage, /id="backToConfigButton"/);
+    // A etapa 2 precisa sobreviver a um refresh: sem persistir o disparo em
+    // andamento, a campanha ja criada (com legendas geradas) ficava orfa no banco,
+    // sem caminho de volta na interface.
+    assert.match(envioAutomatizadoPage, /estimulo-envio-automatizado-flow/);
+    assert.match(envioAutomatizadoPage, /restoreDispatchFlow/);
+    assert.match(envioAutomatizadoPage, /clearDispatchFlow/);
+    // Linha com erro de geracao mostra o motivo guardado em erro_mensagem.
+    assert.match(envioAutomatizadoPage, /erro_mensagem/);
+    assert.match(envioAutomatizadoPage, /id="statError"/);
 
     const organizationsResponse = await fetch(`http://127.0.0.1:${port}/organizations`);
     assert.equal(organizationsResponse.status, 200);
@@ -594,6 +616,34 @@ async function main() {
     assert.match(trilhasAppPage, /requestJson\("\/group-profiles"\)/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(renameContext\.trilhaId\)\}`/);
     assert.match(trilhasAppPage, /requestJson\(`\/trilhas\/\$\{encodeURIComponent\(trail\.id\)\}\/perfis`/);
+
+    // ---------- perfis de grupo: desfundir ----------
+    const configPageResponse = await fetch(`http://127.0.0.1:${port}/app/configuracoes.html`);
+    assert.equal(configPageResponse.status, 200);
+    const configPage = await configPageResponse.text();
+    assert.match(configPage, /fetch\("\/group-profiles\/merges"\)/);
+    assert.match(configPage, /data-unmerge-profile/);
+    assert.match(configPage, /\/unmerge`, \{ method: "POST" \}/);
+
+    const mergesResponse = await fetch(`http://127.0.0.1:${port}/group-profiles/merges`);
+    assert.equal(mergesResponse.status, 200);
+    const mergesPayload = await mergesResponse.json();
+    assert.equal(mergesPayload[0].discarded_nome, "Maturidade");
+
+    const unmergeResponse = await fetch(`http://127.0.0.1:${port}/group-profiles/profile-1/unmerge`, {
+      method: "POST",
+    });
+    assert.equal(unmergeResponse.status, 200);
+    const unmergePayload = await unmergeResponse.json();
+    assert.equal(unmergePayload.restored.nome, "Maturidade");
+    assert.equal(unmergePayload.survivor.nome, "Adolescência");
+
+    const unmergeMissingResponse = await fetch(`http://127.0.0.1:${port}/group-profiles/profile-sem-fusao/unmerge`, {
+      method: "POST",
+    });
+    assert.equal(unmergeMissingResponse.status, 404);
+    const unmergeMissingPayload = await unmergeMissingResponse.json();
+    assert.equal(unmergeMissingPayload.error, "Profile was not created from a merge");
 
     const selectableVideosResponse = await fetch(`http://127.0.0.1:${port}/trilhas/selectable-videos`);
     assert.equal(selectableVideosResponse.status, 200);

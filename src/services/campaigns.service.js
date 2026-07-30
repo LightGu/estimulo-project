@@ -11,6 +11,7 @@ const {
 const { formatCampaignDayName, formatDateOnlyInTimezone } = require("../utils/campaign-naming");
 
 const TRIGGER_ENQUEUE_TIMEOUT_MS = Number(process.env.CAMPAIGN_TRIGGER_ENQUEUE_TIMEOUT_MS) || 5000;
+const DISPATCH_CONFIRM_LEAD_MS = Number(process.env.CAMPAIGN_DISPATCH_CONFIRM_LEAD_MS) || 5 * 60 * 1000;
 
 function withTimeout(promise, timeoutMs, timeoutMessage) {
   return Promise.race([
@@ -75,6 +76,36 @@ function resolveDispatchScheduleOptions(payload = {}, executionDate = new Date()
     window_end: windowEnd,
     jitter_delay_min_ms: minMs,
     jitter_delay_max_ms: Math.max(maxMs, minMs),
+  };
+}
+
+// A janela escolhida na Etapa 1 vale para o instante do disparo, mas entre
+// "Disparar campanha" e "Fazer o envio" o usuario ainda espera as legendas serem
+// geradas e as revisa -- o que pode levar minutos. Se o inicio da janela ja
+// passou quando o envio e confirmado, o primeiro grupo cairia no passado e o
+// jitter perderia exatamente o tempo gasto na revisao. Aqui a janela inteira
+// desliza para frente preservando a duracao: o inicio vai para agora + 5 min e
+// o fim recebe o mesmo deslocamento (janela 07:00-10:00 confirmada as 07:10 vira
+// 07:15-10:15). Janela ainda no futuro nao e tocada.
+function shiftDispatchWindowToConfirmation(scheduleOptions, now = new Date()) {
+  const start = new Date(scheduleOptions.window_start);
+  const end = new Date(scheduleOptions.window_end);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return { ...scheduleOptions, window_shift_ms: 0 };
+  }
+
+  const shiftMs = now.getTime() + DISPATCH_CONFIRM_LEAD_MS - start.getTime();
+
+  if (shiftMs <= 0) {
+    return { ...scheduleOptions, window_shift_ms: 0 };
+  }
+
+  return {
+    ...scheduleOptions,
+    window_start: new Date(start.getTime() + shiftMs).toISOString(),
+    window_end: new Date(end.getTime() + shiftMs).toISOString(),
+    window_shift_ms: shiftMs,
   };
 }
 
@@ -293,16 +324,25 @@ function createCampaignsService(dependencies = {}) {
       payload.execution_at || payload.executionAt || payload.scheduled_at || payload.scheduledAt
     );
     const scheduleSettings = await resolveScheduleSettings();
-    const scheduleOptions = resolveDispatchScheduleOptions(payload, executionDate, scheduleSettings);
+    const scheduleOptions = shiftDispatchWindowToConfirmation(
+      resolveDispatchScheduleOptions(payload, executionDate, scheduleSettings)
+    );
+    // O trigger acompanha a janela deslocada: e a partir do novo inicio que os
+    // delays de cada grupo contam, nao do horario configurado la na Etapa 1.
+    const triggerExecutionDate = new Date(executionDate.getTime() + scheduleOptions.window_shift_ms);
 
     const pendingLogs = await createPendingDispatchLogs(campaign.id, {
-      execution_at: executionDate.toISOString(),
+      execution_at: triggerExecutionDate.toISOString(),
       window_start: scheduleOptions.window_start,
       window_end: scheduleOptions.window_end,
       jitter_delay_min_ms: scheduleOptions.jitter_delay_min_ms,
       jitter_delay_max_ms: scheduleOptions.jitter_delay_max_ms,
     });
-    const updatedCampaign = await repository.update(campaignId, { status: "programado" });
+    const updatedCampaign = await repository.update(campaignId, {
+      status: "programado",
+      window_start: scheduleOptions.window_start,
+      window_end: scheduleOptions.window_end,
+    });
 
     let triggerJob = null;
     let triggerJobError = null;
@@ -312,13 +352,16 @@ function createCampaignsService(dependencies = {}) {
         enqueueCampaignTrigger(
           {
             campaign_id: campaign.id,
-            execution_at: executionDate.toISOString(),
+            execution_at: triggerExecutionDate.toISOString(),
             time_window: payload.time_window || payload.timeWindow,
             dispatch_jitter: payload.dispatch_jitter || payload.dispatchJitter,
             window_start: scheduleOptions.window_start,
             window_end: scheduleOptions.window_end,
             jitter_delay_min_ms: scheduleOptions.jitter_delay_min_ms,
             jitter_delay_max_ms: scheduleOptions.jitter_delay_max_ms,
+            // Horarios sorteados agora, na confirmacao: o worker reaproveita
+            // exatamente estes em vez de sortear de novo quando for executar.
+            precomputed_schedule: pendingLogs && pendingLogs.planned_schedule,
             timezone: payload.timezone || scheduleSettings.timezone,
           },
           {
@@ -344,6 +387,11 @@ function createCampaignsService(dependencies = {}) {
     return {
       campaign: updatedCampaign,
       pending_logs: pendingLogs,
+      dispatch_window: {
+        start: scheduleOptions.window_start,
+        end: scheduleOptions.window_end,
+        shift_ms: scheduleOptions.window_shift_ms,
+      },
       trigger_job: triggerJob && {
         id: triggerJob.id,
         name: triggerJob.name,

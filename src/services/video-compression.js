@@ -48,6 +48,13 @@ function runFfmpeg(ffmpegPath, args, options = {}) {
       stderr += String(chunk);
     });
 
+    // Um "error" sem listener num stream e excecao nao capturada, que mata o
+    // processo inteiro. Os pipes do ffmpeg podem errar (EPIPE/ECONNRESET) quando o
+    // processo e derrubado pelo timeout no meio de um video longo. O desfecho real
+    // vem de "error"/"close" no proprio child, aqui so evitamos o evento solto.
+    child.stderr.on("error", () => {});
+    child.stdout && child.stdout.on("error", () => {});
+
     child.on("error", (error) => {
       if (error.code === "ENOENT") {
         reject(

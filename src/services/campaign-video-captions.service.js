@@ -155,13 +155,21 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
   }
 
   async function generateCaptionForItem(item, campaignId, usedCaptionIds, options = {}) {
-    const pendingRow = await repository.createPending({
-      campaign_id: campaignId,
-      group_id: item.progress_group_id,
-      video_id: item.video_id,
-    });
+    const pendingRow =
+      options.pendingRow ||
+      (await repository.createPending({
+        campaign_id: campaignId,
+        group_id: item.progress_group_id,
+        video_id: item.video_id,
+      }));
 
     try {
+      // A fila e sequencial: as linhas ficam em "pendente" e cada uma vira
+      // "processando" so quando chega a sua vez de consultar/gerar a legenda.
+      // Marcar em lote na criacao deixava todos os videos como "Processando" na
+      // tela, dando a entender que havia uma requisicao por video ao mesmo tempo.
+      await repository.markProcessing(pendingRow.id);
+
       const generated = await resolveGeneratedCaption(item, campaignId, usedCaptionIds, options);
 
       return repository.markGenerated(pendingRow.id, generated);
@@ -191,20 +199,79 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
     }
   }
 
+  // Devolve uma linha por grupo, na mesma ordem de dispatchGroups. O insert em
+  // lote nao garante a ordem das linhas retornadas, entao o casamento e feito
+  // pelo par (group_id, video_id) que identifica cada item da campanha.
+  async function createPendingRows(campaignId, dispatchGroups) {
+    const payloads = dispatchGroups.map((item) => ({
+      campaign_id: campaignId,
+      group_id: item.progress_group_id,
+      video_id: item.video_id,
+    }));
+
+    if (typeof repository.createManyPending !== "function") {
+      const rows = [];
+
+      for (const payload of payloads) {
+        rows.push(await repository.createPending(payload));
+      }
+
+      return rows;
+    }
+
+    const inserted = await repository.createManyPending(payloads);
+    const remainingByKey = new Map();
+
+    inserted.forEach((row) => {
+      const key = `${row.group_id}::${row.video_id}`;
+      const bucket = remainingByKey.get(key);
+
+      if (bucket) {
+        bucket.push(row);
+      } else {
+        remainingByKey.set(key, [row]);
+      }
+    });
+
+    return payloads.map((payload) => {
+      const bucket = remainingByKey.get(`${payload.group_id}::${payload.video_id}`);
+
+      return bucket && bucket.length ? bucket.shift() : undefined;
+    });
+  }
+
   async function generateCaptionsForCampaign(campaignId) {
     if (!campaignId) {
       throw new Error("Campaign id is required");
     }
 
     const { dispatchGroups, dispatchRules } = await resolveCampaignDispatchGroups(campaignId);
+    // Todas as linhas da campanha nascem juntas, antes de gerar a primeira
+    // legenda. A tela da Etapa 2 trata a quantidade de linhas como o total
+    // esperado: criar uma linha por vez dentro do laco fazia esse total crescer
+    // aos poucos e, entre uma legenda pronta e a criacao da linha seguinte, a
+    // tela lia "100% gerado" com so parte dos grupos e liberava o botao de envio.
+    const pendingRows = await createPendingRows(campaignId, dispatchGroups);
+
+    logger.info &&
+      logger.info(
+        JSON.stringify({
+          event: "campaign_video_captions.generation_started",
+          campaign_id: campaignId,
+          dispatch_groups: dispatchGroups.length,
+          pending_rows: pendingRows.length,
+        })
+      );
+
     const usedCaptionIds = new Set();
     const results = [];
 
-    for (const item of dispatchGroups) {
+    for (const [index, item] of dispatchGroups.entries()) {
       try {
         results.push(
           await generateCaptionForItem(item, campaignId, usedCaptionIds, {
             autoGenerateCaption: dispatchRules.auto_generate_caption,
+            pendingRow: pendingRows[index],
           })
         );
       } catch (error) {
@@ -240,6 +307,12 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
     const total = rows.length;
     const gerado = rows.filter((row) => row.status === "gerado").length;
     const erro = rows.filter((row) => row.status === "erro").length;
+    // `processando` e a linha que esta de fato sendo gerada/consultada agora (a
+    // fila e sequencial, entao normalmente e uma so); `na_fila` e quem ainda nem
+    // comecou. `pendente` continua sendo "tudo o que nao esta gerado" para nao
+    // mudar o contrato ja consumido pelo restante do fluxo.
+    const processando = rows.filter((row) => row.status === "processando").length;
+    const na_fila = rows.filter((row) => row.status === "pendente").length;
     const pendente = total - gerado;
     const pct = total ? Math.round((gerado / total) * 100) : 0;
 
@@ -247,6 +320,8 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
       total,
       gerado,
       erro,
+      processando,
+      na_fila,
       pendente,
       pct,
       items: rows,

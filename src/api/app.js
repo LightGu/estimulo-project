@@ -157,6 +157,10 @@ function createApp(dependencies = {}) {
   app.patch("/settings/whatsapp/rotation", whatsappInstancesController.updateRotation);
   app.get("/group-profiles", groupProfilesController.list);
   app.post("/group-profiles", groupProfilesController.create);
+  app.get("/group-profiles/merges", groupProfilesController.listMerges);
+  app.post("/group-profiles/merge", groupProfilesController.merge);
+  app.post("/group-profiles/:id/unmerge", groupProfilesController.unmerge);
+  app.patch("/group-profiles/:id", groupProfilesController.update);
   app.delete("/group-profiles/:id", groupProfilesController.remove);
   app.get("/health", healthController);
 
