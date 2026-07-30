@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        } catch (e) {}
+      })();
+    </script>
+    <title>Acesso - Estimulo</title>
+    <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
+    <link rel="shortcut icon" href="assets/img/logo-mark.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tokens.css">
+    <link rel="stylesheet" href="assets/css/base.css">
+    <link rel="stylesheet" href="assets/css/components.css">
+  </head>
+  <body class="access-page">
+    <main class="access-shell">
+      <section class="access-panel" aria-labelledby="accessTitle">
+        <img src="assets/img/logo-mark.svg" alt="" class="access-logo">
+        <div class="access-copy">
+          <h1 id="accessTitle">Acesso ao painel</h1>
+          <p>Digite a senha para liberar esta maquina.</p>
+        </div>
+
+        <form id="accessForm" class="access-form">
+          <div class="field">
+            <label for="accessPassword">Senha</label>
+            <input id="accessPassword" name="password" type="password" autocomplete="current-password" required autofocus>
+          </div>
+          <button class="btn" type="submit" id="accessButton">Entrar</button>
+          <p class="access-error" id="accessError" role="alert" hidden></p>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const form = document.getElementById("accessForm");
+        const input = document.getElementById("accessPassword");
+        const button = document.getElementById("accessButton");
+        const errorEl = document.getElementById("accessError");
+        const params = new URLSearchParams(window.location.search);
+        const next = params.get("next") || "/app/index.html";
+        const LOCAL_API_BASE_URL = "http://127.0.0.1:3000";
+
+        function isLocalHost(hostname) {
+          return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+        }
+
+        function apiUrl(path) {
+          const current = window.location;
+          const alreadyOnApi = current.protocol.startsWith("http") && isLocalHost(current.hostname) && current.port === "3000";
+          const localStaticServer = current.protocol === "file:" || (current.protocol.startsWith("http") && isLocalHost(current.hostname));
+
+          if (alreadyOnApi || !localStaticServer) {
+            return path;
+          }
+
+          return `${LOCAL_API_BASE_URL}${path}`;
+        }
+
+        function showError(message) {
+          errorEl.textContent = message;
+          errorEl.hidden = false;
+        }
+
+        function goNext() {
+          const current = window.location;
+          const alreadyOnApi = current.protocol.startsWith("http") && isLocalHost(current.hostname) && current.port === "3000";
+          const localStaticServer = current.protocol === "file:" || (current.protocol.startsWith("http") && isLocalHost(current.hostname));
+          const safeNext = next.startsWith("/") ? next : "/app/index.html";
+
+          if (!alreadyOnApi && localStaticServer) {
+            window.location.href = `${LOCAL_API_BASE_URL}${safeNext}`;
+            return;
+          }
+
+          window.location.href = safeNext;
+        }
+
+        async function checkStatus() {
+          try {
+            const response = await fetch(apiUrl("/access/status"), { cache: "no-store" });
+            const payload = await response.json();
+            if (!payload.required || payload.authorized) goNext();
+          } catch (error) {
+            showError("Nao foi possivel verificar o acesso agora.");
+          }
+        }
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          errorEl.hidden = true;
+          button.disabled = true;
+          button.textContent = "Entrando...";
+
+          try {
+            const response = await fetch(apiUrl("/access/login"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ password: input.value }),
+            });
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok || !payload.authorized) {
+              throw new Error(payload.error || "Senha incorreta");
+            }
+
+            goNext();
+          } catch (error) {
+            showError(error.message || "Senha incorreta");
+            input.select();
+          } finally {
+            button.disabled = false;
+            button.textContent = "Entrar";
+          }
+        });
+
+        checkStatus();
+      })();
+    </script>
+  </body>
+</html>

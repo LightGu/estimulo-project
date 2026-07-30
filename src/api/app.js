@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("node:path");
+const { createAccessGate } = require("./access-gate");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createCampaignVideoCaptionsController = require("./controllers/campaign-video-captions.controller");
 const createGroupProfilesController = require("./controllers/group-profiles.controller");
@@ -31,6 +32,7 @@ const whatsappInstancesService = require("../services/whatsapp-instances.service
 
 function createApp(dependencies = {}) {
   const app = express();
+  app.set("trust proxy", dependencies.trustProxy || process.env.EXPRESS_TRUST_PROXY || "loopback");
   app.use(
     cors({
       origin(origin, callback) {
@@ -49,7 +51,14 @@ function createApp(dependencies = {}) {
     })
   );
   app.use(express.json());
-  app.use(express.static(path.join(__dirname, "../../public")));
+
+  const publicRoot = path.join(__dirname, "../../public");
+  const accessGate = createAccessGate(dependencies.accessGate || {});
+
+  app.get("/access/status", accessGate.statusHandler);
+  app.post("/access/login", accessGate.loginHandler);
+  app.use(accessGate.middleware);
+  app.use(express.static(publicRoot));
 
   const campaignService = dependencies.campaignService || campaignsService;
   const campaignVideoCaptionsServiceDependency =

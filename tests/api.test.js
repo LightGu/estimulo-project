@@ -5,6 +5,9 @@ const createApp = require("../src/api/app");
 
 async function main() {
   const app = createApp({
+    accessGate: {
+      password: null,
+    },
     healthController: {
       redisClient: {
         ping: async () => "PONG",
