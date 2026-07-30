@@ -2,6 +2,8 @@ function getClient(client) {
   return client || require("../database/client");
 }
 
+// Nasce como "pendente" (na fila). Quem marca "processando" e o servico, no
+// instante em que a geracao daquele video comeca de fato - a fila e sequencial.
 async function createPending(payload, client) {
   const { data, error } = await getClient(client)
     .from("campaign_video_captions")
@@ -9,7 +11,7 @@ async function createPending(payload, client) {
       campaign_id: payload.campaign_id,
       group_id: payload.group_id,
       video_id: payload.video_id,
-      status: "processando",
+      status: "pendente",
     })
     .select("*")
     .single();
@@ -19,6 +21,42 @@ async function createPending(payload, client) {
   }
 
   return data;
+}
+
+// Cria todas as linhas da campanha de uma vez: a tela da Etapa 2 usa a contagem
+// de linhas como total esperado, entao elas precisam aparecer juntas em vez de
+// ir surgindo conforme cada legenda e gerada. Upsert (e nao insert) porque
+// (campaign_id, group_id, video_id) e UNIQUE: numa segunda rodada de geracao para
+// a mesma campanha, um insert em lote falharia inteiro por causa de uma linha
+// repetida - aqui a linha existente volta para a fila e e regerada.
+//
+// Todas nascem em "pendente", nunca em "processando": a geracao percorre os
+// videos um por um e marcar o lote inteiro como "processando" na criacao fazia a
+// tela sugerir que havia uma requisicao de legenda por video em paralelo.
+async function createManyPending(payloads, client) {
+  if (!Array.isArray(payloads) || payloads.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await getClient(client)
+    .from("campaign_video_captions")
+    .upsert(
+      payloads.map((payload) => ({
+        campaign_id: payload.campaign_id,
+        group_id: payload.group_id,
+        video_id: payload.video_id,
+        status: "pendente",
+        erro_mensagem: null,
+      })),
+      { onConflict: "campaign_id,group_id,video_id" }
+    )
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
 }
 
 async function findById(id, client) {
@@ -129,6 +167,7 @@ async function listByCampaign(campaignId, client) {
 }
 
 module.exports = {
+  createManyPending,
   createPending,
   findById,
   listByCampaign,

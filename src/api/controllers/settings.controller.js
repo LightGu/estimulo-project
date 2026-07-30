@@ -70,6 +70,8 @@ function createSettingsController(dependencies = {}) {
           "timezone is invalid",
           "min_interval_min must be an integer greater than or equal to 1",
           "max_interval_min must be an integer greater than or equal to min_interval_min",
+          "dispatch_periods entries must have valid inicio/fim times (HH:mm)",
+          "dispatch_periods entries must have inicio earlier than fim",
         ].includes(message)
       ) {
         return res.status(400).json({ error: message });

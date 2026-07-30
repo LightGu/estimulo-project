@@ -18,6 +18,32 @@ const server = app.listen(port, () => {
   console.log(`Aplicacao web: http://127.0.0.1:${port}/app/index.html`);
 });
 
+// A geracao de legendas de um disparo roda em background dentro deste processo
+// (dispatchCampaign inicia e nao aguarda). Sem estes handlers, qualquer excecao
+// ou rejeicao solta nesse trabalho - ou em qualquer EventEmitter de terceiros -
+// derrubava o `npm run api` no meio do caminho: a tela continuava em
+// "Processando" para sempre e toda requisicao seguinte, inclusive o DELETE que
+// cancela o disparo, falhava com "Failed to fetch". Registrar e seguir servindo
+// mantem o operador no controle: da para cancelar o disparo, corrigir a causa e
+// tentar de novo em vez de descobrir o problema por um servidor morto.
+function logProcessFailure(event, error) {
+  console.error(
+    JSON.stringify({
+      event,
+      error_message: (error && error.message) || String(error),
+      stack: error && error.stack,
+    })
+  );
+}
+
+process.on("unhandledRejection", (reason) => {
+  logProcessFailure("api.unhandled_rejection", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  logProcessFailure("api.uncaught_exception", error);
+});
+
 async function shutdown() {
   await new Promise((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));

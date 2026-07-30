@@ -11,6 +11,7 @@ const videoCatalogRepository = require("../repositories/video-catalog.repository
 const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
 const defaultWhatsappInstancesService = require("../services/whatsapp-instances.service");
 const defaultNotificationsService = require("../services/notifications.service");
+const defaultInAppNotificationsService = require("../services/in-app-notifications.service");
 const defaultSettingsService = require("../services/settings.service");
 const {
   resolveGroupTrailId,
@@ -31,7 +32,14 @@ let campaignTriggerQueueInstance;
 
 function getCampaignTriggerQueue() {
   if (!campaignTriggerQueueInstance) {
-    campaignTriggerQueueInstance = createQueue(queueNames.campaignTrigger);
+    // attempts:1 evita que uma falha apos notifyCampaignStarted (ex.: erro
+    // transitorio no Redis/repositorio) refaca o job do zero e reenvie a
+    // notificacao de "campanha iniciada" para o WhatsApp.
+    campaignTriggerQueueInstance = createQueue(queueNames.campaignTrigger, {
+      defaultJobOptions: {
+        attempts: 1,
+      },
+    });
   }
 
   return campaignTriggerQueueInstance;
@@ -95,6 +103,7 @@ function buildCampaignTriggerJobData(params) {
     execution_at: executionDate.toISOString(),
     time_window: timeWindow,
     dispatch_jitter: dispatchJitter,
+    precomputed_schedule: normalizePrecomputedSchedule(params),
     timezone: timezone || undefined,
     status: params.status || CAMPAIGN_TRIGGER_INITIAL_STATUS,
   };
@@ -213,6 +222,28 @@ function normalizeDispatchJitter(params = {}) {
     min_ms: minMs,
     max_ms: maxMs,
   };
+}
+
+// Horarios ja sorteados na confirmacao do envio (campaigns.service.confirmDispatch).
+// Quando presentes, o worker reaproveita esse sorteio em vez de fazer um novo:
+// e o mesmo horario que ja foi gravado em dispatch_logs e mostrado no relatorio.
+function normalizePrecomputedSchedule(params = {}) {
+  const schedule = params.precomputed_schedule || params.precomputedSchedule;
+
+  if (!Array.isArray(schedule)) {
+    return undefined;
+  }
+
+  const normalized = schedule
+    .filter((item) => item && item.group_id && item.scheduled_at)
+    .map((item) => ({
+      group_id: item.group_id,
+      video_id: item.video_id,
+      scheduled_at: item.scheduled_at,
+      dispatch_order: item.dispatch_order,
+    }));
+
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function normalizeRepeatOptions(params = {}) {
@@ -524,6 +555,16 @@ async function resolveActiveInstancesAndRotation(dependencies = {}) {
   };
 }
 
+function resolvePrecomputedScheduleByGroup(jobData = {}) {
+  const schedule = Array.isArray(jobData.precomputed_schedule) ? jobData.precomputed_schedule : [];
+
+  return new Map(
+    schedule
+      .filter((item) => item && item.group_id && item.scheduled_at)
+      .map((item) => [String(item.group_id), item])
+  );
+}
+
 function shouldUseJitteredDispatch(jobData = {}) {
   return Boolean(
     jobData.time_window &&
@@ -576,23 +617,32 @@ async function enqueueResolvedDispatchJobs(jobData, dispatchGroups, dependencies
   }
 
   const { whatsappInstances, rotationGroupCount } = await resolveActiveInstancesAndRotation(dependencies);
-  const dispatchParams = buildDispatchParams(jobData, dispatchGroups, { whatsappInstances, rotationGroupCount });
+  const precomputedByGroup = resolvePrecomputedScheduleByGroup(jobData);
+  // So reaproveita o sorteio da confirmacao se ele cobrir todos os grupos desta
+  // execucao; se a lista mudou no meio do caminho (grupo pausado, video novo),
+  // cai no caminho normal e sorteia de novo para nao deixar grupo sem horario.
+  const hasFullPrecomputedSchedule =
+    precomputedByGroup.size > 0 &&
+    dispatchGroups.every((group) => precomputedByGroup.has(String(group.progress_group_id)));
 
-  if (shouldUseJitteredDispatch(jobData)) {
-    return addManyJitteredDispatchJobs(dispatchParams);
+  if (!hasFullPrecomputedSchedule && shouldUseJitteredDispatch(jobData)) {
+    return addManyJitteredDispatchJobs(
+      buildDispatchParams(jobData, dispatchGroups, { whatsappInstances, rotationGroupCount })
+    );
   }
 
   const scheduledAt = jobData.execution_at || new Date().toISOString();
   const jobs = [];
 
   for (const [index, group] of dispatchGroups.entries()) {
-    const dispatchOrder = group.dispatch_order || group.order || index + 1;
+    const precomputed = precomputedByGroup.get(String(group.progress_group_id));
+    const dispatchOrder = (precomputed && precomputed.dispatch_order) || group.dispatch_order || group.order || index + 1;
 
     jobs.push(
       await addSingleDispatchJob({
         ...group,
         campaign_id: group.campaign_id || jobData.campaign_id,
-        scheduled_at: group.scheduled_at || scheduledAt,
+        scheduled_at: (precomputed && precomputed.scheduled_at) || group.scheduled_at || scheduledAt,
         dispatch_order: dispatchOrder,
         whatsapp_instance_id: resolveInstanceForOrder(dispatchOrder, whatsappInstances, rotationGroupCount),
       })
@@ -620,6 +670,7 @@ function extractDispatchLogPayloadFromJob(job) {
     video_id: data.video_id,
     status: "pendente",
     mensagem_erro: null,
+    horario_envio_planejado: data.scheduled_at || null,
   };
 }
 
@@ -650,7 +701,41 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
   let created = 0;
 
   for (const payload of payloads) {
-    if (hasExistingDispatchLog(existingLogs, payload)) {
+    const existingLog = existingLogs.find((entry) => (
+      entry.campaign_id === payload.campaign_id &&
+      entry.group_id === payload.group_id &&
+      entry.video_id === payload.video_id
+    ));
+
+    if (existingLog) {
+      // Os logs podem ter sido criados antes de o worker montar os jobs. O
+      // horario do job e a fonte de verdade (o jitter e calculado nele), entao
+      // completa ou sincroniza o registro em vez de manter o relatorio com "-"
+      // ou com uma previa diferente do horario efetivo.
+      if (
+        payload.horario_envio_planejado &&
+        existingLog.id &&
+        existingLog.horario_envio_planejado !== payload.horario_envio_planejado &&
+        typeof dispatchLogs.updatePlannedSchedule === "function"
+      ) {
+        const updatedLog = await dispatchLogs.updatePlannedSchedule(
+          existingLog.id,
+          payload.horario_envio_planejado
+        );
+        Object.assign(existingLog, updatedLog || { horario_envio_planejado: payload.horario_envio_planejado });
+
+        logger.info &&
+          logger.info(
+            JSON.stringify({
+              event: "dispatch_log.planned_schedule_synchronized",
+              campaign_id: payload.campaign_id,
+              group_id: payload.group_id,
+              video_id: payload.video_id,
+              log_id: existingLog.id,
+              horario_envio_planejado: payload.horario_envio_planejado,
+            })
+          );
+      }
       continue;
     }
 
@@ -695,15 +780,19 @@ async function updateCampaignScheduledDispatch(campaigns, campaignId, dispatchJo
   });
 }
 
-function resolvePlannedScheduleByGroup(dispatchGroups, scheduleParams, logger = console) {
-  const plannedByKey = new Map();
-
-  if (!scheduleParams || !scheduleParams.window_start || !scheduleParams.window_end) {
-    return plannedByKey;
+// Unico ponto onde os horarios aleatorios de cada grupo sao sorteados: roda na
+// confirmacao do envio (campaigns.service.confirmDispatch) e o resultado vai
+// tanto para dispatch_logs quanto para o job de campaign-trigger. Um erro aqui
+// (janela curta demais para os grupos) precisa chegar na tela nesse momento --
+// engolir a falha era o que deixava o relatorio sem horario planejado e so
+// derrubava o disparo depois, la na fila.
+function buildPlannedDispatchSchedule(dispatchGroups, scheduleParams, logger = console) {
+  if (!dispatchGroups.length || !scheduleParams || !scheduleParams.window_start || !scheduleParams.window_end) {
+    return [];
   }
 
   try {
-    const schedule = buildJitteredDispatchSchedule({
+    return buildJitteredDispatchSchedule({
       ...scheduleParams,
       groups: dispatchGroups.map((group) => ({
         group_id: group.progress_group_id,
@@ -711,21 +800,17 @@ function resolvePlannedScheduleByGroup(dispatchGroups, scheduleParams, logger = 
         envia_video: true,
       })),
     });
-
-    schedule.forEach((item) => {
-      plannedByKey.set(`${item.group_id}::${item.video_id}`, item.scheduled_at);
-    });
   } catch (error) {
-    logger.warn &&
-      logger.warn(
+    logger.error &&
+      logger.error(
         JSON.stringify({
           event: "dispatch_log.planned_schedule_failed",
           error_message: error.message,
         })
       );
-  }
 
-  return plannedByKey;
+    throw error;
+  }
 }
 
 async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
@@ -737,6 +822,7 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     settingsService: settingsServiceOption = defaultSettingsService,
     notificationsService: notificationsServiceOption = defaultNotificationsService,
+    inAppNotificationsService: inAppNotificationsServiceOption = defaultInAppNotificationsService,
     logger = console,
   } = options;
 
@@ -761,10 +847,11 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     repository: videoFlowRepository,
     dispatchRules,
     notificationsService: notificationsServiceOption,
+    inAppNotificationsService: inAppNotificationsServiceOption,
     logger,
   });
   const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);
-  const plannedScheduleByKey = resolvePlannedScheduleByGroup(
+  const plannedSchedule = buildPlannedDispatchSchedule(
     dispatchableGroups,
     {
       execution_at: options.execution_at,
@@ -774,6 +861,9 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
       jitter_delay_max_ms: options.jitter_delay_max_ms,
     },
     logger
+  );
+  const plannedScheduleByKey = new Map(
+    plannedSchedule.map((item) => [`${item.group_id}::${item.video_id}`, item.scheduled_at])
   );
   const logPayloads = dispatchableGroups
     .map((group) => ({
@@ -814,6 +904,12 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
 
   return {
     pending_logs_created: created,
+    planned_schedule: plannedSchedule.map((item) => ({
+      group_id: item.group_id,
+      video_id: item.video_id,
+      scheduled_at: item.scheduled_at,
+      dispatch_order: item.dispatch_order,
+    })),
     total_campaign_groups: campaignGroupRows.length,
     video_enabled_groups: groups.length,
     eligible_groups: dispatchableGroups.length,
@@ -831,6 +927,7 @@ function createCampaignTriggerProcessor(options = {}) {
     trilhasRepository: trilhasRepositoryOption = trilhasRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     notificationsService = defaultNotificationsService,
+    inAppNotificationsService = defaultInAppNotificationsService,
     settingsService: settingsServiceOption = defaultSettingsService,
     logger = console,
   } = options;
@@ -893,6 +990,7 @@ function createCampaignTriggerProcessor(options = {}) {
         repository: videoFlowRepository,
         dispatchRules,
         notificationsService,
+        inAppNotificationsService,
         logger,
       });
       const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);
@@ -1006,6 +1104,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
     addDispatchJob: injectedAddDispatchJob,
     addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,
     notificationsService,
+    inAppNotificationsService,
     logger,
     ...bullmqOptions
   } = workerOptions;
@@ -1023,6 +1122,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
       addDispatchJob: injectedAddDispatchJob,
       addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,
       notificationsService,
+      inAppNotificationsService,
       logger,
     }),
     bullmqOptions

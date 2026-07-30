@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   downloadFromDrive,
   resolveVideoCatalogRecord,
+  selectCatalogFileName,
 } = require("../src/services/google-drive-video-download");
 
 function createFakeDrive(response, calls) {
@@ -188,7 +189,57 @@ async function testRequiresDriveFileId() {
   );
 }
 
+// A coluna real do video_catalog e `nome_do_arquivo`. Enquanto ela nao era lida,
+// todo registro vindo do banco caia no fallback `${drive_file_id}.mp4` e o video
+// chegava no grupo com o id do Drive como nome do arquivo.
+function testPrefersCatalogColumnForFileName() {
+  assert.equal(
+    selectCatalogFileName({ nome_do_arquivo: "7) Faturamento e lucro.mp4" }),
+    "7) Faturamento e lucro.mp4"
+  );
+  // Registros montados em memoria (indexador, atalho por drive_file_id) usam `name`.
+  assert.equal(selectCatalogFileName({ name: "aula.mp4" }), "aula.mp4");
+  assert.equal(selectCatalogFileName({ file_name: "aula.mp4" }), "aula.mp4");
+  assert.equal(selectCatalogFileName({ filename: "aula.mp4" }), "aula.mp4");
+  assert.equal(selectCatalogFileName({ nome_do_arquivo: "banco.mp4", name: "memoria.mp4" }), "banco.mp4");
+  assert.equal(selectCatalogFileName({}), undefined);
+  assert.equal(selectCatalogFileName(), undefined);
+}
+
+async function testUsesCatalogFileNameFromDatabaseRecord() {
+  const calls = [];
+  const drive = createFakeDrive({ data: Buffer.from("bytes"), headers: { "content-type": "video/quicktime" } }, calls);
+  const result = await downloadFromDrive({
+    drive,
+    // Formato exato de uma linha do video_catalog: sem `name`, so `nome_do_arquivo`.
+    videoCatalogRecord: {
+      id: "818eb02c-1736-420d-b37b-42e699d9ccc8",
+      drive_file_id: "1-mE0Am-PmoYPzsicTqJkRI1Qv3mSTrMp",
+      nome_do_arquivo: "7) Diferença entre faturamento e lucro.mp4",
+    },
+  });
+
+  assert.equal(result.name, "7) Diferença entre faturamento e lucro.mp4");
+  assert.equal(result.metadata.name, "7) Diferença entre faturamento e lucro.mp4");
+  assert.equal(result.file_extension, "mp4");
+  assert.notEqual(result.name, "1-mE0Am-PmoYPzsicTqJkRI1Qv3mSTrMp.mp4");
+}
+
+async function testFallsBackToDriveFileIdWhenCatalogHasNoName() {
+  const calls = [];
+  const drive = createFakeDrive({ data: Buffer.from("bytes"), headers: { "content-type": "video/mp4" } }, calls);
+  const result = await downloadFromDrive({
+    drive,
+    videoCatalogRecord: { id: "video-1", drive_file_id: "drive-file-1" },
+  });
+
+  assert.equal(result.name, "drive-file-1.mp4");
+}
+
 async function main() {
+  testPrefersCatalogColumnForFileName();
+  await testUsesCatalogFileNameFromDatabaseRecord();
+  await testFallsBackToDriveFileIdWhenCatalogHasNoName();
   await testDownloadsVideoBytesUsingDriveFileId();
   await testFetchesVideoCatalogRecordFromRepository();
   await testUsesResponseHeaderAsMimeTypeFallback();

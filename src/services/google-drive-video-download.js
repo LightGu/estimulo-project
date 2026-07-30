@@ -57,6 +57,20 @@ function normalizeFileName(value, fallbackDriveFileId) {
   return fallbackDriveFileId ? `${fallbackDriveFileId}.mp4` : "video.mp4";
 }
 
+// A coluna do video_catalog e `nome_do_arquivo`; `name`/`file_name`/`filename`
+// aparecem apenas em registros montados em memoria (indexador do Drive e o
+// atalho por drive_file_id). Sem `nome_do_arquivo` na lista, todo registro vindo
+// do banco caia no fallback e o arquivo chegava no WhatsApp com o id do Drive no
+// lugar do nome real do video.
+function selectCatalogFileName(videoCatalogRecord = {}) {
+  return (
+    videoCatalogRecord.nome_do_arquivo ||
+    videoCatalogRecord.name ||
+    videoCatalogRecord.file_name ||
+    videoCatalogRecord.filename
+  );
+}
+
 function inferVideoMimeTypeFromName(fileName) {
   const extension = path.extname(fileName || "").toLowerCase();
 
@@ -110,7 +124,7 @@ async function resolveVideoCatalogRecord(params = {}) {
     return {
       id: params.videoId || params.video_id,
       drive_file_id: params.driveFileId || params.drive_file_id,
-      name: params.name,
+      name: params.name || params.nome_do_arquivo,
       mime_type: params.mimeType || params.mime_type,
     };
   }
@@ -165,10 +179,7 @@ async function downloadFromDrive(params = {}) {
   );
   const bytes = toBuffer(response.data);
   const responseMimeType = normalizeMimeType(normalizeHeader(response.headers, "content-type"));
-  const name = normalizeFileName(
-    videoCatalogRecord.name || videoCatalogRecord.file_name || videoCatalogRecord.filename,
-    driveFileId
-  );
+  const name = normalizeFileName(selectCatalogFileName(videoCatalogRecord), driveFileId);
   const inferredMimeType = inferVideoMimeTypeFromName(name);
   const mimeType = selectVideoMimeType(
     videoCatalogRecord.mime_type || videoCatalogRecord.mimeType,
@@ -201,4 +212,5 @@ module.exports = {
   downloadFromDrive,
   downloadGoogleDriveVideoForDispatch,
   resolveVideoCatalogRecord,
+  selectCatalogFileName,
 };

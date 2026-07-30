@@ -24,6 +24,11 @@
       tr.campaign-row:hover { background: var(--surface-strong); }
       tr.group-row { cursor: pointer; }
       tr.group-row:hover { background: var(--surface-strong); }
+      .modal-wide { width: min(920px, calc(100% - 32px)); }
+      .table-wrap--fluid { overflow-x: visible; }
+      table.table-fluid { min-width: 0; table-layout: fixed; width: 100%; }
+      table.table-fluid th,
+      table.table-fluid td { white-space: normal; word-break: break-word; }
     </style>
   </head>
   <body data-page="campanhas">
@@ -37,7 +42,6 @@
             <p>Acompanhamento das campanhas de envio automatizado.</p>
           </div>
           <div class="topbar-actions">
-            <button class="btn" id="newCampaignButton" type="button">+ Nova campanha</button>
             <div class="user-chip"><span class="avatar">LC</span> Lina Chaim</div>
           </div>
         </header>
@@ -64,18 +68,18 @@
     </div>
 
     <div class="overlay" id="campaignDetailOverlay" hidden>
-      <div class="modal">
+      <div class="modal modal-wide">
         <div class="modal-header">
           <h3 id="campaignDetailTitle">Campanha</h3>
           <button class="icon-btn-close" id="closeCampaignDetail" type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
-          <div class="table-wrap">
-            <table>
-              <thead>
+          <div class="table-wrap table-wrap--fluid">
+            <table class="table-fluid">
+              <thead id="campaignGroupsHead">
                 <tr>
                   <th>Grupo</th>
-                  <th>Vídeo</th>
+                  <th id="campaignGroupsVideoHeader">Vídeo</th>
                   <th>Status</th>
                   <th>Atualizado em</th>
                 </tr>
@@ -140,15 +144,20 @@
       }
 
       function statusLabel(status) {
-        return status === "concluido" ? "Concluído" : "Programado";
+        if (status === "concluido") return "Concluído";
+        if (status === "processada") return "Processada";
+        return "Programado";
       }
 
       function statusBadgeClass(status) {
-        return status === "concluido" ? "badge-success" : "badge-info";
+        if (status === "concluido") return "badge-success";
+        if (status === "processada") return "badge-warning";
+        return "badge-info";
       }
 
       function statusTip(status) {
         if (status === "concluido") return "Todos os grupos já tiveram o envio finalizado (com sucesso ou erro definitivo).";
+        if (status === "processada") return "O horário programado já passou, mas nem todos os grupos têm confirmação de envio ou falha.";
         return "Aguardando o horário de disparo programado.";
       }
 
@@ -161,6 +170,17 @@
           falhou: "Falhou",
         };
         return labels[status] || status || "-";
+      }
+
+      function dispatchStatusTip(status) {
+        const tips = {
+          pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
+          processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
+          enviado: "Entregue com sucesso ao grupo via Evolution API.",
+          erro: "Falha no envio — motivo não informado.",
+          falhou: "Falha no envio — motivo não informado.",
+        };
+        return tips[status] || "";
       }
 
       function dispatchStatusBadgeClass(status) {
@@ -235,11 +255,17 @@
         campaignDetailOverlay.hidden = true;
       }
 
+      function isTextCampaign(campaign) {
+        return Boolean(campaign && campaign.tipo === "pontual");
+      }
+
       async function openCampaignDetail(campaignId) {
         const campaign = state.campaigns.find((c) => c.id === campaignId);
+        const isText = isTextCampaign(campaign);
         state.currentCampaignId = campaignId;
         state.captionsByGroup = new Map();
         document.getElementById("campaignDetailTitle").textContent = campaign ? campaignName(campaign) : "Campanha";
+        document.getElementById("campaignGroupsVideoHeader").hidden = isText;
         document.getElementById("campaignGroupsBody").innerHTML = `
           <tr><td colspan="4"><div class="empty-state"><strong>Carregando grupos</strong></div></td></tr>`;
         campaignDetailOverlay.hidden = false;
@@ -247,7 +273,9 @@
         try {
           const [groups, progress] = await Promise.all([
             requestJson(`/campaigns/${encodeURIComponent(campaignId)}/groups`),
-            requestJson(`/campaigns/${encodeURIComponent(campaignId)}/captions/progress`).catch(() => null),
+            isText
+              ? Promise.resolve(null)
+              : requestJson(`/campaigns/${encodeURIComponent(campaignId)}/captions/progress`).catch(() => null),
           ]);
 
           if (progress && Array.isArray(progress.items)) {
@@ -256,9 +284,11 @@
             });
           }
 
+          const colspan = isText ? 3 : 4;
+
           if (!groups.length) {
             document.getElementById("campaignGroupsBody").innerHTML = `
-              <tr><td colspan="4"><div class="empty-state"><strong>Nenhum grupo associado a esta campanha</strong></div></td></tr>`;
+              <tr><td colspan="${colspan}"><div class="empty-state"><strong>Nenhum grupo associado a esta campanha</strong></div></td></tr>`;
             return;
           }
 
@@ -267,7 +297,7 @@
               (g) => `
                 <tr class="group-row" data-group-id="${escapeHtml(g.group_id)}" data-video-id="${escapeHtml(g.video_id || "")}">
                   <td class="strong">${escapeHtml(g.nome || g.group_id)}</td>
-                  <td class="mono">${escapeHtml(g.video_id || "—")}</td>
+                  ${isText ? "" : `<td class="mono">${escapeHtml(g.video_id || "—")}</td>`}
                   <td><span class="badge has-tip ${dispatchStatusBadgeClass(g.status)}" data-tip="${escapeHtml(dispatchStatusTip(g.status))}" data-tip-tone="${dispatchStatusBadgeClass(g.status).replace("badge-", "")}">${dispatchStatusLabel(g.status)}</span></td>
                   <td class="mono">${escapeHtml(g.criado_em || "—")}</td>
                 </tr>`
@@ -276,7 +306,9 @@
 
           document.querySelectorAll("#campaignGroupsBody [data-group-id]").forEach((row) => {
             row.addEventListener("click", () =>
-              openGroupCaption(row.dataset.groupId, row.dataset.videoId, row)
+              isText
+                ? openGroupMessageText(row.dataset.groupId, row, campaign)
+                : openGroupCaption(row.dataset.groupId, row.dataset.videoId, row)
             );
           });
         } catch (error) {
@@ -326,6 +358,23 @@
           document.getElementById("groupCaptionContent").innerHTML = `<div class="empty-state"><strong>Erro ao gerar legenda</strong><span>${escapeHtml(item.erro_mensagem || "Tente novamente mais tarde.")}</span></div>`;
         } else {
           document.getElementById("groupCaptionContent").innerHTML = `<div class="empty-state"><strong>Legenda ainda sendo preparada</strong><span>Aguarde a conclusão do processamento.</span></div>`;
+        }
+
+        groupCaptionOverlay.hidden = false;
+      }
+
+      function openGroupMessageText(groupId, row, campaign) {
+        const groupName = row.cells[0].textContent;
+
+        document.getElementById("groupCaptionTitle").textContent = `Texto da mensagem · ${groupName}`;
+        document.getElementById("groupCaptionMeta").textContent = "";
+
+        const texto = campaign && campaign.texto_mensagem;
+
+        if (texto) {
+          document.getElementById("groupCaptionContent").innerHTML = `<p style="white-space: pre-wrap;">${escapeHtml(texto)}</p>`;
+        } else {
+          document.getElementById("groupCaptionContent").innerHTML = `<div class="empty-state"><strong>Nenhum texto registrado</strong><span>Esta campanha não possui um texto de mensagem associado.</span></div>`;
         }
 
         groupCaptionOverlay.hidden = false;

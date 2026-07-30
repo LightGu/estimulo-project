@@ -2,6 +2,7 @@ const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { sendToEvolution } = require("../services/evolution");
+const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 
 const MENSAGENS_DISPATCH_JOB_NAME = "mensagens-dispatch";
 const MENSAGENS_DISPATCH_INITIAL_STATUS = "pending";
@@ -71,6 +72,7 @@ function buildMensagensJobData(params = {}) {
     dispatch_order: params.dispatch_order,
     jitter_delay_ms: params.jitter_delay_ms,
     cumulative_delay_ms: params.cumulative_delay_ms,
+    dispatch_log_id: params.dispatch_log_id || null,
   };
 }
 
@@ -103,7 +105,27 @@ async function addJitteredMensagensDispatchJobs(params, options = {}) {
 }
 
 function createMensagensDispatchProcessor(options = {}) {
-  const { sender = sendToEvolution, logger = console } = options;
+  const { sender = sendToEvolution, logger = console, dispatchLogs = dispatchLogsRepository } = options;
+
+  async function updateDispatchLogStatus(dispatchLogId, status, mensagemErro) {
+    if (!dispatchLogId) {
+      return;
+    }
+
+    try {
+      await dispatchLogs.updateStatus(dispatchLogId, status, mensagemErro || null);
+    } catch (error) {
+      logger.error &&
+        logger.error(
+          JSON.stringify({
+            event: "mensagens_dispatch.update_log_failed",
+            dispatch_log_id: dispatchLogId,
+            status,
+            error_message: error?.message,
+          })
+        );
+    }
+  }
 
   return async function mensagensDispatchWorker(job) {
     const startedAt = new Date().toISOString();
@@ -113,6 +135,8 @@ function createMensagensDispatchProcessor(options = {}) {
       status: MENSAGENS_DISPATCH_PROCESSING_STATUS,
       started_at: startedAt,
     });
+
+    await updateDispatchLogStatus(job.data.dispatch_log_id, "processando");
 
     try {
       logger.info &&
@@ -146,6 +170,8 @@ function createMensagensDispatchProcessor(options = {}) {
         completed_at: completedAt,
       });
 
+      await updateDispatchLogStatus(job.data.dispatch_log_id, "enviado");
+
       logger.info &&
         logger.info(
           JSON.stringify({
@@ -175,6 +201,8 @@ function createMensagensDispatchProcessor(options = {}) {
         error_message: error.message,
       });
 
+      await updateDispatchLogStatus(job.data.dispatch_log_id, "falhou", error.message);
+
       logger.error &&
         logger.error(
           JSON.stringify({
@@ -196,9 +224,13 @@ function createMensagensDispatchProcessor(options = {}) {
 const mensagensDispatchWorker = createMensagensDispatchProcessor();
 
 function createMensagensDispatchWorker(options = {}) {
-  const { sender = sendToEvolution, logger = console, ...workerOptions } = options;
+  const { sender = sendToEvolution, logger = console, dispatchLogs = dispatchLogsRepository, ...workerOptions } = options;
 
-  return createWorker(queueNames.mensagensDispatch, createMensagensDispatchProcessor({ sender, logger }), workerOptions);
+  return createWorker(
+    queueNames.mensagensDispatch,
+    createMensagensDispatchProcessor({ sender, logger, dispatchLogs }),
+    workerOptions
+  );
 }
 
 function createMensagensDispatchEvents(options = {}) {

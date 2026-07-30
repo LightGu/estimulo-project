@@ -56,27 +56,15 @@
                     <input id="msgTitulo" type="text" placeholder="Ex.: Convite — Feira de Empreendedorismo">
                   </div>
 
-                  <div class="field-row" style="grid-template-columns:1fr 1fr;">
-                    <div class="field">
-                      <label for="msgTipo">Classificação</label>
-                      <select id="msgTipo">
-                        <option value="evento">Evento</option>
-                        <option value="credito">Crédito</option>
-                        <option value="pesquisa">Pesquisa</option>
-                        <option value="aviso">Aviso</option>
-                        <option value="outro">Outro</option>
-                      </select>
-                    </div>
-                    <div class="field">
-                      <label for="msgConteudoTipo">Tipo de conteúdo</label>
-                      <select id="msgConteudoTipo">
-                        <option value="texto">Somente texto</option>
-                        <option value="imagem">Imagem</option>
-                        <option value="video">Vídeo</option>
-                        <option value="documento">Documento (PDF)</option>
-                        <option value="link">Link</option>
-                      </select>
-                    </div>
+                  <div class="field">
+                    <label for="msgTipo">Classificação</label>
+                    <select id="msgTipo">
+                      <option value="evento">Evento</option>
+                      <option value="credito">Crédito</option>
+                      <option value="pesquisa">Pesquisa</option>
+                      <option value="aviso">Aviso</option>
+                      <option value="outro">Outro</option>
+                    </select>
                   </div>
 
                   <div class="field">
@@ -84,13 +72,9 @@
                     <textarea id="msgTexto" rows="3" placeholder="Escreva o texto que acompanhará o envio..."></textarea>
                   </div>
 
-                  <div class="field" id="anexoField" style="display:none;">
-                    <label for="msgAnexo">URL do conteúdo</label>
-                    <input id="msgAnexo" type="url" placeholder="https://.../arquivo.jpg">
-                  </div>
-
                   <div class="field">
                     <label>Grupos destinatários</label>
+                    <input id="groupSearchInput" type="search" placeholder="Buscar grupo por nome..." style="margin-bottom:6px;">
                     <div class="checkbox-list" id="groupCheckboxes"></div>
                   </div>
 
@@ -118,7 +102,7 @@
                       <input id="msgDelayMax" type="number" min="0" value="8">
                     </div>
                   </div>
-                  <p class="text-faint" style="font-size:11px;margin:-8px 0 4px;">Com mais de 1 grupo selecionado, os envios são espalhados aleatoriamente dentro da janela acima — mesmo mecanismo do Envio automatizado — pra não disparar tudo no mesmo instante. Com 1 grupo só, o envio é imediato ao clicar em "Programar mensagem".</p>
+                  <p class="text-faint" style="font-size:11px;margin:-8px 0 4px;">Os envios são espalhados aleatoriamente dentro da janela acima — mesmo mecanismo do Envio automatizado — pra não disparar tudo no mesmo instante. Data e horário de início precisam ser posteriores ao momento atual. Os valores de delay já vêm preenchidos com o padrão definido em Configurações, mas podem ser ajustados aqui.</p>
 
                   <div class="field-row" style="grid-template-columns:1fr 1fr;">
                     <div class="field">
@@ -147,15 +131,14 @@
           <section class="page-section">
             <div class="section-head">
               <h2>Disparos desta sessão</h2>
-              <p class="text-faint" style="font-size:12px;">Histórico não persistido — some ao recarregar a página.</p>
+              <p class="text-faint" style="font-size:12px;">Refletem apenas os envios feitos desde que esta página foi carregada — o registro definitivo fica na tela de Campanhas.</p>
             </div>
             <div class="table-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Título</th>
-                    <th>Tipo</th>
-                    <th>Conteúdo</th>
+                    <th>Classificação</th>
                     <th>Grupos</th>
                     <th>Envio</th>
                     <th>Status</th>
@@ -173,7 +156,6 @@
     <script src="assets/js/tooltip.js"></script>
     <script>
       const TIPO_LABEL = { evento: "Evento", credito: "Crédito", pesquisa: "Pesquisa", aviso: "Aviso", outro: "Outro" };
-      const CONTEUDO_LABEL = { texto: "Texto", imagem: "Imagem", video: "Vídeo", documento: "Documento", link: "Link" };
       const STATUS_BADGE = { programado: "badge-info", enviada: "badge-success", parcial: "badge-warning", erro: "badge-danger" };
       const STATUS_LABEL = { programado: "Programado (fila)", enviada: "Enviada", parcial: "Parcial", erro: "Erro" };
 
@@ -208,14 +190,25 @@
       }
 
       function populateGroupCheckboxes() {
-        document.getElementById("groupCheckboxes").innerHTML = state.groups.length
-          ? state.groups
+        const checkedIds = new Set(selectedGroupIds());
+        const query = document.getElementById("groupSearchInput").value.trim().toLowerCase();
+        const filteredGroups = query
+          ? state.groups.filter((g) => g.nome.toLowerCase().includes(query))
+          : state.groups;
+
+        if (!state.groups.length) {
+          document.getElementById("groupCheckboxes").innerHTML = '<span class="text-faint">Nenhum grupo cadastrado.</span>';
+          return;
+        }
+
+        document.getElementById("groupCheckboxes").innerHTML = filteredGroups.length
+          ? filteredGroups
               .map(
                 (g) =>
-                  `<label><input type="checkbox" value="${g.id}" class="group-check"> ${escapeHtml(g.nome)}${g.evolution_group_id ? "" : ' <span class="text-faint">(sem WhatsApp vinculado)</span>'}</label>`
+                  `<label><input type="checkbox" value="${g.id}" class="group-check" ${checkedIds.has(g.id) ? "checked" : ""}> ${escapeHtml(g.nome)}${g.evolution_group_id ? "" : ' <span class="text-faint">(sem WhatsApp vinculado)</span>'}</label>`
               )
               .join("")
-          : '<span class="text-faint">Nenhum grupo cadastrado.</span>';
+          : '<span class="text-faint">Nenhum grupo encontrado para essa busca.</span>';
         document.querySelectorAll(".group-check").forEach((cb) => cb.addEventListener("change", updatePreview));
       }
 
@@ -225,11 +218,7 @@
           .join("");
       }
 
-      function toggleContentFields() {
-        const tipo = document.getElementById("msgConteudoTipo").value;
-        document.getElementById("anexoField").style.display = tipo === "texto" ? "none" : "block";
-        updatePreview();
-      }
+      document.getElementById("groupSearchInput").addEventListener("input", populateGroupCheckboxes);
 
       function selectedGroupIds() {
         return Array.from(document.querySelectorAll(".group-check:checked")).map((cb) => cb.value);
@@ -242,44 +231,35 @@
       function updatePreview() {
         const titulo = document.getElementById("msgTitulo").value.trim() || "(sem título)";
         const texto = document.getElementById("msgTexto").value.trim() || "(sem texto ainda)";
-        const conteudoTipo = document.getElementById("msgConteudoTipo").value;
-        const anexo = document.getElementById("msgAnexo").value.trim();
         const grupos = selectedGroupNames();
         const data = document.getElementById("msgData").value;
         const inicio = document.getElementById("msgInicio").value;
         const fim = document.getElementById("msgFim").value;
 
-        let anexoHtml = "";
-        if (conteudoTipo !== "texto" && anexo) anexoHtml = `<div class="pattach">📎 ${escapeHtml(anexo)} (${CONTEUDO_LABEL[conteudoTipo]})</div>`;
-
         let envioHtml;
-        if (grupos.length <= 1) {
-          envioHtml = "Envio imediato";
-        } else if (data && inicio && fim) {
+        if (data && inicio && fim) {
           envioHtml = `Espalhado entre ${inicio} e ${fim} em ${data} (intervalo aleatório entre os grupos)`;
         } else {
-          envioHtml = "defina data/início/fim para agendar com intervalo";
+          envioHtml = "defina data/início/fim para agendar";
         }
 
         document.getElementById("previewBubble").innerHTML = `
           <div class="ptitle">${escapeHtml(titulo)}</div>
           <div style="font-size:13px;white-space:pre-wrap;">${escapeHtml(texto)}</div>
-          ${anexoHtml}
           <div class="pattach">👥 ${grupos.length ? escapeHtml(grupos.join(", ")) : "nenhum grupo selecionado"}</div>
           <div class="pattach">🕒 ${envioHtml}</div>
         `;
       }
 
-      document.getElementById("msgConteudoTipo").addEventListener("change", toggleContentFields);
-      ["msgTitulo", "msgTexto", "msgAnexo", "msgData", "msgInicio", "msgFim"].forEach((id) =>
+      ["msgTitulo", "msgTexto", "msgData", "msgInicio", "msgFim"].forEach((id) =>
         document.getElementById(id).addEventListener("input", updatePreview)
       );
 
       function currentContentPayload() {
         return {
           texto: document.getElementById("msgTexto").value.trim(),
-          link: document.getElementById("msgConteudoTipo").value === "texto" ? "" : document.getElementById("msgAnexo").value.trim(),
-          tipo_conteudo: document.getElementById("msgConteudoTipo").value,
+          link: "",
+          tipo_conteudo: "texto",
         };
       }
 
@@ -326,7 +306,6 @@
           id: `msg-${sentMessages.length}-${grupos.length}`,
           titulo: document.getElementById("msgTitulo").value.trim() || "Sem título",
           tipo: document.getElementById("msgTipo").value,
-          conteudoTipo: conteudo.tipo_conteudo,
           texto: conteudo.texto,
           link: conteudo.link || null,
           grupos,
@@ -340,7 +319,6 @@
       function resetForm() {
         document.getElementById("msgTitulo").value = "";
         document.getElementById("msgTexto").value = "";
-        document.getElementById("msgAnexo").value = "";
         document.querySelectorAll(".group-check:checked").forEach((cb) => (cb.checked = false));
         updatePreview();
       }
@@ -354,52 +332,50 @@
         }
 
         if (!msg.texto && !msg.link) {
-          window.alert("Informe um texto ou uma URL de conteúdo.");
+          window.alert("Informe um texto para a mensagem.");
+          return;
+        }
+
+        if (!msg.data || !msg.inicio || !msg.fim) {
+          window.alert("Preencha data, início e fim da janela de envio.");
+          return;
+        }
+
+        const windowStartIso = localDateTimeToUtcIso(msg.data, msg.inicio);
+        const windowEndIso = localDateTimeToUtcIso(msg.data, msg.fim);
+
+        if (new Date(windowStartIso).getTime() <= Date.now()) {
+          window.alert("A data e o horário de início precisam ser posteriores ao momento atual.");
           return;
         }
 
         const button = document.getElementById("scheduleMessageButton");
-        const multiplosGrupos = msg.grupos.length > 1;
-
-        if (multiplosGrupos && (!msg.data || !msg.inicio || !msg.fim)) {
-          window.alert("Com mais de 1 grupo selecionado, preencha data, início e fim da janela de envio.");
-          return;
-        }
-
         button.disabled = true;
-        button.textContent = multiplosGrupos ? "Programando…" : "Enviando…";
+        button.textContent = "Programando…";
 
         try {
-          if (!multiplosGrupos) {
-            const result = await requestJson("/mensagens/dispatch", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ group_ids: msg.grupos, texto: msg.texto, link: msg.link, tipo_conteudo: msg.conteudoTipo }),
-            });
+          const delayMin = Number(document.getElementById("msgDelayMin").value) * 60000;
+          const delayMax = Number(document.getElementById("msgDelayMax").value) * 60000;
+          const result = await requestJson("/mensagens/dispatch/schedule", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              titulo: msg.titulo,
+              tipo: msg.tipo,
+              group_ids: msg.grupos,
+              texto: msg.texto,
+              link: msg.link,
+              tipo_conteudo: "texto",
+              window_start: windowStartIso,
+              window_end: windowEndIso,
+              jitter_delay_min_ms: delayMin,
+              jitter_delay_max_ms: delayMax,
+              persist_as_campaign: true,
+            }),
+          });
 
-            msg.detalhes = result.results;
-            msg.status = result.falhas === 0 ? "enviada" : result.enviados === 0 ? "erro" : "parcial";
-          } else {
-            const delayMin = Number(document.getElementById("msgDelayMin").value) * 60000;
-            const delayMax = Number(document.getElementById("msgDelayMax").value) * 60000;
-            const result = await requestJson("/mensagens/dispatch/schedule", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                group_ids: msg.grupos,
-                texto: msg.texto,
-                link: msg.link,
-                tipo_conteudo: msg.conteudoTipo,
-                window_start: localDateTimeToUtcIso(msg.data, msg.inicio),
-                window_end: localDateTimeToUtcIso(msg.data, msg.fim),
-                jitter_delay_min_ms: delayMin,
-                jitter_delay_max_ms: delayMax,
-              }),
-            });
-
-            msg.detalhes = result.jobs.map((job) => ({ ok: true, group_id: job.group_id, group_nome: job.group_nome, scheduled_at: job.scheduled_at }));
-            msg.status = "programado";
-          }
+          msg.detalhes = result.jobs.map((job) => ({ ok: true, group_id: job.group_id, group_nome: job.group_nome, scheduled_at: job.scheduled_at }));
+          msg.status = "programado";
         } catch (error) {
           msg.status = "erro";
           msg.detalhes = [{ ok: false, error: error.message }];
@@ -431,25 +407,39 @@
             <tr>
               <td class="strong">${escapeHtml(m.titulo)}</td>
               <td>${TIPO_LABEL[m.tipo]}</td>
-              <td>${CONTEUDO_LABEL[m.conteudoTipo]}</td>
               <td>${m.grupos.length}</td>
-              <td class="mono">${m.grupos.length > 1 ? `${m.data || "—"} ${m.inicio || ""}–${m.fim || ""}` : "Imediato"}</td>
+              <td class="mono">${m.data || "—"} ${m.inicio || ""}–${m.fim || ""}</td>
               <td><span class="badge has-tip ${STATUS_BADGE[m.status]}" data-tip="${escapeHtml(statusTip(m))}" data-tip-tone="${STATUS_BADGE[m.status].replace("badge-", "")}">${STATUS_LABEL[m.status]}</span></td>
             </tr>`
               )
               .join("")
-          : '<tr><td colspan="6" class="text-faint">Nenhum disparo nesta sessão ainda. Este histórico não é persistido — ele reflete apenas os envios feitos desde que esta página foi carregada.</td></tr>';
+          : '<tr><td colspan="5" class="text-faint">Nenhum disparo nesta sessão ainda.</td></tr>';
+      }
+
+      async function loadScheduleDefaults() {
+        try {
+          const settings = await requestJson("/settings/schedule");
+          if (Number.isInteger(settings.min_interval_min)) {
+            document.getElementById("msgDelayMin").value = settings.min_interval_min;
+          }
+          if (Number.isInteger(settings.max_interval_min)) {
+            document.getElementById("msgDelayMax").value = settings.max_interval_min;
+          }
+        } catch (error) {
+          // mantém os defaults do HTML se as configurações não puderem ser carregadas
+        }
       }
 
       async function init() {
         try {
-          state.groups = await requestJson("/groups/search");
+          const groups = await requestJson("/groups/search");
+          state.groups = groups.filter((g) => Boolean(g.segmento));
         } catch (error) {
           document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(error.message)}</span>`;
         }
+        await loadScheduleDefaults();
         populateGroupCheckboxes();
         populateTestGroupSelect();
-        toggleContentFields();
         updatePreview();
         renderMessages();
       }

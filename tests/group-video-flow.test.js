@@ -60,6 +60,7 @@ async function testSelectsFirstApprovedUnsentVideoForGroupTrail() {
 async function testPausesGroupWhenQueueEndsAndLogsTransition() {
   const logger = createLogger();
   const pauses = [];
+  const trailFinishedCalls = [];
   const result = await resolveGroupVideoFlow({
     campaign_id: "campaign-1",
     group: createGroup(),
@@ -69,6 +70,11 @@ async function testPausesGroupWhenQueueEndsAndLogsTransition() {
     repository: {
       async pauseGroupVideoFlowForEndOfQueue(groupId, metadata) {
         pauses.push({ groupId, metadata });
+      },
+    },
+    inAppNotificationsService: {
+      async notifyTrailFinished(payload) {
+        trailFinishedCalls.push(payload);
       },
     },
     pausedAt: "2026-07-14T12:00:00.000Z",
@@ -89,6 +95,34 @@ async function testPausesGroupWhenQueueEndsAndLogsTransition() {
     pause_reason: END_OF_QUEUE_PAUSE_REASON,
     paused_at: "2026-07-14T12:00:00.000Z",
   });
+  assert.equal(trailFinishedCalls.length, 1);
+  assert.deepEqual(trailFinishedCalls[0], {
+    groupId: "group-1",
+    groupName: undefined,
+    trilhaLabel: "Pre infancia",
+  });
+}
+
+async function testDoesNotRenotifyGroupAlreadyPausedByEndOfQueue() {
+  const trailFinishedCalls = [];
+  const result = await resolveGroupVideoFlow({
+    campaign_id: "campaign-1",
+    group: createGroup({ video_flow_pause_reason: END_OF_QUEUE_PAUSE_REASON }),
+    sentVideoIds: ["video-1"],
+    videos: [createVideo({ id: "video-1" })],
+    repository: {
+      async pauseGroupVideoFlowForEndOfQueue() {},
+    },
+    inAppNotificationsService: {
+      async notifyTrailFinished(payload) {
+        trailFinishedCalls.push(payload);
+      },
+    },
+    pausedAt: "2026-07-14T12:00:00.000Z",
+  });
+
+  assert.equal(result.status, "paused");
+  assert.equal(trailFinishedCalls.length, 0);
 }
 
 async function testSkipsDisabledGroupEvenWhenItWasAlreadyPausedByEndOfQueue() {
@@ -193,6 +227,9 @@ async function testResolvesMultipleGroupsForDispatch() {
     sentVideoIds: [],
     videos: [createVideo({ id: "video-1", ordem: 1 })],
     logger: createLogger(),
+    inAppNotificationsService: {
+      async notifyTrailFinished() {},
+    },
   });
 
   assert.equal(result.dispatchGroups.length, 1);
@@ -205,6 +242,7 @@ async function testResolvesMultipleGroupsForDispatch() {
 async function main() {
   await testSelectsFirstApprovedUnsentVideoForGroupTrail();
   await testPausesGroupWhenQueueEndsAndLogsTransition();
+  await testDoesNotRenotifyGroupAlreadyPausedByEndOfQueue();
   await testSkipsDisabledGroupEvenWhenItWasAlreadyPausedByEndOfQueue();
   await testDoesNotResumeDisabledPausedGroupWhenNewEligibleVideoExists();
   await testSkipsManuallyDisabledGroup();
