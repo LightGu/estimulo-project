@@ -141,6 +141,20 @@ function normalizeDispatchGroups(groups) {
   }).filter((group) => group.envia_video !== false);
 }
 
+function toMinutes(milliseconds) {
+  return Math.round(milliseconds / 60000);
+}
+
+// A janela curta demais e um erro de configuracao do usuario (periodo apertado,
+// delay minimo alto ou grupos demais), nao uma falha tecnica. O codigo permite
+// que a API responda 422 com o motivo em vez de 500 generico.
+function windowTooShortError(message, details = {}) {
+  const error = new Error(message);
+  error.code = "DISPATCH_WINDOW_TOO_SHORT";
+
+  return Object.assign(error, details);
+}
+
 function randomIntegerBetween(min, max, random = Math.random) {
   if (max <= min) {
     return min;
@@ -185,7 +199,16 @@ function buildJitteredDispatchSchedule(params = {}) {
   const minRequiredDelay = groups.length * effectiveMinDelay;
 
   if (windowStart + minRequiredDelay > windowEnd) {
-    throw new Error("janela da campanha nao comporta todos os grupos com o jitter minimo configurado");
+    throw windowTooShortError(
+      `janela da campanha nao comporta todos os grupos com o jitter minimo configurado: ` +
+        `${groups.length} grupo(s) precisam de ${toMinutes(minRequiredDelay)} min e a janela tem ` +
+        `${toMinutes(windowEnd - windowStart)} min`,
+      {
+        groups_count: groups.length,
+        required_window_ms: minRequiredDelay,
+        available_window_ms: windowEnd - windowStart,
+      }
+    );
   }
 
   let scheduledTime = windowStart;
@@ -200,7 +223,10 @@ function buildJitteredDispatchSchedule(params = {}) {
     const maxAllowedDelay = Math.min(jitter.max_ms, remainingWindow - requiredForRest);
 
     if (maxAllowedDelay < effectiveMinDelay) {
-      throw new Error("janela da campanha nao comporta todos os grupos com o jitter configurado");
+      throw windowTooShortError("janela da campanha nao comporta todos os grupos com o jitter configurado", {
+        groups_count: groups.length,
+        available_window_ms: windowEnd - windowStart,
+      });
     }
 
     jitterDelayMs = randomIntegerBetween(effectiveMinDelay, maxAllowedDelay, random);

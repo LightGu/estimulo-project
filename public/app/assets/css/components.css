@@ -624,6 +624,34 @@ td.mono {
   color: var(--danger);
 }
 
+.chip .chip-edit {
+  cursor: pointer;
+  color: var(--text-faint);
+}
+
+.chip .chip-edit:hover {
+  color: var(--text);
+}
+
+.chip .chip-unmerge {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.chip .chip-unmerge:hover {
+  color: var(--accent, #5b6cff);
+}
+
+.chip.selectable {
+  cursor: pointer;
+}
+
+.chip.selected {
+  border-color: var(--accent, #5b6cff);
+  background: var(--surface);
+}
+
 /* Side drawer — slides in from the right, e.g. a day's contents on the editorial calendar */
 .drawer-backdrop {
   position: fixed;

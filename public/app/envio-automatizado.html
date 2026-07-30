@@ -205,8 +205,16 @@
                     <span class="stat-value" id="statGenerated" style="color:var(--success);">0</span>
                   </div>
                   <div class="kpi-item">
-                    <span class="stat-label">Pendentes</span>
+                    <span class="stat-label">Na fila</span>
+                    <span class="stat-value" id="statQueued">0</span>
+                  </div>
+                  <div class="kpi-item">
+                    <span class="stat-label">Processando</span>
                     <span class="stat-value" id="statPending" style="color:var(--warning);">0</span>
+                  </div>
+                  <div class="kpi-item">
+                    <span class="stat-label">Com erro</span>
+                    <span class="stat-value" id="statError" style="color:var(--danger);">0</span>
                   </div>
                   <div class="kpi-item-ring">
                     <div class="stat-ring" id="progressRing" style="--pct:0;">
@@ -361,7 +369,21 @@
       }
 
       async function requestJson(url, options) {
-        const response = await fetch(url, options);
+        let response;
+
+        try {
+          response = await fetch(url, options);
+        } catch (networkError) {
+          // fetch so rejeita quando a requisicao nao chega ao servidor. O "Failed to
+          // fetch" cru nao diz nada ao operador; o que aconteceu foi a API local ter
+          // parado de responder (tipicamente o processo do `npm run api` caiu).
+          const apiDownError = new Error(
+            "A API local não respondeu. Verifique se o processo do `npm run api` está rodando e tente novamente."
+          );
+          apiDownError.isApiUnreachable = true;
+          throw apiDownError;
+        }
+
         const payload = await response.json().catch(() => ({}));
 
         if (!response.ok) {
@@ -828,6 +850,7 @@
           });
 
           state.currentCampaignIds = [result.campaign.id];
+          saveDispatchFlow(2, state.currentCampaignIds);
           goToStep(2);
           startCaptionPolling();
         } catch (error) {
@@ -854,7 +877,12 @@
           trilha: trilhaNome,
           video: { arquivo: video.nome_do_arquivo || "—", link: driveLink },
           legenda: row.caption_text || null,
-          status: row.status === "gerado" ? "gerado" : row.status === "erro" ? "erro" : "pendente",
+          erro: row.erro_mensagem || null,
+          // "pendente" (na fila, nem comecou) e "processando" (gerando/consultando
+          // a legenda agora) sao estados diferentes na tela: a geracao e sequencial,
+          // um video por vez, e nivelar os dois fazia parecer que todos os videos
+          // estavam sendo processados ao mesmo tempo.
+          status: ["gerado", "erro", "processando", "pendente"].includes(row.status) ? row.status : "pendente",
         };
       }
 
@@ -874,16 +902,23 @@
           captionItems = progressList.flatMap(({ campaignId, progress }) =>
             (progress.items || []).map((row) => mapCaptionRowToItem(row, campaignId))
           );
-          const totalPendente = progressList.reduce((sum, { progress }) => sum + (progress.pendente || 0), 0);
           const allStarted = progressList.every(({ progress }) => progress.total > 0);
+          // `progress.pendente` da API soma as linhas com erro, então usá-lo como
+          // critério de parada deixava o polling rodando para sempre e a tela
+          // presa em "Processando" depois de uma falha de geração. Aqui separamos:
+          // só o que ainda está sendo gerado mantém o polling vivo; erro precisa
+          // de ação do usuário (regerar ou editar), não de mais uma consulta.
+          const emGeracao = captionItems.filter(
+            (item) => item.status === "pendente" || item.status === "processando"
+          ).length;
+          const naoGeradas = captionItems.filter((item) => item.status !== "gerado").length;
 
           renderCaptionStats();
           renderCaptions();
 
-          const startSendButton = document.getElementById("startSendButton");
-          startSendButton.disabled = !allStarted || totalPendente > 0;
+          document.getElementById("startSendButton").disabled = !allStarted || naoGeradas > 0;
 
-          if (allStarted && totalPendente === 0 && captionPollingInterval) {
+          if (allStarted && emGeracao === 0 && captionPollingInterval) {
             clearInterval(captionPollingInterval);
             captionPollingInterval = null;
           }
@@ -907,6 +942,14 @@
         captionPollingInterval = setInterval(refreshCaptionProgress, 3000);
       }
 
+      // Religa o polling sem resetar filtros/etapa. Usado quando uma legenda volta
+      // a ser gerada (regerar) depois de o polling ter parado por só restarem erros.
+      function ensureCaptionPolling() {
+        if (!captionPollingInterval) {
+          captionPollingInterval = setInterval(refreshCaptionProgress, 3000);
+        }
+      }
+
       function stopCaptionPolling() {
         if (captionPollingInterval) {
           clearInterval(captionPollingInterval);
@@ -917,12 +960,19 @@
       function renderCaptionStats() {
         const total = captionItems.length;
         const gerado = captionItems.filter((i) => i.status === "gerado").length;
-        const pendentes = total - gerado;
+        const comErro = captionItems.filter((i) => i.status === "erro").length;
+        // Separado de proposito: "Processando" conta so o video da vez (a fila e
+        // sequencial) e "Na fila" conta quem ainda nem comecou. Antes o tile de
+        // processando somava os dois e mostrava 4 de 4 processando ao mesmo tempo.
+        const processando = captionItems.filter((i) => i.status === "processando").length;
+        const naFila = captionItems.filter((i) => i.status === "pendente").length;
         const pct = total ? Math.round((gerado / total) * 100) : 0;
 
         document.getElementById("statTotal").textContent = total;
         document.getElementById("statGenerated").textContent = gerado;
-        document.getElementById("statPending").textContent = pendentes;
+        document.getElementById("statQueued").textContent = naFila;
+        document.getElementById("statPending").textContent = processando;
+        document.getElementById("statError").textContent = comErro;
         document.getElementById("statPct").textContent = `${pct}%`;
         document.getElementById("progressRing").style.setProperty("--pct", pct);
       }
@@ -942,7 +992,10 @@
         if (item.status === "erro") {
           return '<span class="badge has-tip badge-danger" data-tip="Falha ao gerar a legenda automaticamente — edite manualmente antes de enviar." data-tip-tone="danger">Erro</span>';
         }
-        return '<span class="badge has-tip badge-warning" data-tip="Legenda sendo gerada por IA — aguarde a conclusão." data-tip-tone="warning">Processando</span>';
+        if (item.status === "pendente") {
+          return '<span class="badge has-tip badge-neutral" data-tip="Aguardando na fila — as legendas são geradas um vídeo por vez, este ainda não começou." data-tip-tone="neutral">Pendente</span>';
+        }
+        return '<span class="badge has-tip badge-warning" data-tip="Legenda sendo gerada por IA agora — aguarde a conclusão." data-tip-tone="warning">Processando</span>';
       }
 
       function renderCaptions() {
@@ -962,7 +1015,15 @@
               item.status === "gerado"
                 ? `${escapeHtml(item.legenda)}<br><span class="text-faint" style="font-size:11px;">${item.legenda.length} caracteres</span>`
                 : item.status === "erro"
-                ? `<span class="text-faint" style="font-style:italic;">Falha ao gerar legenda. Edite manualmente.</span>`
+                ? `<span class="text-faint" style="font-style:italic;">Falha ao gerar legenda. Tente novamente ou edite manualmente.</span>${
+                    // Mostra o motivo guardado em erro_mensagem: sem ele a tela dizia
+                    // apenas "falhou" e a causa só existia no log do servidor.
+                    item.erro
+                      ? `<br><span class="text-faint" style="font-size:11px;color:var(--danger);">${escapeHtml(item.erro)}</span>`
+                      : ""
+                  }`
+                : item.status === "pendente"
+                ? `<span class="text-faint" style="font-style:italic;">Na fila...</span>`
                 : `<span class="text-faint" style="font-style:italic;">Processando...</span>`;
             return `
             <tr>
@@ -975,7 +1036,11 @@
               <td style="max-width:280px;">${legendaCell}</td>
               <td>${captionStatusBadge(item)}</td>
               <td>${
-                item.status !== "processando"
+                // `status` vale "gerado" | "erro" | "processando" | "pendente"
+                // (mapCaptionRowToItem). Editar/regerar so faz sentido depois que a
+                // linha saiu da fila e terminou: enquanto esta pendente ou
+                // processando, a geracao ainda vai sobrescrever a legenda.
+                item.status === "gerado" || item.status === "erro"
                   ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>
                      ${
                        item.status === "erro"
@@ -1045,6 +1110,9 @@
         if (!item) return;
 
         button.disabled = true;
+        // Regerar leva minutos (download do vídeo, extração de áudio, IA). Religa o
+        // polling para a linha aparecer como "Processando" enquanto isso.
+        ensureCaptionPolling();
         try {
           await requestJson(`/campaigns/${encodeURIComponent(item.campaignId)}/captions/${encodeURIComponent(itemId)}/regenerate`, {
             method: "POST",
@@ -1069,6 +1137,26 @@
         await confirmDispatch();
       });
 
+      function formatLocalTime(isoValue) {
+        const date = new Date(isoValue);
+        if (Number.isNaN(date.getTime())) return null;
+        return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+      }
+
+      // A janela pode ter sido deslocada pelo backend quando a revisão das legendas
+      // atravessou o horário de início configurado (ver campaigns.service). Mostrar
+      // o período efetivo evita a impressão de que o envio saiu do horário escolhido.
+      function describeDispatchWindow(confirmations) {
+        const janela = (confirmations || []).map((c) => c && c.dispatch_window).find(Boolean);
+        if (!janela || !janela.shift_ms) return "nos períodos configurados";
+
+        const inicio = formatLocalTime(janela.start);
+        const fim = formatLocalTime(janela.end);
+        if (!inicio || !fim) return "nos períodos configurados";
+
+        return `entre <strong>${inicio}</strong> e <strong>${fim}</strong>`;
+      }
+
       async function confirmDispatch() {
         const startSendButton = document.getElementById("startSendButton");
         const warningCallout = document.getElementById("sendWarningCallout");
@@ -1081,7 +1169,7 @@
           const delayMinMin = Number(document.getElementById("delayMin").value);
           const delayMaxMin = Number(document.getElementById("delayMax").value);
 
-          await Promise.all(
+          const confirmations = await Promise.all(
             state.currentCampaignIds.map((campaignId) =>
               requestJson(`/campaigns/${encodeURIComponent(campaignId)}/dispatch/confirm`, {
                 method: "POST",
@@ -1101,13 +1189,16 @@
           );
 
           stopCaptionPolling();
+          // Disparo confirmado: não faz sentido um refresh trazer o usuário de volta
+          // para a etapa 2 desta campanha, com o botão de enviar reabilitado.
+          clearDispatchFlow();
           document.getElementById("stepLegendas").className = "step done";
           document.getElementById("stepLegendas").querySelector(".step-num").textContent = "✓";
           document.getElementById("stepEnvio").className = "step active";
 
           const successCallout = document.getElementById("sendSuccessCallout");
           successCallout.style.display = "flex";
-          successCallout.innerHTML = `Envio iniciado com sucesso! <strong>${captionItems.length}</strong> vídeo(s) programado(s) para ${dataEnvio} nos períodos configurados. Acompanhe em <a href="relatorios.html">Relatório operacional</a>.`;
+          successCallout.innerHTML = `Envio iniciado com sucesso! <strong>${captionItems.length}</strong> vídeo(s) programado(s) para ${dataEnvio} ${describeDispatchWindow(confirmations)}. Acompanhe em <a href="relatorios.html">Relatório operacional</a>.`;
         } catch (error) {
           warningCallout.style.display = "flex";
           warningCallout.className = "callout callout-danger";
@@ -1138,14 +1229,18 @@
           state.currentCampaignIds = [];
           captionItems = [];
           stopCaptionPolling();
+          clearDispatchFlow();
           closeBackToConfigModal();
           goToStep(1);
         } catch (error) {
-          // Mensagens de regra de negocio (ex.: disparo ja enviado) ja vem prontas
-          // do backend; nesse caso mostramos direto, sem o prefixo de falha tecnica.
+          // Mensagens de regra de negocio (ex.: disparo ja enviado) e a de API fora
+          // do ar ja vem prontas e completas; nesses casos mostramos direto, sem o
+          // prefixo de falha tecnica.
           const isBusinessRuleMessage = /já teve envios|não pode ser apagado/i.test(error.message || "");
           window.estimuloAlert(
-            isBusinessRuleMessage ? error.message : `Falha ao apagar o disparo: ${error.message}`
+            isBusinessRuleMessage || error.isApiUnreachable
+              ? error.message
+              : `Falha ao apagar o disparo: ${error.message}`
           );
         } finally {
           confirmButton.disabled = false;
@@ -1160,6 +1255,67 @@
           renderDetail();
         }
         window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      // O disparo em andamento vivia apenas em memória: um refresh na etapa 2
+      // voltava para a etapa 1 e a campanha já criada, com as legendas geradas,
+      // ficava órfã no banco — sem nenhum caminho na interface de volta para ela.
+      const DISPATCH_FLOW_STORAGE_KEY = "estimulo-envio-automatizado-flow";
+
+      function saveDispatchFlow(step, campaignIds) {
+        try {
+          localStorage.setItem(DISPATCH_FLOW_STORAGE_KEY, JSON.stringify({ step, campaignIds }));
+        } catch (error) {
+          // Sem localStorage (modo privativo/cota) o fluxo volta a ser só em memória.
+        }
+      }
+
+      function clearDispatchFlow() {
+        try {
+          localStorage.removeItem(DISPATCH_FLOW_STORAGE_KEY);
+        } catch (error) {
+          /* nada a limpar */
+        }
+      }
+
+      function readDispatchFlow() {
+        try {
+          const stored = JSON.parse(localStorage.getItem(DISPATCH_FLOW_STORAGE_KEY) || "null");
+          if (!stored || stored.step !== 2 || !Array.isArray(stored.campaignIds) || !stored.campaignIds.length) {
+            return null;
+          }
+          return stored;
+        } catch (error) {
+          return null;
+        }
+      }
+
+      // Só restaura se as campanhas ainda existirem com legendas: uma campanha
+      // apagada (ou já disparada em outra aba) deve cair na etapa 1 em vez de
+      // deixar a tela presa apontando para algo que não está mais lá.
+      async function restoreDispatchFlow() {
+        const stored = readDispatchFlow();
+        if (!stored) return false;
+
+        try {
+          const progressList = await Promise.all(
+            stored.campaignIds.map((campaignId) =>
+              requestJson(`/campaigns/${encodeURIComponent(campaignId)}/captions/progress`)
+            )
+          );
+          if (!progressList.length || !progressList.every((progress) => (progress.total || 0) > 0)) {
+            clearDispatchFlow();
+            return false;
+          }
+        } catch (error) {
+          clearDispatchFlow();
+          return false;
+        }
+
+        state.currentCampaignIds = stored.campaignIds;
+        goToStep(2);
+        startCaptionPolling();
+        return true;
       }
 
       function renderLoadError(error) {
@@ -1195,6 +1351,10 @@
         renderPeriodChips();
         loadDefaultScheduleSettings();
         await loadDispatchRules();
+
+        // Antes de montar a etapa 1: se havia um disparo em andamento, volta para a
+        // etapa 2. Os grupos continuam carregando abaixo para que "Voltar" funcione.
+        await restoreDispatchFlow();
 
         try {
           const [groups, organizations] = await Promise.all([
