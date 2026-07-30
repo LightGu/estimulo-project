@@ -221,6 +221,65 @@
   background: #9c2233;
 }
 
+/* Access gate */
+.access-page {
+  min-height: 100%;
+  background:
+    linear-gradient(135deg, rgba(78, 121, 255, 0.14), transparent 36%),
+    linear-gradient(315deg, rgba(87, 217, 136, 0.18), transparent 34%),
+    var(--bg);
+}
+
+.access-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.access-panel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 22px;
+  padding: 28px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.access-logo {
+  width: 44px;
+  height: 44px;
+}
+
+.access-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.access-copy h1 {
+  font-size: 24px;
+}
+
+.access-copy p {
+  color: var(--text-muted);
+}
+
+.access-form {
+  display: grid;
+  gap: 12px;
+}
+
+.access-form .btn {
+  width: 100%;
+}
+
+.access-error {
+  color: var(--danger);
+  font-size: 13px;
+}
+
 .btn.btn-accent {
   background: linear-gradient(90deg, var(--brand-purple), var(--brand-blue));
 }

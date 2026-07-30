@@ -55,6 +55,12 @@ SUPABASE_URL=https://SEU_PROJECT_REF.supabase.co
 SUPABASE_ANON_KEY=change-me
 SUPABASE_SERVICE_ROLE_KEY=change-me
 
+# Acesso simples ao painel/API por IP
+# Em ambiente local, deixe vazio se nao quiser a tela de senha.
+ESTIMULO_ACCESS_PASSWORD=
+ESTIMULO_ACCESS_TTL_HOURS=720
+ESTIMULO_ACCESS_STATE_FILE=storage/access-gate-allowlist.json
+
 # Google Drive
 GOOGLE_DRIVE_CREDENTIALS=
 GOOGLE_DRIVE_ROOT_FOLDER_ID=
@@ -71,6 +77,8 @@ TRANSCRIPTION_AUDIO_ONLY=true
 ```
 
 A `SUPABASE_SERVICE_ROLE_KEY` deve ficar apenas no backend. Nunca exponha essa chave no frontend, em logs, prints, documentacao publica ou codigo versionado.
+
+Para ambiente de teste compartilhado, configure `ESTIMULO_ACCESS_PASSWORD` no `.env` do servidor. Ao acertar a senha, o backend libera o IP de origem pelo periodo definido em `ESTIMULO_ACCESS_TTL_HOURS` (padrao: 720 horas) e persiste essa liberacao em `ESTIMULO_ACCESS_STATE_FILE`, entao a mesma rede/maquina nao precisa digitar a senha em toda visita.
 
 ### 3. IA Para Legendas
 
@@ -540,11 +548,12 @@ O projeto esta deployado para testes. Para atualizar o servidor existente, garan
 1. O servidor fez `git pull` da branch correta.
 2. `npm install` foi executado quando `package-lock.json` mudou.
 3. As migrations novas foram aplicadas no Supabase.
-4. O `.env` do servidor contem Redis, Supabase, Evolution API, Google Drive e Gemini.
+4. O `.env` do servidor contem Redis, Supabase, Evolution API, Google Drive, Gemini e, no painel publicado, `ESTIMULO_ACCESS_PASSWORD`.
 5. Redis esta acessivel pela API e pelos workers.
 6. Evolution API esta acessivel pelos workers de dispatch.
 7. Cada worker obrigatorio esta rodando como processo separado.
 8. Nginx/proxy aponta para a porta da API Node, normalmente `3000`.
+   Para a liberacao por IP funcionar corretamente atras do Nginx, o proxy precisa repassar `X-Forwarded-For`.
 
 Comandos esperados no servidor:
 
