@@ -9,7 +9,30 @@ const DISPATCH_FAILURE_RETRY_JOB_NAME = "dispatch-failure-retry-sweep";
 const DISPATCH_FAILURE_RETRY_SCHEDULE_KEY = "dispatch-failure-retry-sweep";
 const DEFAULT_SWEEP_EVERY_MS = 5 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
+// Teto de reenvios por sweep. Cada reenvio que falha na primeira tentativa gera
+// uma notificacao de falha no WhatsApp, entao um backlog acumulado precisa ser
+// drenado em lotes ao longo de varios sweeps em vez de tudo de uma vez.
+const MAX_RETRIES_PER_SWEEP = 25;
 const FAILED_STATUS = "falhou";
+// Falhas que nao mudam de resultado ao repetir o mesmo envio. HTTP 413 e o caso
+// concreto: o payload em base64 passa do limite de corpo da Evolution API, entao
+// cada retry so repete o download do video do Drive e a montagem do mesmo
+// payload recusado — ate esgotar MAX_RETRY_ATTEMPTS. Sem legenda aprovada ou com
+// credencial/grupo invalidos vale o mesmo raciocinio.
+const PERMANENT_FAILURE_PATTERNS = [
+  /HTTP 413/i,
+  /HTTP 40[0134]/i,
+  /HTTP 41[35]/i,
+  /HTTP 422/i,
+  /excede o limite/i,
+  /entity too large/i,
+];
+
+function isPermanentFailureMessage(message) {
+  const text = String(message || "");
+
+  return PERMANENT_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
+}
 
 let dispatchFailureRetryQueueInstance;
 
@@ -54,6 +77,10 @@ function buildRetryJobData(log) {
     // legado; resolveDispatchCaption/selectCaptionForVideo escolhem a legenda
     // automaticamente a partir do video_id no reprocessamento.
     link_video: video.drive_file_id ? undefined : video.link_video,
+    // Propagado ate o dispatch worker para que ele so notifique a falha uma vez
+    // (na primeira tentativa), em vez de reenviar a mesma notificacao a cada
+    // sweep de retry.
+    retry_count: log.retry_count || 0,
     scheduled_at: new Date(),
   };
 }
@@ -78,8 +105,47 @@ function createDispatchFailureRetryProcessor(options = {}) {
       return { checked: 0, retried: 0 };
     }
 
-    const failedLogs = await dispatchLogsRepository.listFailedForRetry();
-    const retryableLogs = failedLogs.filter((log) => (log.retry_count || 0) < MAX_RETRY_ATTEMPTS);
+    // O filtro por retry_count e o teto de itens por sweep vao para o banco: um
+    // backlog grande de falhas era carregado inteiro e reenfileirado de uma vez,
+    // e cada reenvio que falhava disparava uma notificacao no WhatsApp.
+    const failedLogs = await dispatchLogsRepository.listFailedForRetry({
+      max_retry_count: MAX_RETRY_ATTEMPTS,
+      limit: MAX_RETRIES_PER_SWEEP,
+    });
+    // Rede de seguranca: o filtro acima ja vem do banco, mas manter a checagem
+    // aqui evita reprocessar logs caso a query seja trocada/mockada.
+    const permanentLogs = failedLogs.filter((log) => isPermanentFailureMessage(log.mensagem_erro));
+    const retryableLogs = failedLogs
+      .filter((log) => (log.retry_count || 0) < MAX_RETRY_ATTEMPTS)
+      .filter((log) => !isPermanentFailureMessage(log.mensagem_erro))
+      .slice(0, MAX_RETRIES_PER_SWEEP);
+
+    for (const log of permanentLogs) {
+      logger.warn &&
+        logger.warn(
+          JSON.stringify({
+            event: "dispatch_failure_retry.skipped_permanent",
+            log_id: log.id,
+            campaign_id: log.campaign_id,
+            group_id: log.group_id,
+            video_id: log.video_id,
+            error_message: log.mensagem_erro,
+            note: "falha nao muda de resultado com reenvio identico; exige correcao (ex.: reduzir o video)",
+          })
+        );
+    }
+
+    if (retryableLogs.length >= MAX_RETRIES_PER_SWEEP) {
+      logger.warn &&
+        logger.warn(
+          JSON.stringify({
+            event: "dispatch_failure_retry.batch_capped",
+            batch_size: retryableLogs.length,
+            max_per_sweep: MAX_RETRIES_PER_SWEEP,
+            note: "backlog restante sera drenado nos proximos sweeps",
+          })
+        );
+    }
 
     let retried = 0;
 
@@ -95,7 +161,7 @@ function createDispatchFailureRetryProcessor(options = {}) {
 
         await dispatchLogsRepository.markRetrying(log.id, nextRetryCount);
         await enqueueDispatch(
-          { ...buildRetryJobData({ ...log, groups: group }) },
+          { ...buildRetryJobData({ ...log, groups: group, retry_count: nextRetryCount }) },
           { removeOnComplete: false, removeOnFail: false }
         );
 
@@ -124,7 +190,7 @@ function createDispatchFailureRetryProcessor(options = {}) {
       }
     }
 
-    return { checked: retryableLogs.length, retried };
+    return { checked: retryableLogs.length, retried, skipped_permanent: permanentLogs.length };
   };
 }
 
@@ -139,8 +205,11 @@ function createDispatchFailureRetryEvents(options = {}) {
 module.exports = {
   DISPATCH_FAILURE_RETRY_JOB_NAME,
   DISPATCH_FAILURE_RETRY_SCHEDULE_KEY,
+  MAX_RETRIES_PER_SWEEP,
   MAX_RETRY_ATTEMPTS,
+  PERMANENT_FAILURE_PATTERNS,
   buildRetryJobData,
+  isPermanentFailureMessage,
   createDispatchFailureRetryProcessor,
   createDispatchFailureRetryWorker,
   createDispatchFailureRetryEvents,

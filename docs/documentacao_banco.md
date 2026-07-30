@@ -1,5 +1,20 @@
 # Documentação do Banco de Dados
 
+> **Escopo desta documentação (revisado em 29/07/2026).**
+> Este documento descreve o schema inicial do MVP (migration `202607140001`) e
+> cobre apenas 7 das tabelas em uso. A fonte de verdade do schema é sempre
+> `supabase/migrations/`.
+>
+> **Não documentadas aqui ainda:** `trilhas`, `trilha_perfis`, `settings`,
+> `whatsapp_instances`, `group_whatsapp_instances`, `group_profiles`,
+> `video_captions`, `campaign_video_captions`.
+>
+> Também não refletidas abaixo: colunas adicionadas depois de 14/07 (por exemplo
+> `groups.trilha_id`, `groups.maturidade`, `groups.segmento`,
+> `campaigns.status`, `dispatch_logs.retry_count`) e colunas já removidas
+> (`trilhas.organization_id`, e as colunas legadas de trilha em `video_catalog`:
+> `macrotema`, `trilha`, `ordem`, `perfil_da_jornada`).
+
 ## 1. Visão Geral
 
 O banco de dados organiza a operação de envio de conteúdos para grupos de WhatsApp. A estrutura atual separa clientes, grupos, campanhas, trilhas, catálogo de vídeos, legendas, instâncias de WhatsApp e logs de envio.

@@ -31,22 +31,53 @@ function buildQueueOptions(options = {}) {
   };
 }
 
+// Queue/Worker/QueueEvents sao EventEmitters e a BullMQ reemite nelas todo erro
+// da conexao Redis (QueueBase faz `connection.on("error", ... this.emit("error"))`).
+// Um "error" sem listener em EventEmitter e excecao nao capturada: com o Redis
+// indisponivel ou reconectando, o processo da API morria de repente no meio da
+// geracao de legendas - a tela ficava travada em "Processando" e a requisicao
+// seguinte (inclusive o DELETE que cancela o disparo) falhava com "Failed to
+// fetch". Quem precisa da disponibilidade do Redis ja a verifica onde importa
+// (health check, falha de enqueue), entao aqui basta registrar o erro.
+function withErrorLogging(instance, name, kind) {
+  instance.on("error", (error) => {
+    console.error(
+      JSON.stringify({
+        event: "queue.error",
+        queue: name,
+        kind,
+        error_message: (error && error.message) || String(error),
+      })
+    );
+  });
+
+  return instance;
+}
+
 function createQueue(name, options = {}) {
-  return new Queue(name, buildQueueOptions(options));
+  return withErrorLogging(new Queue(name, buildQueueOptions(options)), name, "queue");
 }
 
 function createWorker(name, processor, options = {}) {
-  return new Worker(name, processor, {
-    ...options,
-    connection: getRedisConnection(),
-  });
+  return withErrorLogging(
+    new Worker(name, processor, {
+      ...options,
+      connection: getRedisConnection(),
+    }),
+    name,
+    "worker"
+  );
 }
 
 function createQueueEvents(name, options = {}) {
-  return new QueueEvents(name, {
-    ...options,
-    connection: getRedisConnection(),
-  });
+  return withErrorLogging(
+    new QueueEvents(name, {
+      ...options,
+      connection: getRedisConnection(),
+    }),
+    name,
+    "queue_events"
+  );
 }
 
 async function closeQueueInfrastructure() {

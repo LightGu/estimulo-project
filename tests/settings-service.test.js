@@ -413,7 +413,11 @@ async function main() {
     assert.deepEqual(settings.caption_generation.models, ["gemini-3.5-flash"]);
     assert.equal(settings.caption_generation.prompt, "Prompt customizado");
     // caption_review nao configurado -> cai no default
-    assert.deepEqual(settings.caption_review.models, ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]);
+    assert.deepEqual(settings.caption_review.models, [
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-lite-latest",
+    ]);
     assert.equal(settings.caption_review.prompt, null);
     // default_prompt sempre exposto (texto do sistema) para a UI mostrar antes de customizar,
     // independente de haver ou nao um prompt customizado salvo
@@ -426,8 +430,8 @@ async function main() {
 
     const defaults = await defaultsService.getAIAgentsSettings();
     assert.deepEqual(defaults.transcription.models, [
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
       "gemini-flash-latest",
     ]);
   }
@@ -448,15 +452,19 @@ async function main() {
     const service = createSettingsService({ settingsRepository });
 
     const updated = await service.updateAIAgentsSettings({
-      transcription: { models: ["gemini-2.5-pro", "gemini-2.5-flash"] },
+      transcription: { models: ["gemini-2.5-pro", "gemini-3.5-flash"] },
       caption_generation: { models: ["gemini-3.5-flash"], prompt: "Novo prompt" },
     });
 
-    assert.deepEqual(updated.transcription.models, ["gemini-2.5-pro", "gemini-2.5-flash"]);
+    assert.deepEqual(updated.transcription.models, ["gemini-2.5-pro", "gemini-3.5-flash"]);
     assert.deepEqual(updated.caption_generation.models, ["gemini-3.5-flash"]);
     assert.equal(updated.caption_generation.prompt, "Novo prompt");
     // caption_review nao foi enviado no payload -> permanece com o default
-    assert.deepEqual(updated.caption_review.models, ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-2.5-flash-lite"]);
+    assert.deepEqual(updated.caption_review.models, [
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-lite-latest",
+    ]);
 
     await assert.rejects(
       () => service.updateAIAgentsSettings({ transcription: { models: [] } }),
@@ -467,15 +475,22 @@ async function main() {
       /transcription\.models contains an unsupported model/
     );
     await assert.rejects(
-      () => service.updateAIAgentsSettings({ caption_review: { models: ["gemini-2.5-flash"], prompt: 123 } }),
+      () => service.updateAIAgentsSettings({ caption_review: { models: ["gemini-3.5-flash"], prompt: 123 } }),
       /caption_review\.prompt must be a string or null/
     );
 
     // prompt: null explicito limpa o prompt customizado (volta ao default do sistema)
     const cleared = await service.updateAIAgentsSettings({
-      caption_generation: { models: ["gemini-2.5-flash"], prompt: null },
+      caption_generation: { models: ["gemini-3.5-flash"], prompt: null },
     });
     assert.equal(cleared.caption_generation.prompt, null);
+
+    // Modelos retirados pelo Google (404 "no longer available") nao podem mais ser
+    // salvos: era exatamente essa configuracao que derrubava o envio das campanhas.
+    await assert.rejects(
+      () => service.updateAIAgentsSettings({ caption_review: { models: ["gemini-2.5-flash-lite"] } }),
+      /caption_review\.models contains an unsupported model/
+    );
   }
 
   console.log("settings service tests OK");

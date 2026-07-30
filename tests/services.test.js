@@ -246,6 +246,14 @@ async function main() {
   };
   const campaignVideoCaptionsServiceInstance = campaignVideoCaptionsService.createCampaignVideoCaptionsService({
     campaignGroups: campaignGroupsRepository,
+    // Sem este stub o caminho de erro ("Falha ao gerar legenda via IA") cai no
+    // notifications.service real e manda mensagem no grupo de avisos.
+    notificationsService: {
+      notifyAiError: async () => ({ sent: true }),
+      notifyCampaignStarted: async () => ({ sent: true }),
+      notifyCampaignFinished: async () => ({ sent: true }),
+      notifyDispatchFailure: async () => ({ sent: true }),
+    },
     campaigns: campaignRepository,
     captionReviewService: captionReviewServiceStub,
     groupVideoProgressRepository: progressRepository,
@@ -363,6 +371,9 @@ async function main() {
     organizationRepository: orgRepository,
     repository: campaignRepository,
     videoCatalogRepository,
+    inAppNotificationsService: {
+      notifyTrailFinished: async () => {},
+    },
   });
   const videoService = videoCatalogService.createVideoCatalogService({ repository: videoCatalogRepository });
   const progressService = groupVideoProgressService.createGroupVideoProgressService({

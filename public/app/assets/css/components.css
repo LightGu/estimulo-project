@@ -23,6 +23,143 @@
   height: 18px;
 }
 
+/* Notification bell */
+.notif-bell-wrap {
+  position: relative;
+}
+
+.notif-bell {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+}
+
+.notif-bell:hover {
+  background: var(--surface-strong);
+  color: var(--text);
+}
+
+.notif-bell svg {
+  width: 18px;
+  height: 18px;
+}
+
+.notif-bell-count {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.notif-bell-count[hidden] {
+  display: none;
+}
+
+.notif-panel {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(360px, 90vw);
+  max-height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: 40;
+}
+
+.notif-panel[hidden] {
+  display: none;
+}
+
+.notif-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.notif-panel-header h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.notif-panel-mark-all {
+  border: 0;
+  background: none;
+  color: var(--primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.notif-panel-mark-all:hover {
+  text-decoration: underline;
+}
+
+.notif-panel-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.notif-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.notif-item:last-child {
+  border-bottom: 0;
+}
+
+.notif-item.is-unread {
+  background: var(--surface-strong);
+}
+
+.notif-item-message {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.notif-item-time {
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+
+.notif-panel-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 13px;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;
@@ -485,6 +622,34 @@ td.mono {
 
 .chip .chip-remove:hover {
   color: var(--danger);
+}
+
+.chip .chip-edit {
+  cursor: pointer;
+  color: var(--text-faint);
+}
+
+.chip .chip-edit:hover {
+  color: var(--text);
+}
+
+.chip .chip-unmerge {
+  cursor: pointer;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+.chip .chip-unmerge:hover {
+  color: var(--accent, #5b6cff);
+}
+
+.chip.selectable {
+  cursor: pointer;
+}
+
+.chip.selected {
+  border-color: var(--accent, #5b6cff);
+  background: var(--surface);
 }
 
 /* Side drawer — slides in from the right, e.g. a day's contents on the editorial calendar */

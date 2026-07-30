@@ -4,6 +4,7 @@ const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { EvolutionDeliveryProvider, sendToEvolution } = require("../services/evolution");
 const { evolutionConfig } = require("../config/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
+const { base64Length, compressVideoToFitBase64Budget } = require("../services/video-compression");
 const defaultCaptionReviewService = require("../services/caption-review.service");
 const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
 const defaultVideoCaptionsService = require("../services/video-captions.service");
@@ -14,6 +15,9 @@ const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-ins
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 const defaultCampaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const defaultNotificationsService = require("../services/notifications.service");
+const defaultInAppNotificationsService = require("../services/in-app-notifications.service");
+const defaultTrilhasRepository = require("../repositories/trilhas.repository");
+const { resolveGroupTrailId, selectNextApprovedUnsentVideo } = require("../services/group-video-flow");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
 const DISPATCH_INITIAL_STATUS = "pending";
@@ -167,6 +171,12 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
     return {
       caption: jobData.caption_id ? { id: jobData.caption_id } : null,
       generated: Boolean(jobData.caption_generated),
+      // Ja passou pela revisao factual na Etapa 2 (campaign-video-captions.service
+      // chama selectCaptionForVideo com requireCaptionReview). Revisar de novo aqui
+      // era uma segunda chamada ao Gemini por grupo sobre exatamente o mesmo par
+      // legenda/transcricao — o que dobrava o consumo da cota diaria e fazia o envio
+      // falhar por 429 justamente com a legenda pronta.
+      reviewed: true,
       text: fallbackCaption,
     };
   }
@@ -175,6 +185,7 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
     return {
       caption: null,
       generated: false,
+      reviewed: false,
       text: fallbackCaption,
     };
   }
@@ -203,6 +214,7 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
     return {
       caption: null,
       generated: false,
+      reviewed: false,
       text: fallbackCaption,
     };
   }
@@ -211,6 +223,7 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
     return {
       caption: null,
       generated: false,
+      reviewed: false,
       text: fallbackCaption,
     };
   }
@@ -228,7 +241,9 @@ async function resolveDispatchCaption(jobData, captionSelector, logger = console
       })
     );
 
-  return selected;
+  // selectCaptionForVideo ja revisou a legenda quando requireCaptionReview estava
+  // ligado (tanto a reaproveitada do banco quanto a gerada agora).
+  return { ...selected, reviewed: Boolean(options.requireCaptionReview) };
 }
 
 async function resolveVideoTranscript(jobData, videoCatalogRepository = defaultVideoCatalogRepository) {
@@ -352,6 +367,98 @@ async function markDispatchCaptionUsed(params = {}) {
   return marked;
 }
 
+// Sobra reservada para o resto do JSON do sendMedia (number, mediatype, mimetype,
+// fileName e a legenda) alem do campo `media` em base64.
+const DISPATCH_PAYLOAD_ENVELOPE_RESERVE_BYTES = 64 * 1024;
+
+function isDispatchVideoCompressionEnabled() {
+  return String(process.env.EVOLUTION_MEDIA_COMPRESSION_ENABLED || "true").toLowerCase() !== "false";
+}
+
+function resolveDispatchMediaBase64Budget(config = evolutionConfig) {
+  const limitBytes = Number(config.maxMediaPayloadBytes);
+
+  if (!Number.isFinite(limitBytes) || limitBytes <= 0) {
+    return null;
+  }
+
+  return limitBytes - DISPATCH_PAYLOAD_ENVELOPE_RESERVE_BYTES;
+}
+
+// A Evolution API recusa com HTTP 413 qualquer corpo acima do limite do
+// body-parser dela (136 MB, fixo no bundle). Como a midia viaja em base64
+// (+33% sobre o arquivo), video a partir de ~102 MB nunca era entregue: o job
+// baixava o arquivo do Drive, montava o payload e tomava 413. Aqui o video e
+// reduzido para caber antes do envio.
+async function fitDownloadedVideoToEvolutionLimit(downloadedVideo, options = {}) {
+  const { compressVideo = compressVideoToFitBase64Budget, config = evolutionConfig, jobData = {}, logger = console } =
+    options;
+
+  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes)) {
+    return downloadedVideo;
+  }
+
+  const maxBase64Bytes = resolveDispatchMediaBase64Budget(config);
+
+  if (!maxBase64Bytes || base64Length(downloadedVideo.bytes.length) <= maxBase64Bytes) {
+    return downloadedVideo;
+  }
+
+  if (!isDispatchVideoCompressionEnabled()) {
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "dispatch.video_compression.skipped",
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.group_id,
+          video_id: jobData.video_id,
+          bytes: downloadedVideo.bytes.length,
+          max_base64_bytes: maxBase64Bytes,
+          reason: "EVOLUTION_MEDIA_COMPRESSION_ENABLED=false",
+        })
+      );
+
+    return downloadedVideo;
+  }
+
+  logger.info &&
+    logger.info(
+      JSON.stringify({
+        event: "dispatch.video_compression.started",
+        campaign_id: jobData.campaign_id,
+        group_id: jobData.group_id,
+        progress_group_id: jobData.progress_group_id,
+        video_id: jobData.video_id,
+        bytes: downloadedVideo.bytes.length,
+        base64_bytes: base64Length(downloadedVideo.bytes.length),
+        max_base64_bytes: maxBase64Bytes,
+      })
+    );
+
+  const compressed = await compressVideo(downloadedVideo, { logger, maxBase64Bytes });
+
+  if (compressed !== downloadedVideo) {
+    // Libera os bytes originais (~125 MB) assim que o video reduzido existe, para
+    // nao manter as duas versoes na memoria do worker durante o upload.
+    downloadedVideo.bytes = undefined;
+  }
+
+  logger.info &&
+    logger.info(
+      JSON.stringify({
+        event: "dispatch.video_compression.completed",
+        campaign_id: jobData.campaign_id,
+        group_id: jobData.group_id,
+        progress_group_id: jobData.progress_group_id,
+        video_id: jobData.video_id,
+        bytes: compressed.bytes.length,
+        base64_bytes: base64Length(compressed.bytes.length),
+      })
+    );
+
+  return compressed;
+}
+
 function releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload) {
   if (downloadedVideo) {
     downloadedVideo.bytes = undefined;
@@ -399,6 +506,7 @@ async function resolveDispatchSender(whatsappInstanceId, options = {}) {
 
 function createDeliveryExecutor(params = {}) {
   const {
+    compressVideo = compressVideoToFitBase64Budget,
     drive,
     jobData,
     logger = console,
@@ -479,7 +587,16 @@ function createDeliveryExecutor(params = {}) {
 
       downloadedVideo = downloadedVideoResult;
 
-      if (jobData.video_id && captionReviewService && typeof captionReviewService.assertCaptionApproved === "function") {
+      // Revisa apenas o que ainda nao foi revisado: legenda vinda do fallback
+      // (jobData.legenda sem passar por selectCaptionForVideo). Legenda ja aprovada
+      // na Etapa 2 ou revisada agora dentro de selectCaptionForVideo nao gasta uma
+      // segunda chamada de IA aqui.
+      if (
+        jobData.video_id &&
+        captionReviewService &&
+        !captionSelection.reviewed &&
+        typeof captionReviewService.assertCaptionApproved === "function"
+      ) {
         await captionReviewService.assertCaptionApproved({
           caption: captionSelection.text,
           transcript,
@@ -489,6 +606,11 @@ function createDeliveryExecutor(params = {}) {
           video_id: jobData.video_id,
         });
       }
+      downloadedVideo = await fitDownloadedVideoToEvolutionLimit(downloadedVideo, {
+        compressVideo,
+        jobData,
+        logger,
+      });
       deliveryPayload = buildDispatchDeliveryPayload({ ...jobData, legenda: captionSelection.text }, downloadedVideo);
       logger.info &&
         logger.info(
@@ -606,6 +728,80 @@ async function registerDispatchProgress(
   };
 }
 
+// Roda logo apos o envio de um video ser registrado em group_video_progress: e o
+// unico ponto que sabe, no exato momento da entrega, se aquele era o ultimo video
+// aprovado e nao enviado da trilha do grupo. O campaignTriggerWorker so reavalia
+// isso quando o cron da campanha roda de novo, o que pode nunca acontecer depois
+// da trilha terminar.
+async function maybeNotifyTrailFinished(jobData, dependencies = {}) {
+  const {
+    groupsRepository = defaultGroupsRepository,
+    trilhasRepository = defaultTrilhasRepository,
+    videoCatalogRepository = defaultVideoCatalogRepository,
+    progressRepository = groupVideoProgressRepository,
+    inAppNotificationsService = defaultInAppNotificationsService,
+    logger = console,
+  } = dependencies;
+
+  const groupId = jobData.progress_group_id;
+
+  if (!groupId) {
+    return;
+  }
+
+  try {
+    const group = await groupsRepository.findById(groupId);
+    const trilhaId = jobData.trilha_id || jobData.trilhaId || (group && resolveGroupTrailId(group));
+
+    if (!group || !trilhaId) {
+      return;
+    }
+
+    const [delivered, links] = await Promise.all([
+      progressRepository.listDelivered(groupId),
+      trilhasRepository.listVideoLinksByTrilha(trilhaId),
+    ]);
+
+    if (!links.length) {
+      return;
+    }
+
+    const approved = typeof videoCatalogRepository.listApproved === "function"
+      ? await videoCatalogRepository.listApproved()
+      : [];
+    const approvedById = new Map(approved.map((video) => [video.id, video]));
+    const trailVideos = links
+      .filter((link) => approvedById.has(link.video_id))
+      .map((link) => ({ ...approvedById.get(link.video_id), ordem: link.ordem }));
+    const sentVideoIds = delivered.map((item) => item.video_id).filter(Boolean);
+
+    const nextVideo = selectNextApprovedUnsentVideo({
+      group,
+      sentVideoIds,
+      videos: trailVideos,
+    });
+
+    if (nextVideo) {
+      return;
+    }
+
+    await inAppNotificationsService.notifyTrailFinished({
+      groupId,
+      groupName: group.nome || group.name,
+      trilhaLabel: group.trilha_override || group.segmento,
+    });
+  } catch (error) {
+    logger.error &&
+      logger.error(
+        JSON.stringify({
+          event: "dispatch.trail_finished_check_failed",
+          group_id: groupId,
+          error_message: error.message,
+        })
+      );
+  }
+}
+
 async function maybeNotifyCampaignFinished(jobData, dependencies = {}) {
   const {
     campaignsRepository = defaultCampaignsRepository,
@@ -642,6 +838,7 @@ async function maybeNotifyCampaignFinished(jobData, dependencies = {}) {
 function createDispatchProcessor(options = {}) {
   const {
     sender: explicitSender,
+    compressVideo = compressVideoToFitBase64Budget,
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
@@ -654,6 +851,8 @@ function createDispatchProcessor(options = {}) {
     campaignsRepository = defaultCampaignsRepository,
     campaignGroupsRepository = defaultCampaignGroupsRepository,
     notificationsService = defaultNotificationsService,
+    trilhasRepository = defaultTrilhasRepository,
+    inAppNotificationsService = defaultInAppNotificationsService,
     logger = console,
   } = options;
 
@@ -683,6 +882,7 @@ function createDispatchProcessor(options = {}) {
       const resolvedSender =
         explicitSender || (await resolveDispatchSender(job.data.whatsapp_instance_id, { whatsappInstancesRepository }));
       const executeDelivery = createDeliveryExecutor({
+        compressVideo,
         drive,
         jobData: job.data,
         logger,
@@ -749,6 +949,17 @@ function createDispatchProcessor(options = {}) {
         logger,
       });
 
+      if (progress && !progress.duplicate) {
+        await maybeNotifyTrailFinished(job.data, {
+          groupsRepository,
+          trilhasRepository,
+          videoCatalogRepository: videoCatalogRepository || defaultVideoCatalogRepository,
+          progressRepository,
+          inAppNotificationsService,
+          logger,
+        });
+      }
+
       return {
         status: DISPATCH_SUCCESS_STATUS,
         delivery,
@@ -786,25 +997,36 @@ function createDispatchProcessor(options = {}) {
           started_at: startedAt,
           failed_at: failedAt,
           error_message: error.message,
+          // Marcado pelo wrapper da Evolution (ver PERMANENT_ERROR_STATUSES):
+          // indica que o sweep de dispatch-failure-retry vai ignorar este log em
+          // vez de gastar tentativas repetindo um envio que nao pode dar certo.
+          permanent: Boolean(error.permanent),
+          error_code: error.code,
         })
       );
 
-      await notificationsService
-        .notifyDispatchFailure({
-          campaignId: job.data.campaign_id,
-          groupId: job.data.group_id,
-          videoId: job.data.video_id,
-          errorMessage: error.message,
-        })
-        .catch((notifyError) => {
-          console.error(
-            JSON.stringify({
-              event: "dispatch.notification_failed",
-              job_id: job.id,
-              error_message: notifyError.message,
-            })
-          );
-        });
+      // So notifica na primeira falha (retry_count 0): o sweep de
+      // dispatch-failure-retry reenfileira o mesmo log ate MAX_RETRY_ATTEMPTS
+      // vezes, e sem essa checagem cada nova tentativa falha reenviaria a
+      // mesma notificacao de falha ao WhatsApp.
+      if (!job.data.retry_count) {
+        await notificationsService
+          .notifyDispatchFailure({
+            campaignId: job.data.campaign_id,
+            groupId: job.data.group_id,
+            videoId: job.data.video_id,
+            errorMessage: error.message,
+          })
+          .catch((notifyError) => {
+            console.error(
+              JSON.stringify({
+                event: "dispatch.notification_failed",
+                job_id: job.id,
+                error_message: notifyError.message,
+              })
+            );
+          });
+      }
 
       await maybeNotifyCampaignFinished(job.data, {
         campaignsRepository,
@@ -827,6 +1049,7 @@ const dispatchWorker = createDispatchProcessor({
 function createDispatchWorker(options = {}) {
   const {
     sender,
+    compressVideo = compressVideoToFitBase64Budget,
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
@@ -838,6 +1061,8 @@ function createDispatchWorker(options = {}) {
     campaignsRepository,
     campaignGroupsRepository,
     notificationsService,
+    trilhasRepository,
+    inAppNotificationsService,
     logger = console,
     ...workerOptions
   } = options;
@@ -846,6 +1071,7 @@ function createDispatchWorker(options = {}) {
     queueNames.dispatch,
     createDispatchProcessor({
       sender,
+      compressVideo,
       videoDownloader,
       drive,
       videoCatalogRepository,
@@ -857,6 +1083,8 @@ function createDispatchWorker(options = {}) {
       campaignsRepository,
       campaignGroupsRepository,
       notificationsService,
+      trilhasRepository,
+      inAppNotificationsService,
       logger,
     }),
     {
@@ -886,7 +1114,10 @@ module.exports = {
   createDispatchEvents,
   createDispatchWorker,
   dispatchWorker,
+  fitDownloadedVideoToEvolutionLimit,
+  resolveDispatchMediaBase64Budget,
   maybeNotifyCampaignFinished,
+  maybeNotifyTrailFinished,
   markDispatchCaptionUsed,
   prepareDispatchCaptionBeforeQueue,
   registerDispatchProgress,

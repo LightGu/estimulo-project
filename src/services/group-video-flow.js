@@ -1,4 +1,4 @@
-const defaultNotificationsService = require("./notifications.service");
+const defaultInAppNotificationsService = require("./in-app-notifications.service");
 
 const APPROVED_VIDEO_STATUS = true;
 const END_OF_QUEUE_PAUSE_REASON = "end_of_queue";
@@ -181,8 +181,18 @@ function resolveNotifyOnTrailFinished(params = {}) {
 }
 
 async function pauseGroupForEndOfQueue(params = {}) {
-  const { group, repository, logger = console, notificationsService = defaultNotificationsService } = params;
+  const {
+    group,
+    repository,
+    logger = console,
+    inAppNotificationsService: notificationsService = defaultInAppNotificationsService,
+  } = params;
   const pausedAt = params.pausedAt || new Date().toISOString();
+  // O grupo ja estava pausado por fim de fila antes desta chamada: evita
+  // recriar a notificacao de "trilha concluida" toda vez que o fluxo e
+  // reavaliado (gatilho de campanha recorrente, criacao de campanha, etc.)
+  // para um grupo que ja esta parado no mesmo motivo.
+  const alreadyPaused = isGroupPausedByEndOfQueue(group);
 
   if (repository && typeof repository.pauseGroupVideoFlowForEndOfQueue === "function") {
     await repository.pauseGroupVideoFlowForEndOfQueue(resolveGroupId(group), {
@@ -200,11 +210,12 @@ async function pauseGroupForEndOfQueue(params = {}) {
     });
   }
 
-  if (!isGroupPausedByEndOfQueue(group) && logger && typeof logger.info === "function") {
+  if (!alreadyPaused && logger && typeof logger.info === "function") {
     logger.info(JSON.stringify(buildEndOfQueueLogPayload({ ...params, group, pausedAt })));
   }
 
   if (
+    !alreadyPaused &&
     notificationsService &&
     typeof notificationsService.notifyTrailFinished === "function" &&
     resolveNotifyOnTrailFinished(params)

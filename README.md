@@ -53,6 +53,14 @@ GEMINI_TRANSCRIPTION_MODEL=gemini-flash-latest
 GEMINI_TEXT_MODEL=gemini-flash-latest
 ```
 
+Para transcrever, o adapter envia ao Gemini **somente o audio** extraido do
+video (`src/services/video-audio-extraction.js`, mono/16 kHz/mp3), nunca o video
+completo: a transcricao so depende da fala e o audio isolado custa ~32 tokens por
+segundo de midia contra ~258 do video, com upload muito menor. A extracao usa o
+ffmpeg instalado como dependencia npm (`@ffmpeg-installer/ffmpeg`); use
+`FFMPEG_PATH` para apontar outro binario e `TRANSCRIPTION_AUDIO_ONLY=false` para
+voltar a enviar o video em caso de emergencia.
+
 Essas variaveis servem apenas como valor inicial (seed). O modelo principal, a
 cascata de fallback e os prompts de geracao/revisao de legenda por agente
 (transcricao, geracao de legenda, revisao de legenda) sao configurados pela
@@ -178,6 +186,13 @@ http://127.0.0.1:3000/app/trilhas.html
 http://127.0.0.1:3000/app/campanhas.html
 ```
 
+1. Crie um projeto no Supabase.
+2. Copie o URL e as chaves para o arquivo `.env`.
+3. Aplique as migrations de `supabase/migrations/` no projeto, em ordem de nome de arquivo.
+
+### Como aplicar as migrations
+
+Com o Supabase CLI, apontando para o projeto correto:
 É recomendável abrir o frontend pela própria API na porta `3000`, porque as telas chamam endpoints como `/organizations`, `/groups/search` e `/trilhas`.
 
 ### Verificação rápida
@@ -199,9 +214,19 @@ As migrations ficam em `supabase/migrations`. Elas devem ser aplicadas no projet
 O comando abaixo não aplica migrations; ele apenas valida se a aplicação consegue acessar o Supabase configurado:
 
 ```bash
-npm run db:test
+supabase link --project-ref SEU_PROJECT_REF
+supabase db push
 ```
 
+`supabase/migrations/` é a única fonte de verdade do schema. As migrations são
+incrementais e dependentes de ordem: aplicar só a primeira (`202607140001_create_mvp_schema.sql`)
+não deixa o banco no estado que a aplicação espera. Depois de aplicar, confirme
+a conexão com `npm run db:test`.
+
+O diretório `supabase/.temp/` é cache local do CLI e não deve ser versionado:
+ele guarda o project ref e a URL do pooler do banco.
+
+### Como executar o seed
 Para popular dados iniciais de desenvolvimento:
 
 ```bash
@@ -258,4 +283,25 @@ Para remover também os volumes locais:
 docker compose --env-file .env -f infra/docker-compose.yml down -v
 ```
 
+- `POST /campaigns`: cria campanhas usando o serviço existente.
+- `GET /health`: devolve status geral do sistema, Redis, fila BullMQ e último dispatch.
+
+## Processos em produção
+
+A API não executa fila nenhuma. Cada worker é um processo separado e todos
+precisam estar de pé, além do Redis:
+
+| Processo | Comando | Papel |
+| --- | --- | --- |
+| API | `npm run api` | HTTP + frontend estático em `/app` |
+| Campaign trigger | `npm run queue:campaign-trigger:worker` | Agenda e dispara campanhas recorrentes |
+| Dispatch | `npm run queue:dispatch:worker` | Envio de vídeo/legenda para os grupos |
+| Dispatch review timeout | `npm run queue:dispatch-review-timeout:worker` | Expira revisões de legenda pendentes |
+| Dispatch failure retry | `npm run queue:dispatch-failure-retry:worker` | Reprocessa envios que falharam |
+| Mensagens (disparo pontual) | `npm run queue:mensagens-dispatch:worker` | Fila da tela "Disparador Pontual" |
+| Group sync | `npm run queue:group-sync:worker` | Sincroniza grupos e contagem de membros |
+| Drive video index | `npm run queue:drive-video-index:worker` | Indexa e transcreve vídeos do Google Drive |
+
+Sem o worker de `mensagens-dispatch`, a tela de Disparador Pontual enfileira o
+envio e nada acontece.
 Mais detalhes estão em `docs/filas.md`, `docs/evolution-api.md`, `docs/estrutura.md` e `docs/documentacao_banco.md`.

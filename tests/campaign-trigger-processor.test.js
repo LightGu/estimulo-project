@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   buildCampaignVideoFlowRepository,
   createCampaignTriggerProcessor,
+  ensurePendingDispatchLogs,
 } = require("../src/queues/campaign-trigger");
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 
@@ -384,8 +385,48 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
       video_id: "video-1",
       status: "pendente",
       mensagem_erro: null,
+      horario_envio_planejado: "2026-07-17T10:00:00.000Z",
     },
   ]);
+}
+
+async function testProcessorRepairsMissingPlannedTimeOnExistingLog() {
+  const existingLog = {
+    id: "log-1",
+    campaign_id: "campaign-1",
+    group_id: "group-1",
+    video_id: "video-1",
+    horario_envio_planejado: null,
+  };
+  const repaired = [];
+
+  const created = await ensurePendingDispatchLogs(
+    {
+      listByCampaign: async () => [existingLog],
+      createLog: async () => {
+        throw new Error("nao deve criar log duplicado");
+      },
+      updatePlannedSchedule: async (id, scheduledAt) => {
+        repaired.push({ id, scheduledAt });
+        return { ...existingLog, horario_envio_planejado: scheduledAt };
+      },
+    },
+    "campaign-1",
+    [
+      {
+        data: {
+          campaign_id: "campaign-1",
+          progress_group_id: "group-1",
+          video_id: "video-1",
+          scheduled_at: "2026-07-17T10:05:00.000Z",
+        },
+      },
+    ],
+    {}
+  );
+
+  assert.equal(created, 0);
+  assert.deepEqual(repaired, [{ id: "log-1", scheduledAt: "2026-07-17T10:05:00.000Z" }]);
 }
 
 async function testProcessorNotifiesCampaignStartedWhenDispatchesEnqueued() {
@@ -487,6 +528,7 @@ async function main() {
   await testProcessorUsesCampaignNameAsTrailFallback();
   await testProcessorResolvesTrilhaIdFromCampaignNameFallback();
   await testProcessorCreatesPendingDispatchLogAfterEnqueue();
+  await testProcessorRepairsMissingPlannedTimeOnExistingLog();
   await testProcessorNotifiesCampaignStartedWhenDispatchesEnqueued();
   await testProcessorSkipsNotificationWhenNoDispatchesEnqueued();
   await testProcessorSurvivesNotificationFailure();

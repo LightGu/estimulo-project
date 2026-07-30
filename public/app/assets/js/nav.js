@@ -9,6 +9,7 @@
     "/campaigns",
     "/groups",
     "/health",
+    "/notifications",
     "/organizations",
     "/reports",
     "/trilhas",
@@ -157,6 +158,8 @@
     sun: '<circle cx="12" cy="12" r="4.5" /><path d="M12 2.5v2.2M12 19.3v2.2M4.2 4.2l1.55 1.55M18.25 18.25l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.2 19.8l1.55-1.55M18.25 5.75l1.55-1.55" />',
     moon: '<path d="M20 14.3A8.1 8.1 0 0 1 9.7 4a6.6 6.6 0 1 0 10.3 10.3Z" />',
   };
+  const BELL_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9a6 6 0 0 1 12 0c0 4 1.4 5.6 2 6.4a1 1 0 0 1-.8 1.6H4.8a1 1 0 0 1-.8-1.6C4.6 14.6 6 13 6 9Z" /><path d="M9.5 19.5a2.5 2.5 0 0 0 5 0" /></svg>';
 
   function currentTheme() {
     return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
@@ -238,6 +241,165 @@
     actions.insertBefore(btn, actions.firstChild);
   }
 
+  // ---------- Notification bell (topbar) ----------
+  // Shows in-app notifications (e.g. "trilha concluída") next to the user's
+  // name. These no longer go to WhatsApp — see src/services/in-app-notifications.service.js.
+  const NOTIF_POLL_INTERVAL_MS = 30000;
+  let notifPanelEl = null;
+  let notifBellButton = null;
+  let notifCountEl = null;
+  let notifPollTimer = null;
+
+  function formatNotifTime(isoDate) {
+    const date = new Date(isoDate);
+    if (Number.isNaN(date.getTime())) return "";
+
+    return date.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  }
+
+  function renderNotifList(items) {
+    const list = notifPanelEl.querySelector(".notif-panel-list");
+
+    if (!items || !items.length) {
+      list.innerHTML = '<div class="notif-panel-empty">Nenhuma notificação por aqui.</div>';
+      return;
+    }
+
+    list.innerHTML = items
+      .map(
+        (item) => `
+          <div class="notif-item${item.read_at ? "" : " is-unread"}">
+            <span class="notif-item-message"></span>
+            <span class="notif-item-time"></span>
+          </div>`
+      )
+      .join("");
+
+    list.querySelectorAll(".notif-item").forEach((node, index) => {
+      node.querySelector(".notif-item-message").textContent = items[index].message;
+      node.querySelector(".notif-item-time").textContent = formatNotifTime(items[index].created_at);
+    });
+  }
+
+  function setNotifCount(count) {
+    const value = Number(count) || 0;
+    notifCountEl.textContent = value > 99 ? "99+" : String(value);
+    notifCountEl.hidden = value <= 0;
+  }
+
+  async function refreshNotifications() {
+    try {
+      const response = await fetch("/notifications?limit=20");
+      const data = await response.json();
+
+      setNotifCount(data && data.unread_count);
+
+      if (notifPanelEl && !notifPanelEl.hidden) {
+        renderNotifList(data && data.items);
+      }
+
+      return data;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async function openNotifPanel() {
+    notifPanelEl.hidden = false;
+    const data = await refreshNotifications();
+    renderNotifList(data && data.items);
+
+    if (data && data.unread_count > 0) {
+      try {
+        await fetch("/notifications/read-all", { method: "POST" });
+        setNotifCount(0);
+      } catch (error) {
+        /* mantém o contador atual caso a chamada falhe */
+      }
+    }
+  }
+
+  function closeNotifPanel() {
+    if (notifPanelEl) notifPanelEl.hidden = true;
+  }
+
+  function toggleNotifPanel() {
+    if (!notifPanelEl.hidden) {
+      closeNotifPanel();
+      return;
+    }
+
+    openNotifPanel();
+  }
+
+  function ensureNotifPanel(wrap) {
+    if (notifPanelEl) return notifPanelEl;
+
+    notifPanelEl = document.createElement("div");
+    notifPanelEl.className = "notif-panel";
+    notifPanelEl.hidden = true;
+    notifPanelEl.innerHTML = `
+      <div class="notif-panel-header">
+        <h4>Notificações</h4>
+        <button type="button" class="notif-panel-mark-all">Marcar todas como lidas</button>
+      </div>
+      <div class="notif-panel-list"></div>
+    `;
+    wrap.appendChild(notifPanelEl);
+
+    notifPanelEl.querySelector(".notif-panel-mark-all").addEventListener("click", async () => {
+      try {
+        await fetch("/notifications/read-all", { method: "POST" });
+        setNotifCount(0);
+        const data = await refreshNotifications();
+        renderNotifList(data && data.items);
+      } catch (error) {
+        /* ignora falha ao marcar como lida */
+      }
+    });
+
+    document.addEventListener("click", (event) => {
+      if (notifPanelEl.hidden) return;
+      if (notifPanelEl.contains(event.target) || notifBellButton.contains(event.target)) return;
+      closeNotifPanel();
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !notifPanelEl.hidden) closeNotifPanel();
+    });
+
+    return notifPanelEl;
+  }
+
+  function initNotificationBell() {
+    const actions = document.querySelector(".topbar-actions");
+    if (!actions || document.getElementById("notifBellButton")) return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "notif-bell-wrap";
+
+    notifBellButton = document.createElement("button");
+    notifBellButton.type = "button";
+    notifBellButton.id = "notifBellButton";
+    notifBellButton.className = "notif-bell";
+    notifBellButton.setAttribute("aria-label", "Notificações");
+    notifBellButton.innerHTML = `${BELL_ICON_SVG}<span class="notif-bell-count" hidden></span>`;
+    notifBellButton.addEventListener("click", toggleNotifPanel);
+
+    notifCountEl = notifBellButton.querySelector(".notif-bell-count");
+
+    wrap.appendChild(notifBellButton);
+    ensureNotifPanel(wrap);
+
+    const themeButton = document.getElementById("themeToggleButton");
+    actions.insertBefore(wrap, themeButton ? themeButton.nextSibling : actions.firstChild);
+
+    refreshNotifications();
+
+    if (notifPollTimer) clearInterval(notifPollTimer);
+    notifPollTimer = setInterval(refreshNotifications, NOTIF_POLL_INTERVAL_MS);
+  }
+
   // ---------- User chip (topbar) ----------
   // Loads the current user's display name from /settings/profile and fills
   // in the topbar chip (avatar initials + name) on every page.
@@ -277,6 +439,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     render();
     initThemeToggle();
+    initNotificationBell();
     window.estimuloRefreshUserChip();
   });
 

@@ -224,6 +224,30 @@ function createSettingsService(dependencies = {}) {
     return getProfileSettings();
   }
 
+  const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+  function normalizeDispatchPeriods(rawPeriods) {
+    if (!Array.isArray(rawPeriods)) {
+      return [];
+    }
+
+    return rawPeriods
+      .filter((period) => period && typeof period === "object")
+      .map((period) => ({ inicio: String(period.inicio || ""), fim: String(period.fim || "") }));
+  }
+
+  function assertValidDispatchPeriods(periods) {
+    for (const period of periods) {
+      if (!TIME_OF_DAY_PATTERN.test(period.inicio) || !TIME_OF_DAY_PATTERN.test(period.fim)) {
+        throw new Error("dispatch_periods entries must have valid inicio/fim times (HH:mm)");
+      }
+
+      if (period.inicio >= period.fim) {
+        throw new Error("dispatch_periods entries must have inicio earlier than fim");
+      }
+    }
+  }
+
   async function getScheduleSettings() {
     const settings = await repository.getSettings();
 
@@ -235,6 +259,7 @@ function createSettingsService(dependencies = {}) {
       max_interval_min: Number.isInteger(settings && settings.default_max_interval_min)
         ? settings.default_max_interval_min
         : DEFAULT_SCHEDULE_MAX_INTERVAL_MIN,
+      dispatch_periods: normalizeDispatchPeriods(settings && settings.default_dispatch_periods),
     };
   }
 
@@ -261,10 +286,14 @@ function createSettingsService(dependencies = {}) {
       throw new Error("max_interval_min must be an integer greater than or equal to min_interval_min");
     }
 
+    const dispatchPeriods = normalizeDispatchPeriods(input.dispatch_periods);
+    assertValidDispatchPeriods(dispatchPeriods);
+
     await repository.updateSettings({
       default_timezone: timezone,
       default_min_interval_min: minInterval,
       default_max_interval_min: maxInterval,
+      default_dispatch_periods: dispatchPeriods,
     });
 
     return getScheduleSettings();

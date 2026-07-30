@@ -4,6 +4,7 @@ const VALIDATION_ERROR_PATTERNS = [
   "window_start e window_end",
   "Grupo(s) nao encontrado(s)",
   "Grupo(s) sem evolution_group_id",
+  "Grupo(s) sem classificacao (segmento)",
   "groups deve conter ao menos um grupo",
   "cada item de groups deve informar group_id",
   "jitter_delay_min_ms",
@@ -11,6 +12,7 @@ const VALIDATION_ERROR_PATTERNS = [
   "janela da campanha nao comporta",
   "e obrigatorio",
   "deve ser uma data valida",
+  "deve ser uma data/hora futura",
   "deve usar o formato HH:mm",
 ];
 
