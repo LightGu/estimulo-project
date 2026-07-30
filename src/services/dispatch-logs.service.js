@@ -23,13 +23,8 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Group id is required");
     }
 
-    if (!videoId) {
-      throw new Error("Video id is required");
-    }
-
     const campaign = await campaignsRepositoryDependency.findById(campaignId);
     const group = await groupsRepositoryDependency.findById(groupId);
-    const video = await videoCatalogRepositoryDependency.findById(videoId);
 
     if (!campaign) {
       throw new Error("Campaign not found");
@@ -39,8 +34,12 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Group not found");
     }
 
-    if (!video) {
-      throw new Error("Video not found");
+    if (videoId) {
+      const video = await videoCatalogRepositoryDependency.findById(videoId);
+
+      if (!video) {
+        throw new Error("Video not found");
+      }
     }
 
     const validStatuses = ["pendente", "processando", "enviado", "falhou"];
@@ -64,6 +63,18 @@ function createDispatchLogsService(dependencies = {}) {
     }
 
     return repository.updateStatus(id, status, mensagemErro);
+  }
+
+  async function updatePlannedSchedule(id, horarioEnvioPlanejado) {
+    if (!id) {
+      throw new Error("Dispatch log id is required");
+    }
+
+    if (!horarioEnvioPlanejado) {
+      throw new Error("Planned dispatch time is required");
+    }
+
+    return repository.updatePlannedSchedule(id, horarioEnvioPlanejado);
   }
 
   async function listByCampaign(campaignId) {
@@ -122,6 +133,7 @@ function createDispatchLogsService(dependencies = {}) {
     listByGroup,
     listForReport,
     listRecent,
+    updatePlannedSchedule,
     updateStatus,
   };
 }

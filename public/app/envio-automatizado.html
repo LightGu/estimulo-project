@@ -318,6 +318,7 @@
         pencil: '<path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />',
         refresh: '<path d="M20 11A8 8 0 1 0 18.5 15.5" /><path d="M20 5v6h-6" />',
         warning: '<path d="M10.3 3.9 1.9 18a1 1 0 0 0 .9 1.5h18.4a1 1 0 0 0 .9-1.5L13.7 3.9a1 1 0 0 0-1.7 0Z" /><path d="M12 9v4" /><path d="M12 16.5h.01" />',
+        check: '<path d="M20 6 9 17l-5-5" />',
       };
       function icon(name) {
         return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
@@ -338,10 +339,7 @@
 
       let selectedGroupId = null;
       let editingTrilhaGroupId = null;
-      let periods = [
-        { inicio: "07:00", fim: "12:00" },
-        { inicio: "13:00", fim: "17:00" },
-      ];
+      let periods = [];
       let dispatchGroups = [];
       let captionItems = [];
       let captionFilter = "todos";
@@ -619,7 +617,11 @@
                         (v, i) => `
                       <tr class="${v.status === "proximo" ? "video-row-next" : ""}">
                         <td>${i + 1}</td>
-                        <td class="${v.status === "proximo" ? "strong" : ""}">${escapeHtml(v.nome_do_arquivo)}</td>
+                        <td class="${v.status === "proximo" ? "strong" : ""}">${
+                          v.aprovado
+                            ? `<span class="has-tip" data-tip="Vídeo aprovado." data-tip-tone="success" style="color:var(--success);margin-right:4px;">${icon("check")}</span>`
+                            : ""
+                        }${escapeHtml(v.nome_do_arquivo)}</td>
                         <td>${
                           v.status === "enviado"
                             ? '<span class="badge has-tip badge-success" data-tip="Já foi entregue a este grupo." data-tip-tone="success">Enviado</span>'
@@ -1174,6 +1176,10 @@
           }
           if (settings.max_interval_min !== undefined) {
             document.getElementById("delayMax").value = settings.max_interval_min;
+          }
+          if (Array.isArray(settings.dispatch_periods) && settings.dispatch_periods.length) {
+            periods = settings.dispatch_periods.map((p) => ({ inicio: p.inicio, fim: p.fim }));
+            renderPeriodChips();
           }
           state.timezone = settings.timezone || null;
           timezoneHint.textContent = state.timezone

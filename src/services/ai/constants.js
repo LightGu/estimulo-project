@@ -1,5 +1,5 @@
 const DEFAULT_TRANSCRIPTION_PROMPT =
-  "Transcreva fielmente todo o audio falado deste video em portugues brasileiro. Retorne apenas a transcricao em texto corrido. Preserve nomes proprios, termos tecnicos e numeros. Nao resuma, nao interprete, nao adicione comentarios, nao use markdown e nao inclua timestamps.";
+  "Transcreva fielmente todo o audio falado deste arquivo de audio em portugues brasileiro. Retorne apenas a transcricao em texto corrido. Preserve nomes proprios, termos tecnicos e numeros. Nao resuma, nao interprete, nao adicione comentarios, nao use markdown e nao inclua timestamps.";
 
 const DEFAULT_CAPTION_GENERATION_PROMPT =
   `Você é um Copywriter Especialista em WhatsApp e Estrategista de Conteúdo voltado para pequenos e médios empreendedores. Sua comunicação é clara, empática, simpática e altamente "marketeira" (persuasiva e focada em prender a atenção).

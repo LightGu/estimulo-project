@@ -70,6 +70,18 @@
       .day-item-main span { font-size: 11.5px; color: var(--text-faint); }
       .day-item .badge { flex: none; }
 
+      /* Drawer header back button + panel switching */
+      .drawer-header { display: flex; align-items: center; gap: 8px; }
+      .drawer-header-titles { flex: 1 1 auto; min-width: 0; }
+      .drawer-header-titles h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .icon-btn-back {
+        border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
+        width: 30px; height: 30px; cursor: pointer; font-size: 15px; flex: none;
+      }
+      .icon-btn-back:hover { background: var(--surface-strong); }
+      .group-row { cursor: pointer; }
+      .group-row:hover { background: var(--surface-strong); }
+
       @media (max-width: 720px) {
         .cal-cell { min-height: 46px; padding: 6px; }
         .cal-count-pill { font-size: 11px; padding: 3px 7px; }
@@ -103,18 +115,6 @@
                 <label for="nameFilter">Pesquisar por nome</label>
                 <input id="nameFilter" type="search" placeholder="Nome da campanha...">
               </div>
-              <div class="field" style="min-width:160px;">
-                <label for="levelFilter">Nível</label>
-                <select id="levelFilter">
-                  <option value="todos">Todos</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="orgFilter">Organização</label>
-                <select id="orgFilter">
-                  <option value="todas">Todas</option>
-                </select>
-              </div>
               <div class="toolbar-spacer"></div>
               <span class="text-faint" style="font-size:12px;">Clique em um dia para ver os detalhes</span>
             </div>
@@ -131,14 +131,15 @@
     <div class="drawer-backdrop" id="dayDrawerBackdrop"></div>
     <aside class="drawer" id="dayDrawer" aria-hidden="true">
       <div class="drawer-header">
-        <h3 id="dayDrawerTitle">Conteúdos do dia</h3>
+        <button class="icon-btn-back" id="drawerBackButton" type="button" aria-label="Voltar" hidden>‹</button>
+        <div class="drawer-header-titles">
+          <h3 id="dayDrawerTitle">Conteúdos do dia</h3>
+        </div>
         <button class="icon-btn-close" id="closeDayDrawer" type="button" aria-label="Fechar">✕</button>
       </div>
       <div class="drawer-body" id="dayDrawerBody"></div>
     </aside>
 
-    <script src="assets/js/mock-data.js"></script>
-    <script src="assets/js/helpers.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -147,36 +148,105 @@
         "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
         "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
       ];
-      const TODAY = "2026-07-22";
 
-      let viewYear = 2026;
-      let viewMonth = 6; // 0-indexed: 6 = Julho
+      const today = new Date();
+      const TODAY = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
 
-      function populateOrgFilter() {
-        document.getElementById("orgFilter").innerHTML =
-          '<option value="todas">Todas</option>' + MOCK.organizations.map((o) => `<option value="${o.id}">${o.nome}</option>`).join("");
+      let viewYear = today.getFullYear();
+      let viewMonth = today.getMonth();
+
+      const state = {
+        campaigns: [],
+        currentCampaignId: null,
+        captionsByGroup: new Map(),
+      };
+
+      function escapeHtml(value) {
+        return String(value === null || value === undefined ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
       }
 
-      function populateLevelFilter() {
-        document.getElementById("levelFilter").innerHTML =
-          '<option value="todos">Todos</option>' + MOCK.perfis.map((p) => `<option value="${p}">${p}</option>`).join("");
+      async function requestJson(url, options) {
+        const response = await fetch(url, options);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+        }
+
+        return payload;
       }
 
-      function campaignMatchesOrg(campaign, orgId) {
-        if (orgId === "todas") return true;
-        return MOCK.groups.some((g) => g.trilha === campaign.trilha && g.organizationId === orgId);
+      function campaignName(campaign) {
+        return campaign.trilha || campaign.nome || "Campanha";
+      }
+
+      function campaignStatusLabel(status) {
+        if (status === "concluido") return "Concluído";
+        if (status === "processada") return "Processada";
+        return "Programado";
+      }
+
+      function campaignStatusBadgeClass(status) {
+        if (status === "concluido") return "badge-success";
+        if (status === "processada") return "badge-warning";
+        return "badge-info";
+      }
+
+      function campaignStatusTip(status) {
+        if (status === "concluido") return "Todos os grupos já tiveram o envio finalizado (com sucesso ou erro definitivo).";
+        if (status === "processada") return "O horário programado já passou, mas nem todos os grupos têm confirmação de envio ou falha.";
+        return "Aguardando o horário de disparo programado.";
+      }
+
+      function dispatchStatusLabel(status) {
+        const labels = {
+          pendente: "Pendente",
+          processando: "Processando",
+          enviado: "Enviado",
+          erro: "Erro",
+          falhou: "Falhou",
+        };
+        return labels[status] || status || "-";
+      }
+
+      function dispatchStatusTip(status) {
+        const tips = {
+          pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
+          processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
+          enviado: "Entregue com sucesso ao grupo via Evolution API.",
+          erro: "Falha no envio — motivo não informado.",
+          falhou: "Falha no envio — motivo não informado.",
+        };
+        return tips[status] || "";
+      }
+
+      function dispatchStatusBadgeClass(status) {
+        if (status === "enviado") return "badge-success";
+        if (status === "erro" || status === "falhou") return "badge-danger";
+        if (status === "processando") return "badge-info";
+        return "badge-warning";
+      }
+
+      function captionStatusLabel(status) {
+        const labels = {
+          processando: "Gerando legenda…",
+          gerado: "Legenda pronta",
+          erro: "Erro ao gerar legenda",
+        };
+        return labels[status] || status || "-";
       }
 
       function campaignsForDate(dateStr) {
-        const orgId = document.getElementById("orgFilter").value;
-        const level = document.getElementById("levelFilter").value;
         const q = document.getElementById("nameFilter").value.trim().toLowerCase();
 
-        return MOCK.campaigns.filter((c) => {
-          if (c.dataEnvio !== dateStr) return false;
-          if (!campaignMatchesOrg(c, orgId)) return false;
-          if (level !== "todos" && perfilForTrilha(c.trilha) !== level) return false;
-          if (q && !c.nome.toLowerCase().includes(q)) return false;
+        return state.campaigns.filter((c) => {
+          if (c.data_envio !== dateStr) return false;
+          if (q && !campaignName(c).toLowerCase().includes(q)) return false;
           return true;
         });
       }
@@ -229,22 +299,65 @@
         });
       }
 
-      function openDayDrawer(dateStr) {
-        const campaigns = campaignsForDate(dateStr);
-        document.getElementById("dayDrawerTitle").textContent = `Conteúdos de ${dateStr}`;
+      // Drawer navigation stack — each entry knows how to (re-)render itself into #dayDrawerBody.
+      // Views: "day" (campaigns of the clicked date) -> "campaign" (groups of a campaign) -> "group" (caption detail).
+      const drawerStack = [];
 
-        document.getElementById("dayDrawerBody").innerHTML = campaigns
-          .map(
-            (c) => `
-            <a class="day-item" href="campanhas.html">
-              <div class="day-item-main">
-                <strong>${c.nome}</strong>
-                <span>${trilhaShortName(c.trilha)} · ${c.janelaInicio}–${c.janelaFim}</span>
-              </div>
-              <span class="badge has-tip ${campaignStatusBadgeClass(c.status)}" data-tip="${c.status === "concluida" ? "Todos os grupos já tiveram o envio finalizado." : "Aguardando o horário de disparo programado."}" data-tip-tone="${campaignStatusBadgeClass(c.status).replace("badge-", "")}">${campaignStatusLabel(c.status)}</span>
-            </a>`
-          )
-          .join("");
+      function drawerTitleEl() {
+        return document.getElementById("dayDrawerTitle");
+      }
+
+      function drawerBodyEl() {
+        return document.getElementById("dayDrawerBody");
+      }
+
+      function pushDrawerView(view) {
+        drawerStack.push(view);
+        renderDrawerTop();
+      }
+
+      function popDrawerView() {
+        if (drawerStack.length <= 1) return;
+        drawerStack.pop();
+        renderDrawerTop();
+      }
+
+      function renderDrawerTop() {
+        const view = drawerStack[drawerStack.length - 1];
+        document.getElementById("drawerBackButton").hidden = drawerStack.length <= 1;
+        drawerTitleEl().textContent = view.title;
+        view.render();
+      }
+
+      function renderDayView(dateStr) {
+        const campaigns = campaignsForDate(dateStr);
+
+        drawerBodyEl().innerHTML = campaigns.length
+          ? campaigns
+              .map(
+                (c) => `
+              <a class="day-item" href="#" data-campaign-id="${escapeHtml(c.id)}">
+                <div class="day-item-main">
+                  <strong>${escapeHtml(campaignName(c))}</strong>
+                  <span>${Number(c.grupos_total || 0)} grupo${Number(c.grupos_total || 0) === 1 ? "" : "s"}</span>
+                </div>
+                <span class="badge has-tip ${campaignStatusBadgeClass(c.status)}" data-tip="${escapeHtml(campaignStatusTip(c.status))}" data-tip-tone="${campaignStatusBadgeClass(c.status).replace("badge-", "")}">${campaignStatusLabel(c.status)}</span>
+              </a>`
+              )
+              .join("")
+          : `<div class="empty-state"><strong>Nenhuma campanha neste dia</strong></div>`;
+
+        document.querySelectorAll("#dayDrawerBody [data-campaign-id]").forEach((el) => {
+          el.addEventListener("click", (e) => {
+            e.preventDefault();
+            openCampaignView(el.dataset.campaignId);
+          });
+        });
+      }
+
+      function openDayDrawer(dateStr) {
+        drawerStack.length = 0;
+        pushDrawerView({ title: `Conteúdos de ${dateStr}`, render: () => renderDayView(dateStr) });
 
         document.getElementById("dayDrawer").classList.add("open");
         document.getElementById("dayDrawer").setAttribute("aria-hidden", "false");
@@ -255,10 +368,12 @@
         document.getElementById("dayDrawer").classList.remove("open");
         document.getElementById("dayDrawer").setAttribute("aria-hidden", "true");
         document.getElementById("dayDrawerBackdrop").classList.remove("open");
+        drawerStack.length = 0;
       }
 
       document.getElementById("closeDayDrawer").addEventListener("click", closeDayDrawer);
       document.getElementById("dayDrawerBackdrop").addEventListener("click", closeDayDrawer);
+      document.getElementById("drawerBackButton").addEventListener("click", popDrawerView);
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") closeDayDrawer();
       });
@@ -273,14 +388,108 @@
         if (viewMonth > 11) { viewMonth = 0; viewYear += 1; }
         renderCalendar();
       });
-      document.getElementById("orgFilter").addEventListener("change", renderCalendar);
-      document.getElementById("levelFilter").addEventListener("change", renderCalendar);
       document.getElementById("nameFilter").addEventListener("input", renderCalendar);
 
-      populateOrgFilter();
-      populateLevelFilter();
-      renderWeekdaysRow();
-      renderCalendar();
+      function openCampaignView(campaignId) {
+        const campaign = state.campaigns.find((c) => c.id === campaignId);
+        pushDrawerView({
+          title: campaign ? campaignName(campaign) : "Campanha",
+          render: () => renderCampaignView(campaignId),
+        });
+      }
+
+      async function renderCampaignView(campaignId) {
+        drawerBodyEl().innerHTML = `<div class="empty-state"><strong>Carregando grupos</strong></div>`;
+
+        try {
+          const [groups, progress] = await Promise.all([
+            requestJson(`/campaigns/${encodeURIComponent(campaignId)}/groups`),
+            requestJson(`/campaigns/${encodeURIComponent(campaignId)}/captions/progress`).catch(() => null),
+          ]);
+
+          state.captionsByGroup = new Map();
+          if (progress && Array.isArray(progress.items)) {
+            progress.items.forEach((item) => {
+              state.captionsByGroup.set(`${item.group_id}::${item.video_id}`, item);
+            });
+          }
+
+          if (!groups.length) {
+            drawerBodyEl().innerHTML = `<div class="empty-state"><strong>Nenhum grupo associado a esta campanha</strong></div>`;
+            return;
+          }
+
+          drawerBodyEl().innerHTML = groups
+            .map(
+              (g) => `
+              <a class="day-item group-row" href="#" data-group-id="${escapeHtml(g.group_id)}" data-video-id="${escapeHtml(g.video_id || "")}" data-group-name="${escapeHtml(g.nome || g.group_id)}">
+                <div class="day-item-main">
+                  <strong>${escapeHtml(g.nome || g.group_id)}</strong>
+                  <span>${escapeHtml(g.criado_em ? new Date(g.criado_em).toLocaleString("pt-BR") : "—")}</span>
+                </div>
+                <span class="badge has-tip ${dispatchStatusBadgeClass(g.status)}" data-tip="${escapeHtml(dispatchStatusTip(g.status))}" data-tip-tone="${dispatchStatusBadgeClass(g.status).replace("badge-", "")}">${dispatchStatusLabel(g.status)}</span>
+              </a>`
+            )
+            .join("");
+
+          document.querySelectorAll("#dayDrawerBody [data-group-id]").forEach((el) => {
+            el.addEventListener("click", (e) => {
+              e.preventDefault();
+              openGroupView(el.dataset.groupId, el.dataset.videoId, el.dataset.groupName);
+            });
+          });
+        } catch (error) {
+          drawerBodyEl().innerHTML = `<div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div>`;
+        }
+      }
+
+      function openGroupView(groupId, videoId, groupName) {
+        pushDrawerView({
+          title: `Legenda · ${groupName}`,
+          render: () => renderGroupView(groupId, videoId),
+        });
+      }
+
+      function renderGroupView(groupId, videoId) {
+        const item = state.captionsByGroup.get(`${groupId}::${videoId}`);
+
+        if (!videoId) {
+          drawerBodyEl().innerHTML = `<div class="empty-state"><strong>Sem vídeo associado</strong><span>Este grupo ainda não possui um vídeo associado nesta campanha.</span></div>`;
+          return;
+        }
+
+        if (!item) {
+          drawerBodyEl().innerHTML = `<div class="empty-state"><strong>Nenhuma legenda encontrada</strong><span>Não há legenda registrada para este vídeo.</span></div>`;
+          return;
+        }
+
+        const videoName = item.video_catalog && item.video_catalog.nome_do_arquivo ? item.video_catalog.nome_do_arquivo : videoId;
+        const meta = `<p class="text-muted">Vídeo: ${escapeHtml(videoName)} · ${escapeHtml(captionStatusLabel(item.status))}</p>`;
+
+        if (item.status === "gerado" && item.caption_text) {
+          drawerBodyEl().innerHTML = `${meta}<p style="white-space: pre-wrap;">${escapeHtml(item.caption_text)}</p>`;
+        } else if (item.status === "erro") {
+          drawerBodyEl().innerHTML = `${meta}<div class="empty-state"><strong>Erro ao gerar legenda</strong><span>${escapeHtml(item.erro_mensagem || "Tente novamente mais tarde.")}</span></div>`;
+        } else {
+          drawerBodyEl().innerHTML = `${meta}<div class="empty-state"><strong>Legenda ainda sendo preparada</strong><span>Aguarde a conclusão do processamento.</span></div>`;
+        }
+      }
+
+      async function initialize() {
+        renderWeekdaysRow();
+
+        try {
+          const campaigns = await requestJson("/campaigns");
+          state.campaigns = Array.isArray(campaigns) ? campaigns : [];
+        } catch (error) {
+          console.error("Falha ao carregar campanhas", error);
+          state.campaigns = [];
+        }
+
+        renderCalendar();
+      }
+
+      initialize();
     </script>
   </body>
 </html>

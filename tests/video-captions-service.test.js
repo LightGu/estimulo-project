@@ -365,6 +365,40 @@ async function testPrefersTranscriptOverDownloadedVideoForCaptionGeneration() {
   ]);
 }
 
+async function testRetriesGeneratedCaptionWhenFirstCandidateIsRejected() {
+  const generatedTexts = ["Legenda incoerente", "Legenda aprovada"];
+  const reviews = [];
+  const service = createVideoCaptionsService({
+    aiProviderAdapter: {
+      async generateCaptionFromTranscript() {
+        return generatedTexts.shift();
+      },
+    },
+    captionReviewService: {
+      async reviewCaption({ caption }) {
+        reviews.push(caption);
+        return { approved: caption === "Legenda aprovada", reason: "revisao" };
+      },
+    },
+    repository: {
+      async listUnusedTodayByVideo() {
+        return [];
+      },
+      async create(payload) {
+        return { id: "caption-approved", ...payload };
+      },
+    },
+  });
+
+  const selected = await service.selectCaptionForVideo("video-1", {
+    transcript: "Transcricao real do video",
+    requireCaptionReview: true,
+  });
+
+  assert.equal(selected.text, "Legenda aprovada");
+  assert.deepEqual(reviews, ["Legenda incoerente", "Legenda aprovada"]);
+}
+
 async function main() {
   assert.equal(normalizeCaptionText({ caption_text: " Texto " }), "Texto");
   assert.equal(await generateCaptionFromTranscript({
@@ -384,6 +418,7 @@ async function main() {
   await testAcceptsPendingDownloadedVideoForGeneration();
   await testRejectsCaptionAndGeneratesNewOneFromTranscript();
   await testPrefersTranscriptOverDownloadedVideoForCaptionGeneration();
+  await testRetriesGeneratedCaptionWhenFirstCandidateIsRejected();
 
   console.log("video-captions-service tests OK");
 }
