@@ -32,15 +32,17 @@ async function buildTrailStatusById(trilhaId, deliveries, trilhasRepositoryDepen
   const rows = trailVideos
     .sort((left, right) => Number(left.ordem ?? Number.MAX_SAFE_INTEGER) - Number(right.ordem ?? Number.MAX_SAFE_INTEGER))
     .map((video) => {
+      const aprovado = video.status === true;
+
       if (deliveredByVideoId.has(video.id)) {
-        return { ...video, status: "enviado", enviado_em: deliveredByVideoId.get(video.id) };
+        return { ...video, aprovado, status: "enviado", enviado_em: deliveredByVideoId.get(video.id) };
       }
 
       if (nextVideo && video.id === nextVideo.id) {
-        return { ...video, status: "proximo", enviado_em: null };
+        return { ...video, aprovado, status: "proximo", enviado_em: null };
       }
 
-      return { ...video, status: "pendente", enviado_em: null };
+      return { ...video, aprovado, status: "pendente", enviado_em: null };
     });
 
   const enviados = rows.filter((row) => row.status === "enviado").length;

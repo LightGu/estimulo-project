@@ -1,5 +1,8 @@
+const process = require("node:process");
+
 const { createAIProviderAdapter } = require("./ai");
 const defaultAISettingsService = require("./ai/ai-settings.service");
+const { SkippableModelError } = require("./ai/http-utils");
 
 class CaptionReviewRejectedError extends Error {
   constructor(message, review = {}) {
@@ -50,6 +53,35 @@ function normalizeReviewResult(value) {
   };
 }
 
+// A revisao factual e uma checagem de conteudo, nao um pre-requisito de
+// infraestrutura. Quando o provedor de IA esta indisponivel (todos os modelos da
+// cascata sem cota, sobrecarregados ou retirados, ou chave ausente) isso NAO e uma
+// reprovacao da legenda: a legenda ja existe e ja foi gerada a partir da
+// transcricao. Falhar o envio nesse caso significa perder a campanha por um
+// problema externo, entao o padrao aqui e passar adiante com aviso no log.
+// CAPTION_REVIEW_STRICT=true restaura o comportamento de bloquear o envio.
+function isProviderUnavailableError(error) {
+  if (!error) {
+    return false;
+  }
+
+  if (error instanceof SkippableModelError || error.name === "SkippableModelError") {
+    return true;
+  }
+
+  const message = String(error.message || "");
+
+  return (
+    /Nenhum modelo Gemini disponivel/i.test(message) ||
+    /e obrigatorio para gerar legenda/i.test(message) ||
+    /fetch e obrigatorio/i.test(message)
+  );
+}
+
+function isStrictReviewEnabled() {
+  return String(process.env.CAPTION_REVIEW_STRICT || "false").trim().toLowerCase() === "true";
+}
+
 function assertReviewInput(caption, transcript) {
   if (!String(caption || "").trim()) {
     return {
@@ -90,6 +122,7 @@ function createCaptionReviewService(dependencies = {}) {
     const caption = String(params.caption || "").trim();
     const transcript = String(params.transcript || "").trim();
     const inputError = assertReviewInput(caption, transcript);
+    const strict = params.strict === undefined ? isStrictReviewEnabled() : Boolean(params.strict);
     let review;
 
     if (inputError) {
@@ -101,15 +134,41 @@ function createCaptionReviewService(dependencies = {}) {
         throw new Error("AIProviderAdapter invalido: reviewCaptionConsistency e obrigatorio");
       }
 
-      review = normalizeReviewResult(
-        await adapter.reviewCaptionConsistency(
-          {
-            caption,
-            transcript,
-          },
-          params.ai || {}
-        )
-      );
+      try {
+        review = normalizeReviewResult(
+          await adapter.reviewCaptionConsistency(
+            {
+              caption,
+              transcript,
+            },
+            params.ai || {}
+          )
+        );
+      } catch (error) {
+        if (strict || !isProviderUnavailableError(error)) {
+          throw error;
+        }
+
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "caption_review.skipped_provider_unavailable",
+              campaign_id: params.campaign_id,
+              group_id: params.group_id,
+              progress_group_id: params.progress_group_id,
+              video_id: params.video_id,
+              caption_id: params.caption_id,
+              generated: Boolean(params.generated),
+              error_message: error.message,
+            })
+          );
+
+        review = {
+          approved: true,
+          reason: `Revisao factual indisponivel, legenda liberada sem revisao: ${error.message}`,
+          skipped: true,
+        };
+      }
     }
 
     logger.info &&
@@ -130,6 +189,7 @@ function createCaptionReviewService(dependencies = {}) {
     return {
       approved: Boolean(review.approved),
       reason: review.reason || (review.approved ? "Legenda aprovada" : "Legenda reprovada"),
+      ...(review.skipped ? { skipped: true } : {}),
     };
   }
 
@@ -153,4 +213,5 @@ module.exports = createCaptionReviewService();
 module.exports.CaptionReviewRejectedError = CaptionReviewRejectedError;
 module.exports.createCaptionReviewService = createCaptionReviewService;
 module.exports.extractJsonObject = extractJsonObject;
+module.exports.isProviderUnavailableError = isProviderUnavailableError;
 module.exports.normalizeReviewResult = normalizeReviewResult;

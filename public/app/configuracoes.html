@@ -35,6 +35,8 @@
       .drag-handle:active { cursor: grabbing; }
       #whatsappInstancesBody tr.dragging { opacity: 0.5; }
       #whatsappInstancesBody tr.drag-over { border-top: 2px solid var(--brand, #6366f1); }
+      .period-add-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+      .period-add-row input[type="time"] { width: 92px; }
     </style>
   </head>
   <body data-page="configuracoes">
@@ -166,6 +168,18 @@
                   <div class="field">
                     <label for="maxInterval">Tempo máximo entre envios (minutos)</label>
                     <input id="maxInterval" type="number" min="1" value="12">
+                  </div>
+                </div>
+                <div class="divider" style="margin:16px 0;"></div>
+                <p class="text-muted" style="margin-bottom:14px;">Períodos de envio pré-preenchidos ao criar um envio automatizado. Se nenhum período for adicionado aqui, o campo iniciará vazio e poderá ser preenchido manualmente a cada envio.</p>
+                <div class="field">
+                  <label>Períodos de envio padrão</label>
+                  <div class="chip-list" id="defaultPeriodChips"></div>
+                  <div class="period-add-row">
+                    <input type="time" id="defaultPeriodStart" value="07:00">
+                    <span class="text-faint">até</span>
+                    <input type="time" id="defaultPeriodEnd" value="12:00">
+                    <button class="btn btn-secondary btn-sm" id="addDefaultPeriodButton" type="button">+ Adicionar</button>
                   </div>
                 </div>
               </div>
@@ -731,6 +745,10 @@
       loadRotationSettings();
 
       // ---------- 4. IA ----------
+      // Mantido em sincronia com ALLOWED_GEMINI_MODELS em
+      // src/services/ai/ai-settings.service.js. Os modelos 2.5 Flash / 2.5
+      // Flash-Lite foram removidos: a API responde 404 "no longer available to new
+      // users" e selecionar um deles derrubava o envio das campanhas.
       const GEMINI_MODELS = [
         { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash" },
         { value: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
@@ -738,10 +756,10 @@
         { value: "gemini-3.1-flash-lite", label: "Gemini 3.1 Flash-Lite" },
         { value: "gemini-3-flash-preview", label: "Gemini 3 Flash (Preview)" },
         { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-        { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-        { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
-        { value: "gemini-2.5-flash-lite-preview-09-2025", label: "Gemini 2.5 Flash-Lite (Preview 09-2025)" },
+        { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+        { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash-Lite" },
         { value: "gemini-flash-latest", label: "Gemini Flash (Latest)" },
+        { value: "gemini-flash-lite-latest", label: "Gemini Flash-Lite (Latest)" },
       ];
       const AI_AGENT_DEFS = [
         { key: "transcription", nome: "Transcrever vídeo", hasPrompt: false },
@@ -949,6 +967,34 @@
       const minIntervalInput = document.getElementById("minInterval");
       const maxIntervalInput = document.getElementById("maxInterval");
       const scheduleSaveStatus = document.getElementById("scheduleSaveStatus");
+      const defaultPeriodChipsEl = document.getElementById("defaultPeriodChips");
+      let defaultDispatchPeriods = [];
+
+      function renderDefaultPeriodChips() {
+        defaultPeriodChipsEl.innerHTML = defaultDispatchPeriods.length
+          ? defaultDispatchPeriods
+              .map(
+                (p, i) => `
+              <span class="chip">${p.inicio} - ${p.fim}<span class="chip-remove" data-remove-default-period="${i}">✕</span></span>`
+              )
+              .join("")
+          : '<span class="text-faint" style="font-size:12px;">Nenhum período padrão adicionado</span>';
+
+        document.querySelectorAll("[data-remove-default-period]").forEach((el) =>
+          el.addEventListener("click", () => {
+            defaultDispatchPeriods.splice(Number(el.dataset.removeDefaultPeriod), 1);
+            renderDefaultPeriodChips();
+          })
+        );
+      }
+
+      document.getElementById("addDefaultPeriodButton").addEventListener("click", () => {
+        const inicio = document.getElementById("defaultPeriodStart").value;
+        const fim = document.getElementById("defaultPeriodEnd").value;
+        if (!inicio || !fim || inicio >= fim) return;
+        defaultDispatchPeriods.push({ inicio, fim });
+        renderDefaultPeriodChips();
+      });
 
       async function loadScheduleSettings() {
         try {
@@ -958,9 +1004,11 @@
           if (data.timezone) timezoneSelect.value = data.timezone;
           if (data.min_interval_min !== undefined) minIntervalInput.value = data.min_interval_min;
           if (data.max_interval_min !== undefined) maxIntervalInput.value = data.max_interval_min;
+          defaultDispatchPeriods = Array.isArray(data.dispatch_periods) ? data.dispatch_periods : [];
         } catch (error) {
           // mantém os valores padrão exibidos no HTML caso a chamada falhe
         }
+        renderDefaultPeriodChips();
       }
 
       document.getElementById("saveScheduleButton").addEventListener("click", async () => {
@@ -974,6 +1022,7 @@
               timezone: timezoneSelect.value,
               min_interval_min: Number(minIntervalInput.value),
               max_interval_min: Number(maxIntervalInput.value),
+              dispatch_periods: defaultDispatchPeriods,
             }),
           });
           const data = await response.json();
@@ -981,6 +1030,8 @@
           minIntervalInput.value = data.min_interval_min;
           maxIntervalInput.value = data.max_interval_min;
           timezoneSelect.value = data.timezone;
+          defaultDispatchPeriods = Array.isArray(data.dispatch_periods) ? data.dispatch_periods : [];
+          renderDefaultPeriodChips();
           scheduleSaveStatus.textContent = "Configurações salvas.";
           scheduleSaveStatus.style.color = "var(--success)";
         } catch (error) {

@@ -1,5 +1,6 @@
 const defaultSettingsService = require("./settings.service");
 const defaultGroupsRepository = require("../repositories/groups.repository");
+const { isTestEnvironment, parseBooleanEnv } = require("../config/notifications");
 const { sendToEvolution } = require("./evolution");
 
 const AI_STAGE_LABELS = {
@@ -13,6 +14,23 @@ function createNotificationsService(dependencies = {}) {
   const groupsRepository = dependencies.groupsRepository || defaultGroupsRepository;
   const sender = dependencies.sendToEvolution || sendToEvolution;
   const logger = dependencies.logger || console;
+  const hasInjectedSender = Boolean(dependencies.sendToEvolution);
+
+  // Ordem de precedencia: NOTIFICATIONS_ENABLED sempre vence (o dry-run nao pode
+  // ser furado por um sender injetado). Sem a env, um sender injetado significa
+  // que o chamador controla o destino (testes que verificam o payload), entao
+  // liberamos; caso contrario o envio real e bloqueado em contexto de teste.
+  const isEnabled =
+    dependencies.isEnabled ||
+    function resolveEnabled() {
+      const explicit = parseBooleanEnv(process.env.NOTIFICATIONS_ENABLED);
+
+      if (explicit !== null) {
+        return explicit;
+      }
+
+      return hasInjectedSender || !isTestEnvironment();
+    };
 
   async function resolveNotificationTarget(settings) {
     const groupId = settings && settings.notification_group_id;
@@ -40,6 +58,19 @@ function createNotificationsService(dependencies = {}) {
   }
 
   async function dispatchMessage(message, context, eventKey) {
+    if (!isEnabled()) {
+      logger.warn &&
+        logger.warn(
+          JSON.stringify({
+            event: "notifications.skipped_disabled",
+            reason: "outbound_notifications_disabled",
+            ...context,
+          })
+        );
+
+      return { sent: false, reason: "notifications_disabled" };
+    }
+
     try {
       const settings = await settingsService.getNotificationSettings();
 
@@ -100,15 +131,6 @@ function createNotificationsService(dependencies = {}) {
     );
   }
 
-  async function notifyTrailFinished({ groupId, groupName, trilhaLabel } = {}) {
-    const groupLabel = groupName || groupId;
-    const message = trilhaLabel
-      ? `A trilha "${trilhaLabel}" foi concluída no grupo "${groupLabel}". Selecione uma nova trilha para continuar os envios.`
-      : `A trilha do grupo "${groupLabel}" foi concluída. Selecione uma nova trilha para continuar os envios.`;
-
-    return dispatchMessage(message, { event: "trail_finished", group_id: groupId }, "trailFinished");
-  }
-
   async function notifyAiError({ campaignId, groupId, videoId, stage, errorMessage, campaignLabel } = {}) {
     const label = campaignLabel || campaignId;
     const stageLabel = AI_STAGE_LABELS[stage] || stage || "IA";
@@ -126,7 +148,6 @@ function createNotificationsService(dependencies = {}) {
     notifyCampaignFinished,
     notifyDispatchFailure,
     notifyAiError,
-    notifyTrailFinished,
   };
 }
 

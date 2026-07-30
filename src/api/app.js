@@ -8,6 +8,7 @@ const createGroupsController = require("./controllers/groups.controller");
 const createGroupVideoProgressController = require("./controllers/group-video-progress.controller");
 const createHealthController = require("./controllers/health.controller");
 const createMensagensController = require("./controllers/mensagens.controller");
+const createNotificationsController = require("./controllers/notifications.controller");
 const createOrganizationsController = require("./controllers/organizations.controller");
 const createReportController = require("./controllers/report.controller");
 const createSettingsController = require("./controllers/settings.controller");
@@ -21,6 +22,7 @@ const groupProfilesService = require("../services/group-profiles.service");
 const groupsService = require("../services/groups.service");
 const groupVideoProgressService = require("../services/group-video-progress.service");
 const mensagensService = require("../services/mensagens.service");
+const inAppNotificationsService = require("../services/in-app-notifications.service");
 const organizationsService = require("../services/organizations.service");
 const settingsService = require("../services/settings.service");
 const trilhasService = require("../services/trilhas.service");
@@ -56,6 +58,7 @@ function createApp(dependencies = {}) {
   const groupService = dependencies.groupService || groupsService;
   const groupVideoProgressServiceDependency = dependencies.groupVideoProgressService || groupVideoProgressService;
   const mensagensServiceDependency = dependencies.mensagensService || mensagensService;
+  const inAppNotificationsServiceDependency = dependencies.inAppNotificationsService || inAppNotificationsService;
   const organizationService = dependencies.organizationService || organizationsService;
   const dispatchLogsServiceDependency = dependencies.dispatchLogsService || dispatchLogsService;
   const settingsServiceDependency = dependencies.settingsService || settingsService;
@@ -74,6 +77,9 @@ function createApp(dependencies = {}) {
   });
   const healthController = createHealthController(dependencies.healthController || {});
   const mensagensController = createMensagensController({ mensagensService: mensagensServiceDependency });
+  const notificationsController = createNotificationsController({
+    notificationsService: inAppNotificationsServiceDependency,
+  });
   const organizationsController = createOrganizationsController({ organizationService });
   const reportController = createReportController({ dispatchLogsService: dispatchLogsServiceDependency });
   const settingsController = createSettingsController({ settingsService: settingsServiceDependency });
@@ -93,6 +99,11 @@ function createApp(dependencies = {}) {
   app.post("/campaigns/:id/dispatch/confirm", campaignsController.confirmDispatch);
   app.get("/campaigns/:id", campaignsController.getById);
   app.delete("/campaigns/:id", campaignsController.remove);
+  app.post("/mensagens/dispatch", mensagensController.dispatch);
+  app.post("/mensagens/dispatch/schedule", mensagensController.schedule);
+  app.get("/notifications", notificationsController.list);
+  app.post("/notifications/read-all", notificationsController.markAllRead);
+  app.post("/notifications/:id/read", notificationsController.markRead);
   app.get("/organizations", organizationsController.list);
   app.post("/organizations", organizationsController.create);
   app.patch("/organizations/:id", organizationsController.update);

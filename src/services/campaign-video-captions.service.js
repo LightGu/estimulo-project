@@ -2,7 +2,6 @@ const campaignVideoCaptionsRepository = require("../repositories/campaign-video-
 const campaignsRepository = require("../repositories/campaigns.repository");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const defaultVideoCaptionsService = require("./video-captions.service");
-const defaultCaptionReviewService = require("./caption-review.service");
 const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
 const defaultTrilhasRepository = require("../repositories/trilhas.repository");
 const defaultGroupVideoProgressRepository = require("../repositories/group-video-progress.repository");
@@ -16,6 +15,7 @@ const {
 const { resolveVideoTranscript } = require("../queues/dispatch");
 const { downloadFromDrive } = require("./google-drive-video-download");
 const defaultNotificationsService = require("./notifications.service");
+const defaultInAppNotificationsService = require("./in-app-notifications.service");
 const defaultSettingsService = require("./settings.service");
 
 function createCampaignVideoCaptionsService(dependencies = {}) {
@@ -23,13 +23,13 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
   const campaigns = dependencies.campaigns || campaignsRepository;
   const campaignGroups = dependencies.campaignGroups || campaignGroupsRepository;
   const videoCaptionsService = dependencies.videoCaptionsService || defaultVideoCaptionsService;
-  const captionReviewService = dependencies.captionReviewService || defaultCaptionReviewService;
   const videoCatalogRepository = dependencies.videoCatalogRepository || defaultVideoCatalogRepository;
   const trilhasRepository = dependencies.trilhasRepository || defaultTrilhasRepository;
   const videoFlowRepository = dependencies.videoFlowRepository || buildCampaignVideoFlowRepository(dependencies);
   const groupVideoProgressRepository = dependencies.groupVideoProgressRepository || defaultGroupVideoProgressRepository;
   const videoDownloader = dependencies.videoDownloader || downloadFromDrive;
   const notificationsService = dependencies.notificationsService || defaultNotificationsService;
+  const inAppNotificationsService = dependencies.inAppNotificationsService || defaultInAppNotificationsService;
   const settingsService = dependencies.settingsService || defaultSettingsService;
   const logger = dependencies.logger || console;
 
@@ -81,6 +81,7 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
       repository: videoFlowRepository,
       dispatchRules,
       notificationsService,
+      inAppNotificationsService,
       logger,
     });
 
@@ -136,15 +137,10 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
         return { caption_id: undefined, caption_text: "" };
       }
 
-      await captionReviewService.assertCaptionApproved({
-        caption: item.legenda,
-        transcript,
-        campaign_id: campaignId,
-        group_id: item.group_id,
-        progress_group_id: item.progress_group_id,
-        video_id: item.video_id,
-      });
-
+      // selectCaptionForVideo ja faz a revisao da legenda candidata. A linha da
+      // campanha pode estar vazia justamente porque a tentativa anterior falhou;
+      // revisar esse valor antigo produzia o falso erro "Legenda vazia" e escondia
+      // a causa real (por exemplo, uma candidata reprovada na revisao factual).
       throw new Error("Nao foi possivel gerar uma legenda valida para este video");
     }
 

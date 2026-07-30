@@ -11,6 +11,7 @@ const videoCatalogRepository = require("../repositories/video-catalog.repository
 const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
 const defaultWhatsappInstancesService = require("../services/whatsapp-instances.service");
 const defaultNotificationsService = require("../services/notifications.service");
+const defaultInAppNotificationsService = require("../services/in-app-notifications.service");
 const defaultSettingsService = require("../services/settings.service");
 const {
   resolveGroupTrailId,
@@ -31,7 +32,14 @@ let campaignTriggerQueueInstance;
 
 function getCampaignTriggerQueue() {
   if (!campaignTriggerQueueInstance) {
-    campaignTriggerQueueInstance = createQueue(queueNames.campaignTrigger);
+    // attempts:1 evita que uma falha apos notifyCampaignStarted (ex.: erro
+    // transitorio no Redis/repositorio) refaca o job do zero e reenvie a
+    // notificacao de "campanha iniciada" para o WhatsApp.
+    campaignTriggerQueueInstance = createQueue(queueNames.campaignTrigger, {
+      defaultJobOptions: {
+        attempts: 1,
+      },
+    });
   }
 
   return campaignTriggerQueueInstance;
@@ -620,6 +628,7 @@ function extractDispatchLogPayloadFromJob(job) {
     video_id: data.video_id,
     status: "pendente",
     mensagem_erro: null,
+    horario_envio_planejado: data.scheduled_at || null,
   };
 }
 
@@ -650,7 +659,41 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
   let created = 0;
 
   for (const payload of payloads) {
-    if (hasExistingDispatchLog(existingLogs, payload)) {
+    const existingLog = existingLogs.find((entry) => (
+      entry.campaign_id === payload.campaign_id &&
+      entry.group_id === payload.group_id &&
+      entry.video_id === payload.video_id
+    ));
+
+    if (existingLog) {
+      // Os logs podem ter sido criados antes de o worker montar os jobs. O
+      // horario do job e a fonte de verdade (o jitter e calculado nele), entao
+      // completa ou sincroniza o registro em vez de manter o relatorio com "-"
+      // ou com uma previa diferente do horario efetivo.
+      if (
+        payload.horario_envio_planejado &&
+        existingLog.id &&
+        existingLog.horario_envio_planejado !== payload.horario_envio_planejado &&
+        typeof dispatchLogs.updatePlannedSchedule === "function"
+      ) {
+        const updatedLog = await dispatchLogs.updatePlannedSchedule(
+          existingLog.id,
+          payload.horario_envio_planejado
+        );
+        Object.assign(existingLog, updatedLog || { horario_envio_planejado: payload.horario_envio_planejado });
+
+        logger.info &&
+          logger.info(
+            JSON.stringify({
+              event: "dispatch_log.planned_schedule_synchronized",
+              campaign_id: payload.campaign_id,
+              group_id: payload.group_id,
+              video_id: payload.video_id,
+              log_id: existingLog.id,
+              horario_envio_planejado: payload.horario_envio_planejado,
+            })
+          );
+      }
       continue;
     }
 
@@ -737,6 +780,7 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     settingsService: settingsServiceOption = defaultSettingsService,
     notificationsService: notificationsServiceOption = defaultNotificationsService,
+    inAppNotificationsService: inAppNotificationsServiceOption = defaultInAppNotificationsService,
     logger = console,
   } = options;
 
@@ -761,6 +805,7 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     repository: videoFlowRepository,
     dispatchRules,
     notificationsService: notificationsServiceOption,
+    inAppNotificationsService: inAppNotificationsServiceOption,
     logger,
   });
   const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);
@@ -831,6 +876,7 @@ function createCampaignTriggerProcessor(options = {}) {
     trilhasRepository: trilhasRepositoryOption = trilhasRepository,
     videoFlowRepository = buildCampaignVideoFlowRepository(options),
     notificationsService = defaultNotificationsService,
+    inAppNotificationsService = defaultInAppNotificationsService,
     settingsService: settingsServiceOption = defaultSettingsService,
     logger = console,
   } = options;
@@ -893,6 +939,7 @@ function createCampaignTriggerProcessor(options = {}) {
         repository: videoFlowRepository,
         dispatchRules,
         notificationsService,
+        inAppNotificationsService,
         logger,
       });
       const dispatchableGroups = await filterGroupsMissingInstanceCoverage(flow.dispatchGroups, options, logger);
@@ -1006,6 +1053,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
     addDispatchJob: injectedAddDispatchJob,
     addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,
     notificationsService,
+    inAppNotificationsService,
     logger,
     ...bullmqOptions
   } = workerOptions;
@@ -1023,6 +1071,7 @@ function createCampaignTriggerWorker(processorOrOptions, options = {}) {
       addDispatchJob: injectedAddDispatchJob,
       addJitteredDispatchJobs: injectedAddJitteredDispatchJobs,
       notificationsService,
+      inAppNotificationsService,
       logger,
     }),
     bullmqOptions

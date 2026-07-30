@@ -8,6 +8,7 @@ const {
   addCampaignTriggerJob,
   createPendingDispatchLogsForCampaign: defaultCreatePendingDispatchLogsForCampaign,
 } = require("../queues/campaign-trigger");
+const { formatCampaignDayName, formatDateOnlyInTimezone } = require("../utils/campaign-naming");
 
 const TRIGGER_ENQUEUE_TIMEOUT_MS = Number(process.env.CAMPAIGN_TRIGGER_ENQUEUE_TIMEOUT_MS) || 5000;
 
@@ -16,37 +17,6 @@ function withTimeout(promise, timeoutMs, timeoutMessage) {
     promise,
     new Promise((_, reject) => setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs)),
   ]);
-}
-
-function formatCampaignDayName(date = new Date(), timezone) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: timezone || process.env.CAMPAIGN_TIMEZONE || process.env.TZ || "America/Bahia",
-  })
-    .formatToParts(date)
-    .reduce((accumulator, part) => {
-      accumulator[part.type] = part.value;
-      return accumulator;
-    }, {});
-
-  return `Campanha do dia ${parts.day}/${parts.month}`;
-}
-
-function formatDateOnlyInTimezone(date = new Date(), timezone) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: timezone || process.env.CAMPAIGN_TIMEZONE || process.env.TZ || "America/Bahia",
-  })
-    .formatToParts(date)
-    .reduce((accumulator, part) => {
-      accumulator[part.type] = part.value;
-      return accumulator;
-    }, {});
-
-  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function normalizeScheduledDate(value = new Date()) {
@@ -148,6 +118,7 @@ function createCampaignsService(dependencies = {}) {
       dispatchLogs: dispatchLogsRepositoryDependency,
       videoCatalogRepository: dependencies.videoCatalogRepository,
       groupVideoProgressRepository: dependencies.groupVideoProgressRepository,
+      inAppNotificationsService: dependencies.inAppNotificationsService,
       ...scheduleParams,
     });
 
@@ -476,7 +447,7 @@ function createCampaignsService(dependencies = {}) {
     });
   }
 
-  async function computeStatus(campaignId, campaignGroupRows) {
+  async function computeStatus(campaignId, campaignGroupRows, campaign) {
     const groupRows = campaignGroupRows || (await campaignGroupsRepositoryDependency.listGroups(campaignId));
 
     if (!groupRows.length) {
@@ -487,7 +458,17 @@ function createCampaignsService(dependencies = {}) {
       dispatchLogsRepository: dispatchLogsRepositoryDependency,
     });
 
-    return allTerminal ? "concluido" : "programado";
+    if (allTerminal) {
+      return "concluido";
+    }
+
+    const windowEnd = campaign && campaign.window_end ? new Date(campaign.window_end) : null;
+
+    if (windowEnd && !Number.isNaN(windowEnd.getTime()) && windowEnd.getTime() < Date.now()) {
+      return "processada";
+    }
+
+    return "programado";
   }
 
   async function listWithSummary() {
@@ -496,7 +477,7 @@ function createCampaignsService(dependencies = {}) {
     return Promise.all(
       campaigns.map(async (campaign) => {
         const groupRows = await campaignGroupsRepositoryDependency.listGroups(campaign.id);
-        const status = await computeStatus(campaign.id, groupRows);
+        const status = await computeStatus(campaign.id, groupRows, campaign);
 
         return {
           ...campaign,

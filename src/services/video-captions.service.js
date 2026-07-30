@@ -5,6 +5,7 @@ const defaultAISettingsService = require("./ai/ai-settings.service");
 const defaultCaptionReviewService = require("./caption-review.service");
 
 const DEFAULT_CAPTION_TIMEZONE = "America/Bahia";
+const DEFAULT_GENERATED_CAPTION_ATTEMPTS = 3;
 
 function getTimeZoneDateParts(date, timeZone) {
   return new Intl.DateTimeFormat("en-CA", {
@@ -64,10 +65,10 @@ function normalizeCaptionText(caption) {
 }
 
 // Legenda so pode ser gerada a partir da transcricao do video, nunca do video em
-// si. Quando falta transcricao, ela e gerada aqui (adapter.generateCaption cuida
-// do upload do video e, no caso do Gemini, deleta o arquivo da Files API assim
-// que a transcricao e obtida) e persistida no video_catalog antes de alimentar
-// generateCaptionFromTranscript.
+// si. Quando falta transcricao, ela e gerada aqui (adapter.generateCaption extrai
+// o audio do video, envia apenas esse audio e, no caso do Gemini, deleta o
+// arquivo da Files API assim que a transcricao e obtida) e persistida no
+// video_catalog antes de alimentar generateCaptionFromTranscript.
 async function transcribeVideo(adapter, downloadedVideo, options = {}) {
   if (!downloadedVideo) {
     return "";
@@ -259,30 +260,51 @@ function createVideoCaptionsService(dependencies = {}) {
     }
 
     const captionAdapter = await getAIProviderAdapter("caption_generation");
-    const generatedText = String(
-      await generateCaptionFromTranscript(captionAdapter, transcript, options.ai || {})
-    ).trim();
+    const requestedAttempts = Number(options.maxGeneratedCaptionAttempts);
+    const maxGeneratedCaptionAttempts = Number.isFinite(requestedAttempts)
+      ? Math.max(1, Math.trunc(requestedAttempts))
+      : DEFAULT_GENERATED_CAPTION_ATTEMPTS;
 
-    if (!generatedText) {
-      return null;
+    // Uma resposta pode ser bem-formada, mas nao passar na revisao factual. Nao
+    // deixe uma unica candidata descartar o video: gere novas alternativas e so
+    // marque erro depois de esgotar tentativas que tambem tenham sido revisadas.
+    for (let attempt = 1; attempt <= maxGeneratedCaptionAttempts; attempt += 1) {
+      const generatedText = String(
+        await generateCaptionFromTranscript(captionAdapter, transcript, options.ai || {})
+      ).trim();
+
+      if (!generatedText) {
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "caption_generation.empty_response",
+              video_id: videoId,
+              attempt,
+              max_attempts: maxGeneratedCaptionAttempts,
+            })
+          );
+        continue;
+      }
+
+      const generatedReview = await approveCaption({ caption_text: generatedText }, true);
+
+      if (!generatedReview) {
+        continue;
+      }
+
+      const created = await repository.create({
+        video_id: videoId,
+        caption_text: generatedText,
+      });
+
+      return {
+        caption: created,
+        generated: true,
+        text: normalizeCaptionText(created) || generatedText,
+      };
     }
 
-    const generatedReview = await approveCaption({ caption_text: generatedText }, true);
-
-    if (!generatedReview) {
-      return null;
-    }
-
-    const created = await repository.create({
-      video_id: videoId,
-      caption_text: generatedText,
-    });
-
-    return {
-      caption: created,
-      generated: true,
-      text: normalizeCaptionText(created) || generatedText,
-    };
+    return null;
   }
 
   async function markCaptionUsed(captionId, options = {}) {
@@ -302,6 +324,7 @@ function createVideoCaptionsService(dependencies = {}) {
 }
 
 module.exports = createVideoCaptionsService();
+module.exports.DEFAULT_GENERATED_CAPTION_ATTEMPTS = DEFAULT_GENERATED_CAPTION_ATTEMPTS;
 module.exports.DEFAULT_CAPTION_TIMEZONE = DEFAULT_CAPTION_TIMEZONE;
 module.exports.createVideoCaptionsService = createVideoCaptionsService;
 module.exports.generateCaptionFromTranscript = generateCaptionFromTranscript;

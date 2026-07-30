@@ -35,6 +35,9 @@ class EvolutionApiError extends Error {
     this.response = details.response;
     this.cause = details.cause;
     this.code = details.code;
+    // Sinaliza para o sweep de dispatch-failure-retry que repetir a requisicao
+    // identica nao muda o resultado (ver PERMANENT_ERROR_STATUSES).
+    this.permanent = Boolean(details.permanent);
   }
 }
 
@@ -113,6 +116,33 @@ async function buildMediaPayload(params) {
   };
 }
 
+// Mede o corpo que sera realmente enviado (base64 + campos do JSON) e barra o
+// envio quando ele passa do limite do body-parser da Evolution. Sem isso o
+// backend fazia o upload inteiro de um payload condenado a HTTP 413 — e, no caso
+// de video, depois de ja ter baixado ~125 MB do Google Drive.
+function assertMediaPayloadWithinLimit(payload, config = evolutionConfig) {
+  const limitBytes = Number(config.maxMediaPayloadBytes);
+
+  if (!Number.isFinite(limitBytes) || limitBytes <= 0 || !payload || !payload.media) {
+    return;
+  }
+
+  const payloadBytes = Buffer.byteLength(JSON.stringify(payload));
+
+  if (payloadBytes <= limitBytes) {
+    return;
+  }
+
+  throw new EvolutionApiError(
+    `Payload de midia com ${payloadBytes} bytes excede o limite de ${limitBytes} bytes aceito pela Evolution API; ` +
+      "reduza o video antes do envio",
+    {
+      code: "EVOLUTION_PAYLOAD_TOO_LARGE",
+      permanent: true,
+    }
+  );
+}
+
 function buildTextPayload(params) {
   // Monta o payload aceito pelo endpoint /message/sendText/:instance.
   const text = params.message || params.caption;
@@ -164,13 +194,86 @@ function isAxiosTimeout(error) {
   return TIMEOUT_ERROR_CODES.has(error.code) || /timeout/i.test(error.message || "");
 }
 
-function parseEvolutionError(error) {
+// A Evolution API responde erro no formato
+// `{ status, error: "Internal Server Error", response: { message } }` — o campo
+// `error` e quase sempre o texto generico do handler global dela, e a causa real
+// fica em `response.message`. Por isso `response.message` e testado ANTES de
+// `error`: com a ordem invertida, um HTTP 413 do body-parser (payload acima do
+// limite de 136 MB) era registrado como "Internal Server Error", escondendo o
+// "request entity too large" que explica a falha.
+// `response.message` nem sempre e texto: na validacao de destinatario a Evolution
+// devolve uma lista de objetos (`[{ jid, exists, number }]`). Serializar e melhor
+// que descartar — sem isso o detalhe caia em "[object Object]" ou no generico.
+function normalizeEvolutionErrorCandidate(candidate) {
+  if (typeof candidate === "string") {
+    return candidate.trim() || null;
+  }
+
+  if (Array.isArray(candidate)) {
+    const parts = candidate.map(normalizeEvolutionErrorCandidate).filter(Boolean);
+
+    return parts.length ? parts.join("; ") : null;
+  }
+
+  if (candidate && typeof candidate === "object") {
+    return JSON.stringify(candidate);
+  }
+
+  return null;
+}
+
+function summarizeEvolutionResponseError(response) {
+  const data = response && response.data;
+  const candidates = [
+    typeof data === "string" ? data : null,
+    data && data.message,
+    data && data.error && data.error.message,
+    data && data.response && data.response.message,
+    data && data.error,
+  ];
+  const message = candidates.map(normalizeEvolutionErrorCandidate).find(Boolean);
+
+  // A mensagem vai para log/notificacao. Limita seu tamanho para evitar que uma
+  // resposta HTML ou um payload inesperado da API torne o registro inutilizavel.
+  return message ? message.trim().replace(/\s+/g, " ").slice(0, 500) : null;
+}
+
+// Status que nao mudam de resultado ao repetir a mesma requisicao: payload acima
+// do limite, requisicao malformada, credencial invalida, grupo/instancia
+// inexistente. Reenfileirar esses casos so repete o download do video do Drive e
+// a notificacao de falha no WhatsApp, sem chance de sucesso.
+const PERMANENT_ERROR_STATUSES = new Set([400, 401, 403, 404, 413, 415, 422]);
+
+function isPermanentEvolutionStatus(status) {
+  return PERMANENT_ERROR_STATUSES.has(Number(status));
+}
+
+// O body-parser da Evolution API responde 413 sem mensagem util quando o corpo
+// passa do limite dela (136 MB, fixo no bundle). Explicitamos a causa para que o
+// log e a notificacao digam o que fazer em vez de "Internal Server Error".
+function describePayloadTooLarge(config = evolutionConfig) {
+  const limitMb = Math.round(config.maxMediaPayloadBytes / 1024 / 1024);
+
+  return (
+    `Payload recusado pela Evolution API por exceder o limite de corpo da requisicao (~${limitMb} MB). ` +
+    "A midia vai em base64 (+33% sobre o arquivo), entao o video precisa ser reduzido antes do envio"
+  );
+}
+
+function parseEvolutionError(error, config = evolutionConfig) {
   // Converte erros do axios em um erro unico do modulo, com dados uteis para log/retry.
   if (error.response) {
-    return new EvolutionApiError("Falha na chamada para Evolution API", {
+    const status = error.response.status;
+    const responseMessage =
+      Number(status) === 413 ? describePayloadTooLarge(config) : summarizeEvolutionResponseError(error.response);
+    const detail = [status ? `HTTP ${status}` : null, responseMessage].filter(Boolean).join(": ");
+
+    return new EvolutionApiError(`Falha na chamada para Evolution API${detail ? ` (${detail})` : ""}`, {
       status: error.response.status,
       response: error.response.data,
       cause: error,
+      code: Number(status) === 413 ? "EVOLUTION_PAYLOAD_TOO_LARGE" : undefined,
+      permanent: isPermanentEvolutionStatus(status),
     });
   }
 
@@ -215,6 +318,8 @@ class EvolutionDeliveryProvider {
     // processamento na Evolution API demoram bem mais do que uma mensagem de texto.
     const requestTimeout = request.hasContent ? this.config.mediaTimeoutMs : this.config.timeoutMs;
 
+    assertMediaPayloadWithinLimit(payload, this.config);
+
     try {
       const response = await this.client.post(request.endpoint, payload, {
         timeout: requestTimeout,
@@ -227,7 +332,7 @@ class EvolutionDeliveryProvider {
         data: response.data,
       };
     } catch (error) {
-      throw parseEvolutionError(error);
+      throw parseEvolutionError(error, this.config);
     }
   }
 
@@ -244,7 +349,7 @@ class EvolutionDeliveryProvider {
         data: response.data,
       };
     } catch (error) {
-      throw parseEvolutionError(error);
+      throw parseEvolutionError(error, this.config);
     }
   }
 }
@@ -276,10 +381,14 @@ async function fetchAllGroupsFromEvolution(options = {}) {
 module.exports = {
   EvolutionApiError,
   EvolutionDeliveryProvider,
+  PERMANENT_ERROR_STATUSES,
+  assertMediaPayloadWithinLimit,
   buildFetchAllGroupsRequest,
   buildEvolutionRequest,
   createEvolutionClient,
   fetchAllGroupsFromEvolution,
+  isPermanentEvolutionStatus,
   parseEvolutionError,
+  summarizeEvolutionResponseError,
   sendToEvolution,
 };

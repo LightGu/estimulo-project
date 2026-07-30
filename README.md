@@ -49,6 +49,14 @@ GEMINI_TRANSCRIPTION_MODEL=gemini-flash-latest
 GEMINI_TEXT_MODEL=gemini-flash-latest
 ```
 
+Para transcrever, o adapter envia ao Gemini **somente o audio** extraido do
+video (`src/services/video-audio-extraction.js`, mono/16 kHz/mp3), nunca o video
+completo: a transcricao so depende da fala e o audio isolado custa ~32 tokens por
+segundo de midia contra ~258 do video, com upload muito menor. A extracao usa o
+ffmpeg instalado como dependencia npm (`@ffmpeg-installer/ffmpeg`); use
+`FFMPEG_PATH` para apontar outro binario e `TRANSCRIPTION_AUDIO_ONLY=false` para
+voltar a enviar o video em caso de emergencia.
+
 Essas variaveis servem apenas como valor inicial (seed). O modelo principal, a
 cascata de fallback e os prompts de geracao/revisao de legenda por agente
 (transcricao, geracao de legenda, revisao de legenda) sao configurados pela
