@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 
 const {
   createVideoCaptionsService,
+  findCaptionMetaResponseReason,
   generateCaptionFromTranscript,
   getStartOfTodayInTimeZone,
   normalizeCaptionText,
@@ -399,8 +400,112 @@ async function testRetriesGeneratedCaptionWhenFirstCandidateIsRejected() {
   assert.deepEqual(reviews, ["Legenda incoerente", "Legenda aprovada"]);
 }
 
+// Regressao do defeito de producao: o prompt de geracao mandava o modelo aguardar
+// o comando do usuario, o modelo respondeu perguntando qual modo usar e essa
+// pergunta foi persistida e enviada como legenda.
+async function testRejectsMetaResponseAndRetriesUntilRealCaption() {
+  const responses = [
+    "Olá, empreendedor! Como você prefere receber essa mensagem baseada na transcrição da Carol Bartoleto? Escolha o modo desejado: 1 **Modo 1 (Divulgação, Eventos e Pesquisas)** 2 **Modo 2 (Educação e Conteúdo Profundo)** Basta me dizer qual o modo!",
+    "🚨 *Legenda real gerada a partir da transcricao*",
+  ];
+  const created = [];
+  const warnings = [];
+  const service = createVideoCaptionsService({
+    repository: {
+      async listUnusedTodayByVideo() {
+        return [];
+      },
+      async create(payload) {
+        created.push(payload);
+
+        return { id: "caption-generated", ...payload };
+      },
+    },
+    videoCatalogRepository: {
+      async update() {
+        return null;
+      },
+    },
+    aiProviderAdapter: {
+      async generateCaptionFromTranscript() {
+        return responses.shift();
+      },
+    },
+    captionReviewService: {
+      async reviewCaption() {
+        return { approved: true, reason: "Legenda aprovada" };
+      },
+    },
+    logger: {
+      warn(message) {
+        warnings.push(JSON.parse(message));
+      },
+    },
+  });
+
+  const selected = await service.selectCaptionForVideo("video-1", {
+    transcript: "Transcricao real do video",
+  });
+
+  assert.equal(selected.text, "🚨 *Legenda real gerada a partir da transcricao*");
+  assert.equal(created.length, 1, "a pergunta nao deve ser persistida como legenda");
+  assert.equal(created[0].caption_text, "🚨 *Legenda real gerada a partir da transcricao*");
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].event, "caption_generation.meta_response_rejected");
+}
+
+async function testReturnsNullWhenEveryAttemptIsAMetaResponse() {
+  const created = [];
+  const service = createVideoCaptionsService({
+    repository: {
+      async listUnusedTodayByVideo() {
+        return [];
+      },
+      async create(payload) {
+        created.push(payload);
+
+        return { id: "caption-generated", ...payload };
+      },
+    },
+    videoCatalogRepository: {
+      async update() {
+        return null;
+      },
+    },
+    aiProviderAdapter: {
+      async generateCaptionFromTranscript() {
+        return "Escolha o modo desejado: Modo 1 ou Modo 2?";
+      },
+    },
+    captionReviewService: {
+      async reviewCaption() {
+        return { approved: true, reason: "Legenda aprovada" };
+      },
+    },
+    logger: { warn() {} },
+  });
+
+  const selected = await service.selectCaptionForVideo("video-1", {
+    transcript: "Transcricao real do video",
+  });
+
+  assert.equal(selected, null, "sem legenda valida o envio nao deve receber a pergunta");
+  assert.equal(created.length, 0);
+}
+
 async function main() {
   assert.equal(normalizeCaptionText({ caption_text: " Texto " }), "Texto");
+
+  // Perguntas/menus devem ser barrados; legendas legitimas devem passar.
+  assert.ok(findCaptionMetaResponseReason("Escolha o modo desejado: 1 ou 2"));
+  assert.ok(findCaptionMetaResponseReason("Como você prefere receber essa mensagem?"));
+  assert.ok(findCaptionMetaResponseReason("**Modo 1** (Divulgação) ou **Modo 2** (Educação)?"));
+  assert.equal(findCaptionMetaResponseReason("🚨 *Pessoal, precisamos da ajuda de vocês!*"), null);
+  assert.equal(
+    findCaptionMetaResponseReason("📌 *Seu negócio não cresce olhando apenas para dentro dele.*"),
+    null
+  );
+  assert.equal(findCaptionMetaResponseReason(""), null);
   assert.equal(await generateCaptionFromTranscript({
     async generateCaptionFromTranscript(transcript) {
       return `Legenda de ${transcript}`;
@@ -419,6 +524,8 @@ async function main() {
   await testRejectsCaptionAndGeneratesNewOneFromTranscript();
   await testPrefersTranscriptOverDownloadedVideoForCaptionGeneration();
   await testRetriesGeneratedCaptionWhenFirstCandidateIsRejected();
+  await testRejectsMetaResponseAndRetriesUntilRealCaption();
+  await testReturnsNullWhenEveryAttemptIsAMetaResponse();
 
   console.log("video-captions-service tests OK");
 }
