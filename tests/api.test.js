@@ -134,6 +134,13 @@ async function main() {
       list: async () => [{ id: "org-1", nome: "AMBEV" }],
       create: async (payload) => ({ id: "org-2", nome: payload.nome, descricao: payload.descricao ?? null, programa: payload.programa ?? null }),
       update: async (id, payload) => ({ id, nome: "AMBEV", descricao: payload.descricao ?? null, programa: payload.programa ?? null }),
+      delete: async (id) => {
+        if (id !== "org-1") {
+          throw new Error("Organization not found");
+        }
+
+        return { id, nome: "AMBEV" };
+      },
     },
     videoCatalogService: {
       transcribeByDriveFileId: async (driveFileId, options) => ({
@@ -457,6 +464,20 @@ async function main() {
       programa: "Programa atualizado",
     });
 
+    const deleteOrganizationResponse = await fetch(`http://127.0.0.1:${port}/organizations/org-1`, {
+      method: "DELETE",
+    });
+
+    assert.equal(deleteOrganizationResponse.status, 200);
+    assert.deepEqual(await deleteOrganizationResponse.json(), { id: "org-1", nome: "AMBEV" });
+
+    const deleteMissingOrganizationResponse = await fetch(`http://127.0.0.1:${port}/organizations/org-inexistente`, {
+      method: "DELETE",
+    });
+
+    assert.equal(deleteMissingOrganizationResponse.status, 404);
+    assert.deepEqual(await deleteMissingOrganizationResponse.json(), { error: "Organization not found" });
+
     const reportResponse = await fetch(`http://127.0.0.1:${port}/reports/dispatches?status=enviado`);
     assert.equal(reportResponse.status, 200);
     const reportPayload = await reportResponse.json();
@@ -566,6 +587,11 @@ async function main() {
     assert.match(organizacoesAppPage, /id="orgPrograma"/);
     assert.match(organizacoesAppPage, /requestJson\(`\/organizations\/\$\{encodeURIComponent\(editingOrgId\)\}`/);
     assert.match(organizacoesAppPage, /requestJson\("\/organizations", \{/);
+    assert.match(organizacoesAppPage, /id="deleteFromOrgInfoModal"/);
+    assert.match(organizacoesAppPage, /requestJson\(`\/organizations\/\$\{encodeURIComponent\(org\.id\)\}`, \{ method: "DELETE" \}\)/);
+    // Excluir a organizacao mantem os grupos; eles apenas perdem o vinculo (ON DELETE SET NULL).
+    assert.match(organizacoesAppPage, /serão mantidos, apenas ficarão sem organização/);
+    assert.doesNotMatch(organizacoesAppPage, /state\.groups\.filter\(\(group\) => group\.organization_id !== org\.id\)/);
 
     const trilhasResponse = await fetch(`http://127.0.0.1:${port}/trilhas`);
     assert.equal(trilhasResponse.status, 200);

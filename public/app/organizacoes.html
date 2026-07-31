@@ -107,8 +107,11 @@
           <div id="orgInfoPrograma"></div>
           <div class="org-info-label" style="margin-top:14px;">Descrição</div>
           <div id="orgInfoDescricao"></div>
+          <div id="orgInfoStatus" class="status-line"></div>
         </div>
         <div class="modal-footer">
+          <button class="btn btn-danger" id="deleteFromOrgInfoModal" type="button">Excluir organização</button>
+          <div class="toolbar-spacer"></div>
           <button class="btn btn-secondary" id="cancelOrgInfoModal" type="button">Fechar</button>
           <button class="btn" id="editFromOrgInfoModal" type="button">Editar organização</button>
         </div>
@@ -238,12 +241,55 @@
         document.getElementById("orgInfoDescricao").innerHTML = org.descricao
           ? escapeHtml(org.descricao)
           : '<span class="text-faint">Não informado</span>';
+        document.getElementById("orgInfoStatus").textContent = "";
+        document.getElementById("orgInfoStatus").className = "status-line";
         document.getElementById("orgInfoOverlay").hidden = false;
       }
 
       function closeOrgInfoModal() {
         document.getElementById("orgInfoOverlay").hidden = true;
         infoOrgId = null;
+      }
+
+      async function deleteOrgFromInfoModal() {
+        const org = state.organizations.find((item) => item.id === infoOrgId);
+        if (!org) return;
+
+        const groups = groupsForOrg(org.id);
+        const groupWarning = groups.length
+          ? ` Os ${groups.length} grupo(s) sincronizado(s) serão mantidos, apenas ficarão sem organização.`
+          : "";
+        const confirmed = await window.estimuloConfirm(
+          `Excluir a organização "${org.nome}"?${groupWarning} Esta ação não pode ser desfeita.`,
+          { title: "Excluir organização", confirmLabel: "Excluir" }
+        );
+
+        if (!confirmed) return;
+
+        const deleteButton = document.getElementById("deleteFromOrgInfoModal");
+        const status = document.getElementById("orgInfoStatus");
+
+        deleteButton.disabled = true;
+        status.textContent = "Excluindo organização...";
+        status.className = "status-line";
+
+        try {
+          await requestJson(`/organizations/${encodeURIComponent(org.id)}`, { method: "DELETE" });
+
+          state.organizations = state.organizations.filter((item) => item.id !== org.id);
+          // O grupo continua existindo; o banco apenas zera o vinculo (ON DELETE SET NULL).
+          state.groups = state.groups.map((group) =>
+            group.organization_id === org.id ? { ...group, organization_id: null } : group
+          );
+
+          closeOrgInfoModal();
+          render();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          deleteButton.disabled = false;
+        }
       }
 
       function openOrgModal(orgId) {
@@ -350,6 +396,7 @@
       document.getElementById("orgInfoOverlay").addEventListener("click", (event) => {
         if (event.target.id === "orgInfoOverlay") closeOrgInfoModal();
       });
+      document.getElementById("deleteFromOrgInfoModal").addEventListener("click", deleteOrgFromInfoModal);
       document.getElementById("editFromOrgInfoModal").addEventListener("click", () => {
         const orgId = infoOrgId;
         closeOrgInfoModal();

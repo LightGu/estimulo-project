@@ -62,9 +62,31 @@ function createOrganizationsController(dependencies = {}) {
     }
   }
 
+  async function remove(req, res) {
+    try {
+      const organization = await organizationService.delete(req.params.id);
+
+      return res.status(200).json(organization);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Organization id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Organization not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   return {
     create,
+    delete: remove,
     list,
+    remove,
     update,
   };
 }

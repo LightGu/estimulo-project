@@ -64,6 +64,41 @@ function normalizeCaptionText(caption) {
   return String(caption?.caption_text || caption?.captionText || "").trim();
 }
 
+// A revisao factual compara legenda x transcricao, mas nao detecta uma resposta
+// que nao e legenda nenhuma: quando o prompt de geracao pede confirmacao ou
+// oferece opcoes, o modelo responde perguntando qual modo usar e esse texto passa
+// pela revisao como "coerente". Ja aconteceu em producao (uma pergunta "Escolha o
+// modo desejado: 1 ... 2 ..." foi enviada como legenda), entao aqui a resposta e
+// barrada pela forma, antes de ser persistida ou enviada.
+const CAPTION_META_RESPONSE_PATTERNS = [
+  /\bescolha\s+o\s+modo\b/i,
+  /\bqual\s+(?:e\s+)?o\s+modo\b/i,
+  /\bmodo\s+desejado\b/i,
+  /\bbasta\s+me\s+dizer\b/i,
+  /\bme\s+(?:diga|informe|avise)\s+(?:qual|o\s+modo|se)\b/i,
+  /\baguardo\s+(?:seu|sua|o\s+seu)\b/i,
+  /\bcomo\s+voce\s+prefere\b/i,
+  /\bcomo\s+você\s+prefere\b/i,
+  /\bmodo\s*1\b[\s\S]*\bmodo\s*2\b/i,
+  /\bposso\s+(?:gerar|criar|escrever|seguir)\b.*\?/i,
+];
+
+function findCaptionMetaResponseReason(text) {
+  const normalized = String(text || "").trim();
+
+  if (!normalized) {
+    return null;
+  }
+
+  const matched = CAPTION_META_RESPONSE_PATTERNS.find((pattern) => pattern.test(normalized));
+
+  if (matched) {
+    return `Resposta da IA parece ser uma pergunta/menu, nao uma legenda (padrao: ${matched})`;
+  }
+
+  return null;
+}
+
 // Legenda so pode ser gerada a partir da transcricao do video, nunca do video em
 // si. Quando falta transcricao, ela e gerada aqui (adapter.generateCaption extrai
 // o audio do video, envia apenas esse audio e, no caso do Gemini, deleta o
@@ -286,6 +321,23 @@ function createVideoCaptionsService(dependencies = {}) {
         continue;
       }
 
+      const metaResponseReason = findCaptionMetaResponseReason(generatedText);
+
+      if (metaResponseReason) {
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "caption_generation.meta_response_rejected",
+              video_id: videoId,
+              attempt,
+              max_attempts: maxGeneratedCaptionAttempts,
+              reason: metaResponseReason,
+              caption_preview: generatedText.slice(0, 200),
+            })
+          );
+        continue;
+      }
+
       const generatedReview = await approveCaption({ caption_text: generatedText }, true);
 
       if (!generatedReview) {
@@ -327,6 +379,7 @@ module.exports = createVideoCaptionsService();
 module.exports.DEFAULT_GENERATED_CAPTION_ATTEMPTS = DEFAULT_GENERATED_CAPTION_ATTEMPTS;
 module.exports.DEFAULT_CAPTION_TIMEZONE = DEFAULT_CAPTION_TIMEZONE;
 module.exports.createVideoCaptionsService = createVideoCaptionsService;
+module.exports.findCaptionMetaResponseReason = findCaptionMetaResponseReason;
 module.exports.generateCaptionFromTranscript = generateCaptionFromTranscript;
 module.exports.getStartOfTodayInTimeZone = getStartOfTodayInTimeZone;
 module.exports.normalizeCaptionText = normalizeCaptionText;

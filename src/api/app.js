@@ -107,6 +107,7 @@ function createApp(dependencies = {}) {
   app.get("/organizations", organizationsController.list);
   app.post("/organizations", organizationsController.create);
   app.patch("/organizations/:id", organizationsController.update);
+  app.delete("/organizations/:id", organizationsController.remove);
   app.get("/reports/dispatches", reportController.listDispatches);
   app.get("/trilhas", trilhasController.listAll);
   app.get("/trilhas/overview", trilhasController.listOverview);
