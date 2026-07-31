@@ -86,7 +86,10 @@
 
             <div class="perfis-panel">
               <div class="perfil-checkboxes" id="trailPerfisCheckboxes"></div>
-              <button class="btn btn-secondary btn-sm" id="saveTrailPerfisButton" type="button">Salvar perfis</button>
+              <div class="settings-row">
+                <button class="btn btn-secondary btn-sm" id="saveTrailPerfisButton" type="button">Salvar perfis</button>
+                <button class="btn btn-sm" id="newVideoButton" type="button">+ Adicionar vídeo</button>
+              </div>
             </div>
             <div id="trailPerfisStatus" class="status-line"></div>
 
@@ -140,6 +143,31 @@
         <div class="modal-footer">
           <button class="btn btn-secondary" data-close-new type="button">Cancelar</button>
           <button class="btn" id="createTrailButton" type="button">Cadastrar trilha</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="newVideoOverlay" hidden>
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Adicionar vídeo à trilha</h3>
+          <button class="icon-btn-close" data-close-new-video type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="newVideoTrailLabel" class="text-muted"></p>
+          <div class="field">
+            <label for="newVideoSearch">Buscar vídeo</label>
+            <input id="newVideoSearch" type="text" placeholder="Filtrar pelo nome do arquivo">
+          </div>
+          <div class="field">
+            <label>Vídeos disponíveis</label>
+            <div class="unclassified-list" id="newVideoList"></div>
+          </div>
+          <div id="newVideoStatusLine" class="status-line"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-close-new-video type="button">Cancelar</button>
+          <button class="btn" id="createVideoButton" type="button">Adicionar à trilha</button>
         </div>
       </div>
     </div>
@@ -206,6 +234,7 @@
       let selectedMacrotemaKey = null;
       let selectedTrilhaKey = null;
       let movingVideo = null;
+      let newVideoTrail = null;
       let draggingVideoId = null;
       let renameContext = null;
 
@@ -455,6 +484,8 @@
         document.getElementById("trailPerfisStatus").textContent = "";
         document.getElementById("trailPerfisStatus").className = "status-line";
 
+        document.getElementById("newVideoButton").onclick = () => openNewVideo(trail);
+
         document.getElementById("saveTrailPerfisButton").onclick = async () => {
           const button = document.getElementById("saveTrailPerfisButton");
           const status = document.getElementById("trailPerfisStatus");
@@ -686,6 +717,136 @@
           });
 
           newTrailOverlay.hidden = true;
+          await initialize();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          button.disabled = false;
+        }
+      });
+
+      // Vincular a trilha um video que ja existe no video_catalog. Reusa
+      // /trilhas/selectable-videos (mesma fonte do modal de nova trilha) e o endpoint
+      // POST /trilhas/:id/videos, que so cria o vinculo em trilha_videos.
+      const newVideoOverlay = document.getElementById("newVideoOverlay");
+
+      function renderNewVideoList() {
+        const list = document.getElementById("newVideoList");
+
+        if (!newVideoTrail) {
+          list.innerHTML = "";
+          return;
+        }
+
+        const search = document.getElementById("newVideoSearch").value.trim().toLowerCase();
+        const idsNaTrilha = new Set(newVideoTrail.videos.map((v) => v.id));
+        const disponiveis = state.selectableVideos
+          .filter((v) => !idsNaTrilha.has(v.id))
+          .filter((v) => !search || String(v.nome_do_arquivo || "").toLowerCase().includes(search));
+
+        if (!state.selectableVideos.length) {
+          list.innerHTML = '<div class="unclassified-item text-faint">Carregando vídeos...</div>';
+          return;
+        }
+
+        if (!disponiveis.length) {
+          list.innerHTML = `<div class="unclassified-item text-faint">${
+            search ? "Nenhum vídeo encontrado para esta busca." : "Todos os vídeos do catálogo já estão nesta trilha."
+          }</div>`;
+          return;
+        }
+
+        const novos = disponiveis.filter((v) => !(v.trilhas || []).length);
+        const classificados = disponiveis.filter((v) => (v.trilhas || []).length);
+
+        function renderItem(v) {
+          const existingTrilhas = (v.trilhas || []).map((t) => t.trilha).join(", ");
+          const badge = existingTrilhas
+            ? `<span class="text-faint already-in-trilha">Já em: ${escapeHtml(existingTrilhas)}</span>`
+            : "";
+
+          return `
+            <label class="unclassified-item">
+              <input type="checkbox" data-new-video value="${escapeHtml(v.id)}">
+              <span class="mono">${escapeHtml(v.nome_do_arquivo)}</span>
+              ${badge}
+            </label>`;
+        }
+
+        list.innerHTML = [
+          `<div class="videos-group-title">Vídeos sem trilha (${novos.length})</div>`,
+          novos.length
+            ? novos.map(renderItem).join("")
+            : '<div class="unclassified-item text-faint">Nenhum vídeo sem trilha.</div>',
+          `<div class="videos-group-title">Já classificados em outras trilhas (${classificados.length})</div>`,
+          classificados.length
+            ? classificados.map(renderItem).join("")
+            : '<div class="unclassified-item text-faint">Nenhum vídeo já classificado.</div>',
+        ].join("");
+      }
+
+      async function openNewVideo(trail) {
+        newVideoTrail = trail;
+        document.getElementById("newVideoTrailLabel").textContent = `Trilha: ${trail.macrotema} · ${trail.trilha}`;
+        document.getElementById("newVideoSearch").value = "";
+        document.getElementById("newVideoStatusLine").textContent = "";
+        document.getElementById("newVideoStatusLine").className = "status-line";
+        document.getElementById("newVideoList").innerHTML =
+          '<div class="unclassified-item text-faint">Carregando vídeos...</div>';
+        newVideoOverlay.hidden = false;
+
+        try {
+          state.selectableVideos = await requestJson("/trilhas/selectable-videos");
+        } catch (error) {
+          state.selectableVideos = [];
+          document.getElementById("newVideoStatusLine").textContent = error.message;
+          document.getElementById("newVideoStatusLine").className = "status-line error";
+        }
+
+        renderNewVideoList();
+      }
+
+      document.getElementById("newVideoSearch").addEventListener("input", renderNewVideoList);
+
+      document.querySelectorAll("[data-close-new-video]").forEach((el) =>
+        el.addEventListener("click", () => {
+          newVideoOverlay.hidden = true;
+          newVideoTrail = null;
+        })
+      );
+
+      document.getElementById("createVideoButton").addEventListener("click", async () => {
+        if (!newVideoTrail) return;
+
+        const button = document.getElementById("createVideoButton");
+        const status = document.getElementById("newVideoStatusLine");
+        const videoIds = Array.from(document.querySelectorAll("[data-new-video]:checked")).map(
+          (input) => input.value
+        );
+
+        if (!videoIds.length) {
+          status.textContent = "Selecione ao menos um vídeo.";
+          status.className = "status-line error";
+          return;
+        }
+
+        button.disabled = true;
+        status.textContent = videoIds.length > 1 ? "Adicionando vídeos..." : "Adicionando vídeo...";
+        status.className = "status-line";
+
+        try {
+          for (const videoId of videoIds) {
+            await requestJson(`/trilhas/${encodeURIComponent(newVideoTrail.id)}/videos`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ video_id: videoId }),
+            });
+          }
+
+          selectedTrilhaKey = newVideoTrail.id;
+          newVideoOverlay.hidden = true;
+          newVideoTrail = null;
           await initialize();
         } catch (error) {
           status.textContent = error.message;

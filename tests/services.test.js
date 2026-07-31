@@ -86,8 +86,8 @@ async function main() {
     findById: async (id) => (id === "video-1" ? { id, drive_file_id: "drive-1", status: true } : null),
     findByDriveFileId: async (driveFileId) => (driveFileId === "drive-1" ? { id: "video-1" } : null),
     listApproved: async () => [
-      { id: "video-a1", ordem_geral: 1, nome_do_arquivo: "a1.mp4", status: true },
-      { id: "video-a2", ordem_geral: 2, nome_do_arquivo: "a2.mp4", status: true },
+      { id: "video-a1", ordem_geral: 1, nome_do_arquivo: "a1.mp4", status: true, transcript: "transcricao a1" },
+      { id: "video-a2", ordem_geral: 2, nome_do_arquivo: "a2.mp4", status: true, transcript: "   " },
     ],
     listByStatus: async () => [{ id: "video-1" }],
     update: async (id, payload) => ({ id, ...payload }),
@@ -396,6 +396,11 @@ async function main() {
   await assert.rejects(() => orgService.update("", { nome: "Novo" }), /required/);
   await assert.rejects(() => orgService.getById(""), /required/);
 
+  const deletedOrg = await orgService.delete("org-1");
+  assert.equal(deletedOrg.id, "org-1");
+  await assert.rejects(() => orgService.delete(""), /required/);
+  await assert.rejects(() => orgService.delete("org-inexistente"), /not found/);
+
   const createdGroup = await groupService.create({ nome: "Grupo", organization_id: "org-1", evolution_group_id: "evo-1", maturidade: 2 });
   assert.ok(createdGroup.id);
   await assert.rejects(() => groupService.create({ nome: "Grupo", organization_id: "org-1" }), /required/);
@@ -529,6 +534,10 @@ async function main() {
   assert.equal(progressSummary.current.enviados, 1);
   assert.equal(progressSummary.current.concluida, false);
   assert.equal(progressSummary.current.next_video.id, "video-a2");
+  const progressRowA1 = progressSummary.current.rows.find((row) => row.id === "video-a1");
+  const progressRowA2 = progressSummary.current.rows.find((row) => row.id === "video-a2");
+  assert.equal(progressRowA1.transcrito, true);
+  assert.equal(progressRowA2.transcrito, false);
   assert.equal(progressSummary.history.length, 1);
   assert.equal(progressSummary.history[0].trilha, "Trilha A");
   assert.equal(progressSummary.history[0].trilha_id, "trilha-1");
