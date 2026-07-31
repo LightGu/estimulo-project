@@ -33,16 +33,20 @@ async function buildTrailStatusById(trilhaId, deliveries, trilhasRepositoryDepen
     .sort((left, right) => Number(left.ordem ?? Number.MAX_SAFE_INTEGER) - Number(right.ordem ?? Number.MAX_SAFE_INTEGER))
     .map((video) => {
       const aprovado = video.status === true;
+      // Marca se o video ja tem transcricao no catalogo — a tela usa isso para o
+      // selo "T" na trilha selecionada. Nao devolvemos o texto inteiro para nao
+      // trafegar transcricao completa de cada video da trilha.
+      const transcrito = typeof video.transcript === "string" && video.transcript.trim().length > 0;
 
       if (deliveredByVideoId.has(video.id)) {
-        return { ...video, aprovado, status: "enviado", enviado_em: deliveredByVideoId.get(video.id) };
+        return { ...video, aprovado, transcrito, status: "enviado", enviado_em: deliveredByVideoId.get(video.id) };
       }
 
       if (nextVideo && video.id === nextVideo.id) {
-        return { ...video, aprovado, status: "proximo", enviado_em: null };
+        return { ...video, aprovado, transcrito, status: "proximo", enviado_em: null };
       }
 
-      return { ...video, aprovado, status: "pendente", enviado_em: null };
+      return { ...video, aprovado, transcrito, status: "pendente", enviado_em: null };
     });
 
   const enviados = rows.filter((row) => row.status === "enviado").length;

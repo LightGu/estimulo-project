@@ -69,6 +69,12 @@
       .video-row-next td { background: var(--success-bg); }
       .video-row-next td.strong { color: var(--callout-success-text); }
 
+      /* Selo "T" na coluna Status da trilha selecionada: indica se o video ja tem
+         transcricao no catalogo. Fica ao lado do badge Enviado/Proximo/Pendente. */
+      .transcript-flag { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 5px; font-size: 11px; font-weight: 700; line-height: 1; vertical-align: -4px; cursor: help; }
+      .transcript-flag-on { background: var(--success-bg); color: var(--success); }
+      .transcript-flag-off { background: var(--neutral-bg); color: var(--text-faint); }
+
       .stepper { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px; }
       .step { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
       .step .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: 11.5px; flex: none; }
@@ -455,6 +461,19 @@
         return progress;
       }
 
+      // Selo "T" da tabela da trilha selecionada. `transcrito` vem de
+      // /groups/:id/video-progress; o fallback em `transcript` cobre respostas
+      // antigas que ainda devolviam o texto da transcricao em vez do booleano.
+      function transcriptFlag(video) {
+        const hasTranscript =
+          video.transcrito === true ||
+          (typeof video.transcript === "string" && video.transcript.trim().length > 0);
+
+        return hasTranscript
+          ? '<span class="transcript-flag transcript-flag-on has-tip" data-tip="Este vídeo já tem transcrição gerada no catálogo." data-tip-tone="success">T</span>'
+          : '<span class="transcript-flag transcript-flag-off has-tip" data-tip="Este vídeo ainda não tem transcrição no catálogo — ela será gerada quando a legenda for produzida." data-tip-tone="neutral">T</span>';
+      }
+
       function dispatchBlockReason(g, progress) {
         const trilhaLabel = resolveTrilhaLabel(g);
         if (!g.trilha_id && !g.trilha_override) return "Nenhuma trilha selecionada para este grupo.";
@@ -650,7 +669,7 @@
                             : v.status === "proximo"
                             ? '<span class="badge has-tip badge-success" data-tip="Próximo vídeo aprovado da trilha a ser enviado a este grupo." data-tip-tone="success">Próximo a enviar</span>'
                             : '<span class="badge has-tip badge-neutral" data-tip="Ainda não é a vez deste vídeo — está na fila após o próximo a enviar." data-tip-tone="neutral">Pendente</span>'
-                        }</td>
+                        }${transcriptFlag(v)}</td>
                         <td class="mono">${escapeHtml(v.enviado_em || "—")}</td>
                         ${
                           canForceResend
