@@ -1,7 +1,8 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
-const { EvolutionDeliveryProvider, sendToEvolution } = require("../services/evolution");
+const { resolveInstanceSender } = require("../services/evolution-instance-sender");
+const { assertDeliveryConfirmed, confirmProviderDelivery } = require("../services/delivery-confirmation");
 const { evolutionConfig } = require("../config/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
 const { base64Length, compressVideoToFitBase64Budget } = require("../services/video-compression");
@@ -11,7 +12,6 @@ const defaultVideoCaptionsService = require("../services/video-captions.service"
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
 const defaultGroupsRepository = require("../repositories/groups.repository");
-const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 const defaultCampaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const defaultNotificationsService = require("../services/notifications.service");
@@ -479,34 +479,14 @@ function canUseDispatchConsistency(jobData = {}, dispatchConsistencyService) {
   );
 }
 
-// Resolve o sender a ser usado no envio deste job: sem whatsapp_instance_id
-// (instalacoes com um unico numero, ou compatibilidade retroativa), usa o
-// sender global padrao; com um id valido, monta um EvolutionDeliveryProvider
-// apontando para a instancia especifica. Se a instancia nao existir mais,
-// falha aberto para o sender padrao em vez de derrubar o job em andamento.
-async function resolveDispatchSender(whatsappInstanceId, options = {}) {
-  const repository = options.whatsappInstancesRepository || defaultWhatsappInstancesRepository;
-
-  if (!whatsappInstanceId) {
-    return sendToEvolution;
-  }
-
-  const instance = await repository.findById(whatsappInstanceId);
-
-  if (!instance) {
-    return sendToEvolution;
-  }
-
-  const provider = new EvolutionDeliveryProvider({
-    config: { ...evolutionConfig, instanceName: instance.instance_name },
-  });
-
-  return (params) => provider.send(params);
-}
+// Mesma resolucao de instancia usada pelo caminho de mensagem pontual
+// agendada; a implementacao vive em services/evolution-instance-sender.js.
+const resolveDispatchSender = resolveInstanceSender;
 
 function createDeliveryExecutor(params = {}) {
   const {
     compressVideo = compressVideoToFitBase64Budget,
+    confirmDelivery = confirmProviderDelivery,
     drive,
     jobData,
     logger = console,
@@ -635,6 +615,23 @@ function createDeliveryExecutor(params = {}) {
             success: result && result.data && result.data.success,
           })
         );
+      // Recusa explicita da Evolution (HTTP 200 com corpo de erro). Ficava so
+      // dentro de dispatch-consistency, o que deixava o caminho sem consistencia
+      // (disparo de teste, campanha sem video_id em UUID) aceitar qualquer coisa.
+      assertDeliveryConfirmed(result);
+      // Aceite nao e entrega: espera o ACK do WhatsApp antes de deixar o job
+      // terminar com sucesso. Se o ACK nao vier, isto lanca e o log vai para
+      // "falhou" - e o que impede o relatorio de mostrar "enviado" para uma
+      // mensagem que nunca chegou ao grupo.
+      result.delivery_confirmation = await confirmDelivery(result, {
+        logger,
+        context: {
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.group_id,
+          progress_group_id: jobData.progress_group_id,
+          video_id: jobData.video_id,
+        },
+      });
       await markDispatchCaptionUsed({
         captionSelection,
         jobData,
@@ -839,6 +836,7 @@ function createDispatchProcessor(options = {}) {
   const {
     sender: explicitSender,
     compressVideo = compressVideoToFitBase64Budget,
+    confirmDelivery = confirmProviderDelivery,
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
@@ -883,6 +881,7 @@ function createDispatchProcessor(options = {}) {
         explicitSender || (await resolveDispatchSender(job.data.whatsapp_instance_id, { whatsappInstancesRepository }));
       const executeDelivery = createDeliveryExecutor({
         compressVideo,
+        confirmDelivery,
         drive,
         jobData: job.data,
         logger,
@@ -1050,6 +1049,7 @@ function createDispatchWorker(options = {}) {
   const {
     sender,
     compressVideo = compressVideoToFitBase64Budget,
+    confirmDelivery,
     videoDownloader = downloadFromDrive,
     drive,
     videoCatalogRepository,
@@ -1072,6 +1072,7 @@ function createDispatchWorker(options = {}) {
     createDispatchProcessor({
       sender,
       compressVideo,
+      confirmDelivery,
       videoDownloader,
       drive,
       videoCatalogRepository,

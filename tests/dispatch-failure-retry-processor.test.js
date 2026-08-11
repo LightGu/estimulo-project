@@ -117,6 +117,31 @@ async function testRetryCountIsPropagatedToDispatchJob() {
   assert.equal(enqueued[0].retry_count, 1);
 }
 
+// Falha de "entrega nao confirmada" e a unica em que a mensagem JA saiu: a
+// Evolution aceitou e a midia subiu para o WhatsApp. Reenviar duplicaria o video
+// no grupo que ja recebeu, e o ACK nao muda (em grupo ele nao existe). Cobre
+// tambem os logs falso-negativo gravados antes da correcao da regra de grupo.
+async function testSweepSkipsUnconfirmedDeliveryAsPermanent() {
+  const logs = [
+    buildFailedLog(1, {
+      mensagem_erro:
+        "Envio aceito pela Evolution, mas o WhatsApp nao confirmou a entrega em 90s (estado no provedor: PENDING).",
+    }),
+    buildFailedLog(2, { mensagem_erro: "Evolution API respondeu HTTP 500" }),
+  ];
+  const { enqueued, marked, options } = createDeps(logs);
+
+  const result = await createDispatchFailureRetryProcessor(options)();
+
+  assert.equal(result.skipped_permanent, 1);
+  assert.equal(enqueued.length, 1, "so a falha transitoria pode ser reenfileirada");
+  assert.equal(enqueued[0].campaign_id, "campaign-2");
+  assert.ok(
+    !marked.some((entry) => entry.id === "log-1"),
+    "log de entrega nao confirmada nao pode voltar para pendente"
+  );
+}
+
 async function testSweepIsNoOpWhenAutoRetryDisabled() {
   const logs = [buildFailedLog(1)];
   const { enqueued, listCalls, options } = createDeps(logs, {
@@ -135,6 +160,7 @@ async function main() {
   await testSweepCapsRetriesPerRun();
   await testSweepSkipsExhaustedLogsEvenIfRepositoryReturnsThem();
   await testRetryCountIsPropagatedToDispatchJob();
+  await testSweepSkipsUnconfirmedDeliveryAsPermanent();
   await testSweepIsNoOpWhenAutoRetryDisabled();
 
   console.log("dispatch failure retry processor tests OK");

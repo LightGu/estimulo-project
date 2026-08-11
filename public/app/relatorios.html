@@ -91,6 +91,7 @@
                     <th>Campanha</th>
                     <th>Conteúdo</th>
                     <th>Status</th>
+                    <th>Confirmação</th>
                   </tr>
                 </thead>
                 <tbody id="reportBody"></tbody>
@@ -121,6 +122,74 @@
         erro: "badge-danger",
         falhou: "badge-danger",
       };
+
+      // ACKs do WhatsApp que comprovam entrega. Espelham CONFIRMED_ACK_STATUSES
+      // em src/services/delivery-confirmation.js.
+      const ACK_CONFIRMADO = ["SERVER_ACK", "DELIVERY_ACK", "READ", "PLAYED"];
+      // Espelham as constantes de mesmo nome em delivery-confirmation.js.
+      const ACK_SEM_ACK_DE_GRUPO = "SEM_ACK_DE_GRUPO";
+      const ACK_NAO_VERIFICADO = "NAO_VERIFICADO";
+
+      function providerStatus(row) {
+        return String(row.provider_status || "").toUpperCase();
+      }
+
+      function isEntregaConfirmada(row) {
+        return ACK_CONFIRMADO.includes(providerStatus(row));
+      }
+
+      // Status e confirmacao respondem perguntas diferentes e por isso viram duas
+      // colunas: "o envio saiu?" e "alguem confirmou o recebimento?". Enquanto as
+      // duas dividiam uma celula, "enviado sem ACK" tinha de ser pintado como
+      // entrega ou como problema — e o WhatsApp nao devolve ACK de mensagem que a
+      // gente manda em grupo, ou seja, era a coluna inteira dizendo o que nao
+      // sabia.
+      function dispatchStatusPresentation(row) {
+        return {
+          label: STATUS_LABEL[row.status] || row.status,
+          badgeClass: STATUS_BADGE[row.status] || "badge-neutral",
+        };
+      }
+
+      function dispatchConfirmationPresentation(row) {
+        if (row.status !== "enviado") {
+          return { label: "—", badgeClass: null, tip: "" };
+        }
+
+        if (isEntregaConfirmada(row)) {
+          return {
+            label: "Confirmado",
+            badgeClass: "badge-success",
+            tip: "O WhatsApp confirmou o recebimento desta mensagem.",
+          };
+        }
+
+        if (providerStatus(row) === ACK_SEM_ACK_DE_GRUPO) {
+          return {
+            label: "Sem ACK (grupo)",
+            badgeClass: "badge-neutral",
+            tip:
+              "Normal em grupo: o WhatsApp não devolve confirmação por mensagem enviada a grupo. " +
+              "A Evolution aceitou o envio e a mídia subiu — só não existe ACK para conferir.",
+          };
+        }
+
+        if (providerStatus(row) === ACK_NAO_VERIFICADO) {
+          return {
+            label: "Não verificado",
+            badgeClass: "badge-warning",
+            tip:
+              "Não foi possível consultar a confirmação (banco da Evolution inacessível ou confirmação desligada). " +
+              "O envio foi aceito, mas ninguém checou o ACK.",
+          };
+        }
+
+        return {
+          label: "Aguardando ACK",
+          badgeClass: "badge-warning",
+          tip: "O envio foi aceito e o WhatsApp ainda não confirmou o recebimento.",
+        };
+      }
 
       const todayIso = new Date().toISOString().slice(0, 10);
 
@@ -156,13 +225,13 @@
         document.getElementById("summaryCards").innerHTML = "";
         document.getElementById("resultCount").textContent = "";
         document.getElementById("reportBody").innerHTML = `
-          <tr><td colspan="7"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
+          <tr><td colspan="8"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
       }
 
       const DISPATCH_STATUS_TIP = {
         pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
         processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
-        enviado: "Entregue com sucesso ao grupo via Evolution API.",
+        enviado: "A Evolution aceitou o envio e postou a mensagem no grupo.",
       };
 
       function dispatchStatusTip(row) {
@@ -170,6 +239,17 @@
           return row.mensagem_erro || "Falha no envio — motivo não informado.";
         }
         return DISPATCH_STATUS_TIP[row.status] || "";
+      }
+
+      // A evidência crua (id da mensagem, estado no provedor) fica no selo de
+      // confirmação, que é onde ela responde alguma pergunta.
+      function dispatchConfirmationTip(row) {
+        const { tip } = dispatchConfirmationPresentation(row);
+        const evidencia = [
+          row.provider_status ? `estado no provedor: ${row.provider_status}` : null,
+          row.provider_message_id ? `id da mensagem: ${row.provider_message_id}` : null,
+        ].filter(Boolean);
+        return [tip, ...evidencia].filter(Boolean).join(" · ");
       }
 
       function campaignLabel(campaign) {
@@ -190,6 +270,7 @@
           year: "numeric",
           hour: "2-digit",
           minute: "2-digit",
+          second: "2-digit",
           timeZone: state.timezone || undefined,
         });
       }
@@ -235,7 +316,7 @@
         const cards = [
           { label: "Total no período", value: rows.length, bar: "var(--brand-blue)" },
           { label: "Enviados", value: counts.enviado, bar: "var(--success)" },
-          { label: "Processando", value: counts.processando + counts.pendente, bar: "var(--warning)" },
+          { label: "Aguardando envio", value: counts.pendente + counts.processando, bar: "var(--warning)" },
           { label: "Erros", value: counts.erro + counts.falhou, bar: "var(--danger)" },
         ];
         document.getElementById("summaryCards").innerHTML = cards
@@ -252,7 +333,7 @@
       function renderTable(rows) {
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
         if (!rows.length) {
-          document.getElementById("reportBody").innerHTML = `<tr><td colspan="7"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
+          document.getElementById("reportBody").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
         document.getElementById("reportBody").innerHTML = rows
@@ -261,8 +342,11 @@
             const grupo = r.groups?.nome || "—";
             const campanha = campaignLabel(r.campaigns);
             const conteudo = r.video_catalog?.nome_do_arquivo || "—";
-            const statusLabel = STATUS_LABEL[r.status] || r.status;
-            const badgeClass = STATUS_BADGE[r.status] || "badge-neutral";
+            const { label: statusLabel, badgeClass } = dispatchStatusPresentation(r);
+            const confirmacao = dispatchConfirmationPresentation(r);
+            const confirmacaoCell = confirmacao.badgeClass
+              ? `<span class="badge has-tip ${confirmacao.badgeClass}" data-tip="${escapeHtml(dispatchConfirmationTip(r))}" data-tip-tone="${confirmacao.badgeClass.replace("badge-", "")}">${confirmacao.label}</span>`
+              : `<span class="text-muted">${confirmacao.label}</span>`;
             return `
             <tr>
               <td class="mono">${formatDateTime(r.criado_em)}</td>
@@ -272,6 +356,7 @@
               <td>${escapeHtml(campanha)}</td>
               <td>${escapeHtml(conteudo)}</td>
               <td><span class="badge has-tip ${badgeClass}" data-tip="${escapeHtml(dispatchStatusTip(r))}" data-tip-tone="${badgeClass.replace("badge-", "")}">${statusLabel}</span></td>
+              <td>${confirmacaoCell}</td>
             </tr>`;
           })
           .join("");
@@ -310,7 +395,18 @@
       }
 
       document.getElementById("exportCsvButton").addEventListener("click", () => {
-        const headers = ["Data/Hora", "Horário de envio planejado", "Organização", "Grupo", "Campanha", "Conteúdo", "Status"];
+        const headers = [
+          "Data/Hora",
+          "Horário de envio planejado",
+          "Organização",
+          "Grupo",
+          "Campanha",
+          "Conteúdo",
+          "Status",
+          "Confirmação",
+          "Estado no provedor",
+          "ID da mensagem no provedor",
+        ];
         const lines = [headers.join(";")].concat(
           state.logs.map((r) =>
             [
@@ -320,7 +416,10 @@
               r.groups?.nome || "",
               campaignLabel(r.campaigns),
               r.video_catalog?.nome_do_arquivo || "",
-              STATUS_LABEL[r.status] || r.status,
+              dispatchStatusPresentation(r).label,
+              dispatchConfirmationPresentation(r).label,
+              r.provider_status || "",
+              r.provider_message_id || "",
             ]
               .map(toCsvValue)
               .join(";")

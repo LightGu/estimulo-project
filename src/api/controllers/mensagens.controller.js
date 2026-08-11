@@ -5,6 +5,7 @@ const VALIDATION_ERROR_PATTERNS = [
   "Grupo(s) nao encontrado(s)",
   "Grupo(s) sem evolution_group_id",
   "Grupo(s) sem classificacao (segmento)",
+  "Grupo(s) sem vinculo com todos os numeros de WhatsApp ativos",
   "groups deve conter ao menos um grupo",
   "cada item de groups deve informar group_id",
   "jitter_delay_min_ms",
@@ -31,6 +32,12 @@ function createMensagensController(dependencies = {}) {
     } catch (error) {
       const message = error?.message || "Internal server error";
 
+      // Mesmo contrato do agendamento: campanha de video em andamento bloqueia o
+      // "enviar agora", e a tela precisa dizer qual campanha ocupa o momento.
+      if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
+        return res.status(409).json({ error: message, conflicts: error.conflicts });
+      }
+
       if (isValidationError(message)) {
         return res.status(400).json({ error: message });
       }
@@ -46,6 +53,12 @@ function createMensagensController(dependencies = {}) {
       return res.status(202).json(result);
     } catch (error) {
       const message = error?.message || "Internal server error";
+
+      // Mesmo contrato do POST /campaigns/dispatch: 409 com os conflitos, para a
+      // tela poder dizer qual campanha ja ocupa a janela e em quais grupos.
+      if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
+        return res.status(409).json({ error: message, conflicts: error.conflicts });
+      }
 
       if (isValidationError(message)) {
         return res.status(400).json({ error: message });

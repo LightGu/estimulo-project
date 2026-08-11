@@ -55,6 +55,36 @@ async function listByStatusOlderThan(status, cutoffDate, client) {
   return data || [];
 }
 
+// Campanhas ativas cuja janela cruza [windowStart, windowEnd). A comparacao
+// e feita no banco (start < fim_novo AND fim > inicio_novo) para nao carregar o
+// historico inteiro so para descartar quase tudo em memoria. Campanhas sem
+// janela definida ficam de fora: nao ha intervalo para comparar.
+async function listActiveOverlappingWindow(windowStart, windowEnd, options = {}, client) {
+  const start = windowStart instanceof Date ? windowStart.toISOString() : windowStart;
+  const end = windowEnd instanceof Date ? windowEnd.toISOString() : windowEnd;
+
+  let query = getClient(client)
+    .from("campaigns")
+    .select("*")
+    .eq("ativo", true)
+    .not("window_start", "is", null)
+    .not("window_end", "is", null)
+    .lt("window_start", end)
+    .gt("window_end", start);
+
+  if (options.excludeId) {
+    query = query.neq("id", options.excludeId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function create(payload, client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
@@ -105,6 +135,7 @@ module.exports = {
   findAll,
   findById,
   listActive,
+  listActiveOverlappingWindow,
   listByStatusOlderThan,
   remove,
   update,

@@ -4,35 +4,8 @@ const campaignsRepository = require("../repositories/campaigns.repository");
 const groupsRepository = require("../repositories/groups.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const defaultSettingsService = require("./settings.service");
-
-function isFailureLikeStatus(value) {
-  const normalized = String(value || "").trim().toLowerCase();
-
-  return ["error", "erro", "failed", "failure", "false", "500", "400"].includes(normalized);
-}
-
-function assertDeliveryConfirmed(result) {
-  if (!result) {
-    throw new Error("Envio nao confirmado pelo provedor");
-  }
-
-  if (result.status !== undefined && (Number(result.status) < 200 || Number(result.status) >= 300)) {
-    throw new Error(`Envio nao confirmado pelo provedor: status ${result.status}`);
-  }
-
-  const data = result.data || {};
-
-  if (result.error || data.error || data.errors || data.success === false || isFailureLikeStatus(data.status)) {
-    const message =
-      result.error?.message ||
-      data.error?.message ||
-      data.message ||
-      data.response?.message ||
-      "Envio nao confirmado pelo provedor";
-
-    throw new Error(message);
-  }
-}
+// Regra compartilhada com o disparo pontual - ver delivery-confirmation.js.
+const { assertDeliveryConfirmed, extractProviderDelivery } = require("./delivery-confirmation");
 
 function writeStageLog(logger, level, event, payload = {}) {
   const writer = logger && (logger[level] || logger.info);
@@ -164,6 +137,24 @@ function createDispatchConsistencyService(dependencies = {}) {
     }
 
     return { duplicate: false, record };
+  }
+
+  // Best-effort: a mensagem ja saiu e o log ja esta "enviado". Se o registro da
+  // evidencia falhar, perde-se a rastreabilidade daquele envio - nunca o envio.
+  async function recordProviderDelivery(logId, result, context = {}) {
+    if (!logId || typeof dispatchLogsRepositoryDependency.updateProviderDelivery !== "function") {
+      return;
+    }
+
+    try {
+      await dispatchLogsRepositoryDependency.updateProviderDelivery(logId, extractProviderDelivery(result));
+    } catch (error) {
+      writeStageLog(logger, "error", "dispatch_consistency.record_provider_delivery_failed", {
+        ...context,
+        log_id: logId,
+        error_message: error.message || String(error),
+      });
+    }
   }
 
   async function markCampaignFailed(campaignId) {
@@ -303,6 +294,12 @@ function createDispatchConsistencyService(dependencies = {}) {
         group_id: groupId,
         video_id: videoId,
         log_id: log.id,
+      });
+
+      await recordProviderDelivery(log.id, result, {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
       });
 
       writeStageLog(logger, "info", "dispatch_consistency.progress.started", {

@@ -1,15 +1,29 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
-const { sendToEvolution } = require("../services/evolution");
+const { resolveInstanceSender } = require("../services/evolution-instance-sender");
+const {
+  assertDeliveryConfirmed,
+  confirmProviderDelivery,
+  extractProviderDelivery,
+} = require("../services/delivery-confirmation");
+const {
+  DEFAULT_MAX_POSTPONEMENTS,
+  resolveAdHocDispatchBlock,
+} = require("../services/dispatch-exclusivity");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
+const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 
 const MENSAGENS_DISPATCH_JOB_NAME = "mensagens-dispatch";
 const MENSAGENS_DISPATCH_INITIAL_STATUS = "pending";
 const MENSAGENS_DISPATCH_PROCESSING_STATUS = "processing";
 const MENSAGENS_DISPATCH_SUCCESS_STATUS = "sent";
 const MENSAGENS_DISPATCH_FAILED_STATUS = "failed";
-const DEFAULT_MENSAGENS_DISPATCH_JOB_TIMEOUT_MS = 60 * 1000;
+const MENSAGENS_DISPATCH_POSTPONED_STATUS = "postponed";
+// Antes eram 60s, dimensionados para "postar e esquecer". Agora o job tambem
+// espera o ACK do WhatsApp (ate DELIVERY_CONFIRMATION_TIMEOUT_MS, 90s por
+// padrao), entao o teto precisa cobrir envio + confirmacao.
+const DEFAULT_MENSAGENS_DISPATCH_JOB_TIMEOUT_MS = 5 * 60 * 1000;
 
 let mensagensDispatchQueueInstance;
 
@@ -73,6 +87,12 @@ function buildMensagensJobData(params = {}) {
     jitter_delay_ms: params.jitter_delay_ms,
     cumulative_delay_ms: params.cumulative_delay_ms,
     dispatch_log_id: params.dispatch_log_id || null,
+    // Sem este campo o job perdia a instancia sorteada no agendamento e o worker
+    // enviava tudo pelo numero do .env, independente do rodizio configurado.
+    whatsapp_instance_id: params.whatsapp_instance_id || params.whatsappInstanceId || null,
+    // Quantas vezes este envio ja foi adiado por campanha de video em voo.
+    // Viaja no job para o teto de adiamentos valer entre reenfileiramentos.
+    postponed_count: Number(params.postponed_count || params.postponedCount || 0),
   };
 }
 
@@ -105,7 +125,17 @@ async function addJitteredMensagensDispatchJobs(params, options = {}) {
 }
 
 function createMensagensDispatchProcessor(options = {}) {
-  const { sender = sendToEvolution, logger = console, dispatchLogs = dispatchLogsRepository } = options;
+  const {
+    sender: explicitSender,
+    logger = console,
+    dispatchLogs = dispatchLogsRepository,
+    whatsappInstancesRepository,
+    campaignsRepository = defaultCampaignsRepository,
+    confirmDelivery = confirmProviderDelivery,
+    enqueue = addMensagensDispatchJob,
+    maxPostponements = DEFAULT_MAX_POSTPONEMENTS,
+    now = () => new Date(),
+  } = options;
 
   async function updateDispatchLogStatus(dispatchLogId, status, mensagemErro) {
     if (!dispatchLogId) {
@@ -127,8 +157,136 @@ function createMensagensDispatchProcessor(options = {}) {
     }
   }
 
+  // Best-effort, igual ao caminho de video: a mensagem ja saiu, perder a
+  // evidencia nao pode derrubar o job.
+  async function recordProviderDelivery(dispatchLogId, result) {
+    if (!dispatchLogId || typeof dispatchLogs.updateProviderDelivery !== "function") {
+      return;
+    }
+
+    try {
+      await dispatchLogs.updateProviderDelivery(dispatchLogId, extractProviderDelivery(result));
+    } catch (error) {
+      logger.error &&
+        logger.error(
+          JSON.stringify({
+            event: "mensagens_dispatch.record_provider_delivery_failed",
+            dispatch_log_id: dispatchLogId,
+            error_message: error?.message,
+          })
+        );
+    }
+  }
+
+  // Reagenda o job para depois da campanha de video em vez de disparar por cima
+  // dela. O log volta para "pendente" com o novo horario planejado, entao o
+  // relatorio mostra o adiamento em vez de uma linha parada em "processando".
+  async function postponeForVideoCampaign(job, block) {
+    const postponedCount = Number(job.data.postponed_count || 0) + 1;
+    const resumeAt = block.resumeAt.toISOString();
+
+    if (postponedCount > maxPostponements) {
+      throw new Error(
+        `Envio adiado ${maxPostponements} vezes por ${block.reason} e nao chegou a sair. ` +
+          "Reagende a mensagem para um horario fora da janela das campanhas de video."
+      );
+    }
+
+    await enqueue(
+      { ...job.data, scheduled_at: resumeAt, postponed_count: postponedCount },
+      { removeOnComplete: false, removeOnFail: false }
+    );
+
+    if (job.data.dispatch_log_id && typeof dispatchLogs.updatePlannedSchedule === "function") {
+      try {
+        await dispatchLogs.updatePlannedSchedule(job.data.dispatch_log_id, resumeAt);
+      } catch (error) {
+        logger.error &&
+          logger.error(
+            JSON.stringify({
+              event: "mensagens_dispatch.update_planned_schedule_failed",
+              dispatch_log_id: job.data.dispatch_log_id,
+              error_message: error?.message,
+            })
+          );
+      }
+    }
+
+    await updateDispatchLogStatus(job.data.dispatch_log_id, "pendente");
+
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "mensagens_dispatch.postponed",
+          job_id: job.id,
+          group_id: job.data.group_id,
+          internal_group_id: job.data.internal_group_id,
+          reason: block.reason,
+          campaign_id: block.campaign && block.campaign.id,
+          resume_at: resumeAt,
+          postponed_count: postponedCount,
+        })
+      );
+
+    return {
+      status: MENSAGENS_DISPATCH_POSTPONED_STATUS,
+      reason: block.reason,
+      resume_at: resumeAt,
+      postponed_count: postponedCount,
+    };
+  }
+
   return async function mensagensDispatchWorker(job) {
     const startedAt = new Date().toISOString();
+
+    // Antes de qualquer coisa: mensagem pontual nao divide a sessao do WhatsApp
+    // com campanha de video. A checagem e refeita aqui (e nao apenas no
+    // agendamento) porque a campanha pode ter sido criada depois, ou ter
+    // estourado a janela original.
+    const block = await resolveAdHocDispatchBlock({ campaignsRepository, at: now() }).catch((error) => {
+      // Falha ao consultar campanhas nao pode virar mensagem nao enviada: segue
+      // o fluxo normal e registra.
+      logger.error &&
+        logger.error(
+          JSON.stringify({
+            event: "mensagens_dispatch.exclusivity_check_failed",
+            job_id: job.id,
+            error_message: error?.message,
+          })
+        );
+
+      return null;
+    });
+
+    if (block) {
+      try {
+        return await postponeForVideoCampaign(job, block);
+      } catch (error) {
+        const failedAt = new Date().toISOString();
+
+        await job.updateData({
+          ...job.data,
+          status: MENSAGENS_DISPATCH_FAILED_STATUS,
+          failed_at: failedAt,
+          error_message: error.message,
+        });
+        await updateDispatchLogStatus(job.data.dispatch_log_id, "falhou", error.message);
+
+        logger.error &&
+          logger.error(
+            JSON.stringify({
+              event: "mensagens_dispatch.postpone_failed",
+              job_id: job.id,
+              group_id: job.data.group_id,
+              internal_group_id: job.data.internal_group_id,
+              failed_at: failedAt,
+              error_message: error.message,
+            })
+          );
+
+        throw error;
+      }
+    }
 
     await job.updateData({
       ...job.data,
@@ -160,7 +318,24 @@ function createMensagensDispatchProcessor(options = {}) {
         sendParams.content = job.data.content;
       }
 
+      // Resolvido por job (e nao uma vez no processor) porque cada grupo da
+      // janela pode ter caido em uma instancia diferente do rodizio.
+      const sender =
+        explicitSender || (await resolveInstanceSender(job.data.whatsapp_instance_id, { whatsappInstancesRepository }));
       const result = await sender(sendParams);
+      // A Evolution responde 200 mesmo em recusa: sem esta checagem o log virava
+      // "enviado" e o relatorio mostrava entrega que nao ocorreu.
+      assertDeliveryConfirmed(result);
+      // E aceite tambem nao e entrega: so vira "enviado" depois que o WhatsApp
+      // confirma o ACK da mensagem.
+      result.delivery_confirmation = await confirmDelivery(result, {
+        logger,
+        context: {
+          job_id: job.id,
+          group_id: job.data.group_id,
+          internal_group_id: job.data.internal_group_id,
+        },
+      });
       const completedAt = new Date().toISOString();
 
       await job.updateData({
@@ -171,6 +346,7 @@ function createMensagensDispatchProcessor(options = {}) {
       });
 
       await updateDispatchLogStatus(job.data.dispatch_log_id, "enviado");
+      await recordProviderDelivery(job.data.dispatch_log_id, result);
 
       logger.info &&
         logger.info(
@@ -224,12 +400,32 @@ function createMensagensDispatchProcessor(options = {}) {
 const mensagensDispatchWorker = createMensagensDispatchProcessor();
 
 function createMensagensDispatchWorker(options = {}) {
-  const { sender = sendToEvolution, logger = console, dispatchLogs = dispatchLogsRepository, ...workerOptions } = options;
+  const {
+    sender,
+    logger = console,
+    dispatchLogs = dispatchLogsRepository,
+    whatsappInstancesRepository,
+    campaignsRepository,
+    maxPostponements,
+    ...workerOptions
+  } = options;
 
   return createWorker(
     queueNames.mensagensDispatch,
-    createMensagensDispatchProcessor({ sender, logger, dispatchLogs }),
-    workerOptions
+    createMensagensDispatchProcessor({
+      sender,
+      logger,
+      dispatchLogs,
+      whatsappInstancesRepository,
+      campaignsRepository,
+      maxPostponements,
+    }),
+    {
+      // O job agora espera o ACK do WhatsApp; sem esticar o lock a BullMQ
+      // consideraria o job travado e o reentregaria no meio da confirmacao.
+      lockDuration: resolveMensagensDispatchJobTimeoutMs(),
+      ...workerOptions,
+    }
   );
 }
 
@@ -241,6 +437,7 @@ module.exports = {
   MENSAGENS_DISPATCH_FAILED_STATUS,
   MENSAGENS_DISPATCH_INITIAL_STATUS,
   MENSAGENS_DISPATCH_JOB_NAME,
+  MENSAGENS_DISPATCH_POSTPONED_STATUS,
   MENSAGENS_DISPATCH_PROCESSING_STATUS,
   MENSAGENS_DISPATCH_SUCCESS_STATUS,
   addJitteredMensagensDispatchJobs,

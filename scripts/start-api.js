@@ -18,6 +18,19 @@ const server = app.listen(port, () => {
   console.log(`Aplicacao web: http://127.0.0.1:${port}/app/index.html`);
 });
 
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(
+      `Porta ${port} ja esta em uso por outro processo. Feche-o (ou finalize o node.exe pendente) e tente novamente.`
+    );
+    process.exit(1);
+    return;
+  }
+
+  console.error("Falha ao iniciar o servidor:", error.message);
+  process.exit(1);
+});
+
 // A geracao de legendas de um disparo roda em background dentro deste processo
 // (dispatchCampaign inicia e nao aguarda). Sem estes handlers, qualquer excecao
 // ou rejeicao solta nesse trabalho - ou em qualquer EventEmitter de terceiros -
