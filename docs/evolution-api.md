@@ -152,6 +152,132 @@ await sendToEvolution({
 
 Tambem e possivel enviar um arquivo local informando `content.filePath`. Nesse caso, o wrapper converte o arquivo para base64 antes do envio.
 
+## Confirmacao de entrega (por que "enviado" nao era "enviado")
+
+A resposta HTTP de `POST /message/sendMedia` e `POST /message/sendText` significa
+apenas que a Evolution **aceitou** a mensagem. Ela devolve `data.key.id` e
+`data.status: "PENDING"`, grava a mensagem no banco dela e so troca esse status
+quando o WhatsApp confirma o recebimento:
+
+```text
+PENDING -> SERVER_ACK -> DELIVERY_ACK -> READ (ou PLAYED)
+```
+
+Enquanto a aplicacao marcava o log como `enviado` so por a chamada HTTP ter dado
+200, aceite e entrega ficavam indistinguiveis no relatorio - e foi assim que
+campanhas apareceram como entregues sem ninguem ter recebido nada.
+
+### O ACK nao existe para mensagem enviada a grupo
+
+Isso limita o alcance da confirmacao, e a limitacao e estrutural. Medido na
+instancia real (04/08/2026):
+
+| Populacao | Resultado |
+| --- | --- |
+| 18 mensagens enviadas pela API a grupo (`source='web'`, 11 video + 7 texto) | **todas** em `PENDING`, nenhuma com linha em `MessageUpdate` |
+| 352 linhas de ACK em `MessageUpdate` (270 `DELIVERY_ACK`, 82 `READ`, 10 `PLAYED`) | **todas** de `remoteJid` fora de grupo |
+
+Ou seja: `PENDING` numa mensagem de grupo nao quer dizer nada. Nao e "nao chegou",
+e "nao existe ACK para consultar". O WhatsApp entrega recibo por participante em
+grupo, e o Baileys/Evolution nao converte isso em `Message.status`.
+
+A consequencia pratica de ignorar isso foi tratar a falta de ACK como falha: os
+disparos de campanha - que sao todos para grupo - eram reprovados em bloco. Video
+que chegou ao grupo aparecia como "Falhou", cada log gerava notificacao de falha
+no WhatsApp e o sweep de `dispatch-failure-retry` estava livre para reenviar o
+mesmo video. Trocar "entregue sem lastro" por "falhou com a mensagem no grupo" nao
+resolvia nada; so invertia o lado da mentira.
+
+Se a Evolution passar a gravar ACK de grupo, nada precisa mudar: o ACK confirmado
+e reconhecido em qualquer destino, e o selo vira "Confirmado" automaticamente.
+
+### De onde vem o ACK
+
+Na v2.3.7 nao da para ler esse estado pela API: `POST /chat/findMessages` nao
+inclui `Message.status` no `select` do Prisma, e a relacao `MessageUpdate` volta
+vazia mesmo para mensagens de grupo que ja chegaram a `READ` (verificado contra a
+instancia real). O unico caminho confiavel e consultar o Postgres da propria
+Evolution:
+
+```sql
+SELECT status FROM "Message" WHERE "key"->>'id' = '<provider_message_id>';
+```
+
+E o que `src/services/evolution-message-status.js` faz, usando as variaveis
+`EVOLUTION_DB_*` (ou `EVOLUTION_DB_URL`). Para conferir a mao qual foi o destino
+de cada envio de um dia:
+
+```bash
+docker exec estimulo-evolution-postgres psql -U evolution -d evolution -c \
+  "SELECT to_timestamp(m.\"messageTimestamp\") AT TIME ZONE 'America/Sao_Paulo' AS ts,
+          m.\"key\"->>'remoteJid' AS jid, m.status
+     FROM \"Message\" m
+    WHERE m.\"key\"->>'fromMe' = 'true'
+    ORDER BY m.\"messageTimestamp\" DESC LIMIT 20;"
+```
+
+Numa conversa fora de grupo, uma sequencia de `PENDING` significa que a sessao do
+WhatsApp aceitou as mensagens mas nao esta entregando - reconecte o numero em
+Configuracoes > WhatsApp. Em grupo, `PENDING` e o estado normal e permanente (ver
+a secao acima): nao serve como diagnostico.
+
+Para separar as duas populacoes de uma vez:
+
+```bash
+docker exec estimulo-evolution-postgres psql -U evolution -d evolution -c \
+  "SELECT u.\"fromMe\", (u.\"remoteJid\" LIKE '%@g.us') AS is_group, u.status, count(*)
+     FROM \"MessageUpdate\" u GROUP BY 1,2,3 ORDER BY 4 DESC;"
+```
+
+### Como o envio usa isso
+
+Depois do aceite, `confirmProviderDelivery` (em
+`src/services/delivery-confirmation.js`) consulta o ACK a cada
+`DELIVERY_CONFIRMATION_POLL_INTERVAL_MS`, ate
+`DELIVERY_CONFIRMATION_TIMEOUT_MS` fora de grupo e ate
+`DELIVERY_CONFIRMATION_GROUP_TIMEOUT_MS` em grupo (janela curta: nao ha ACK para
+esperar, so vale dar tempo de a Evolution persistir a mensagem e de um ACK de erro
+aparecer). O resultado decide o log:
+
+| Situacao | Log | Status no relatorio | Selo de confirmacao |
+| --- | --- | --- | --- |
+| ACK em SERVER_ACK/DELIVERY_ACK/READ/PLAYED | `enviado` | "Enviado" | "Confirmado" (verde) |
+| Grupo, sem ACK ate o prazo | `enviado` com `provider_status=SEM_ACK_DE_GRUPO` | "Enviado" | "Sem ACK (grupo)" (neutro) |
+| Fora de grupo, PENDING ate o prazo | `falhou` | "Falhou", com o motivo na dica | — |
+| Provedor devolve ERROR/SERVER_ERROR | `falhou` | "Falhou" | — |
+| Nao foi possivel consultar o ACK | `enviado` com `provider_status=NAO_VERIFICADO` | "Enviado" | "Nao verificado" (ambar) |
+
+Status e confirmacao sao duas colunas porque respondem perguntas diferentes - "o
+envio saiu?" e "alguem confirmou o recebimento?". Enquanto dividiam a mesma
+celula, "enviado sem ACK" tinha de ser pintado como entrega ou como problema, e
+nenhuma das duas leituras era verdade em grupo.
+
+As linhas de `SEM_ACK_DE_GRUPO` e `NAO_VERIFICADO` sao propositais: nem a ausencia
+de um sinal que nao existe (grupo) nem uma falha de infraestrutura nossa (banco da
+Evolution inalcancavel, driver ausente, `DELIVERY_CONFIRMATION_ENABLED=false`)
+podem reprovar um envio que provavelmente deu certo - mas tambem nao podem ser
+vendidas como entrega confirmada.
+
+`dispatch-failure-retry` trata "nao confirmou a entrega" como falha **permanente**:
+nesse caso a mensagem ja saiu e a midia ja subiu, entao reenviar duplicaria o
+conteudo no grupo sem chance de mudar o ACK. Isso tambem protege os logs
+falso-negativo gravados antes desta correcao.
+
+## Exclusividade entre disparo pontual e campanha de video
+
+As duas coisas usam a mesma sessao do WhatsApp. Mensagem pontual nao sai enquanto
+houver campanha de video em voo, e a regra nao olha grupo nenhum
+(`src/services/dispatch-exclusivity.js`):
+
+- **Ao agendar** (`POST /mensagens/dispatch/schedule`): janela que cruza a de uma
+  campanha de video ativa e recusada com HTTP 409.
+- **Ao enviar agora** (`POST /mensagens/dispatch`): recusado com HTTP 409 durante
+  a campanha.
+- **No worker**: a campanha pode ter sido criada depois do agendamento, entao a
+  checagem e refeita no momento do envio. Se houver campanha em voo, o job e
+  reenfileirado para o fim da janela dela (mais um minuto de folga) e o log volta
+  para `pendente` com o novo horario planejado, ate o limite de 12 adiamentos.
+
 ## Ver logs e encerrar
 
 Logs da Evolution API:

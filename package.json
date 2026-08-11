@@ -41,9 +41,10 @@
     "seed": "node scripts/seed.js",
     "transcribe-videos": "node scripts/transcribe-all-videos.js",
     "gemini:files-cleanup": "node scripts/gemini-files-cleanup.js",
-    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/trilhas-repository.test.js && node tests/services.test.js && node tests/gemini-adapter.test.js && node tests/ai-http-utils.test.js && node tests/video-audio-extraction.test.js && node tests/video-compression.test.js && node tests/ai-settings-service.test.js && node tests/caption-review-service.test.js && node tests/video-transcription-service.test.js && node tests/video-captions-service.test.js && node tests/google-drive-video-indexer.test.js && node tests/google-drive-video-download.test.js && node tests/google-drive-video-index-state.test.js && node tests/google-drive-video-index-schedule.test.js && node tests/network-config.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/access-gate.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/dispatch-google-drive-video.test.js && node tests/campaign-trigger-processor.test.js && node tests/campaign-dispatch-window-shift.test.js && node tests/group-sync-schedule.test.js && node tests/settings-repository.test.js && node tests/settings-service.test.js && node tests/group-profiles-repository.test.js && node tests/group-profiles-service.test.js && node tests/whatsapp-instances-repository.test.js && node tests/whatsapp-instances-service.test.js && node tests/dispatch-jitter-instance-rotation.test.js && node tests/dispatch-instance-sender-resolution.test.js && node tests/notifications-service.test.js && node tests/campaign-groups-repository.test.js && node tests/dispatch-notifications.test.js && node tests/dispatch-failure-retry-processor.test.js && node tests/campaign-video-captions-service.test.js && node tests/campaign-video-captions-repository.test.js && node tests/evolution.test.js && node tests/dispatch-media-payload-limit.test.js",
+    "test": "node tests/supabase.test.js && node tests/repositories.test.js && node tests/trilhas-repository.test.js && node tests/services.test.js && node tests/gemini-adapter.test.js && node tests/ai-http-utils.test.js && node tests/video-audio-extraction.test.js && node tests/video-compression.test.js && node tests/ai-settings-service.test.js && node tests/caption-review-service.test.js && node tests/video-transcription-service.test.js && node tests/video-captions-service.test.js && node tests/google-drive-video-indexer.test.js && node tests/google-drive-video-download.test.js && node tests/google-drive-video-index-state.test.js && node tests/google-drive-video-index-schedule.test.js && node tests/network-config.test.js && node tests/integration-dispatch-flow.test.js && node tests/seed.test.js && node tests/api.test.js && node tests/access-gate.test.js && node tests/group-video-flow.test.js && node tests/dispatch-jitter.test.js && node tests/dispatch-google-drive-video.test.js && node tests/campaign-trigger-processor.test.js && node tests/campaign-dispatch-window-shift.test.js && node tests/group-sync-schedule.test.js && node tests/settings-repository.test.js && node tests/settings-service.test.js && node tests/group-profiles-repository.test.js && node tests/group-profiles-service.test.js && node tests/whatsapp-instances-repository.test.js && node tests/whatsapp-instances-service.test.js && node tests/dispatch-jitter-instance-rotation.test.js && node tests/dispatch-instance-sender-resolution.test.js && node tests/notifications-service.test.js && node tests/campaign-groups-repository.test.js && node tests/dispatch-notifications.test.js && node tests/dispatch-failure-retry-processor.test.js && node tests/campaign-video-captions-service.test.js && node tests/campaign-video-captions-repository.test.js && node tests/evolution.test.js && node tests/dispatch-media-payload-limit.test.js && node tests/campaign-window-conflict.test.js && node tests/delivery-ack-confirmation.test.js && node tests/dispatch-exclusivity.test.js",
     "test:video-compression": "node tests/video-compression.test.js",
     "test:dispatch-media-limit": "node tests/dispatch-media-payload-limit.test.js",
+    "test:delivery-confirmation": "node tests/delivery-ack-confirmation.test.js && node tests/dispatch-exclusivity.test.js",
     "test:ai-http-utils": "node tests/ai-http-utils.test.js"
   },
   "repository": {
@@ -67,9 +68,8 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "googleapis": "^173.0.0",
-    "ioredis": "^5.11.1"
-  },
-  "devDependencies": {
+    "ioredis": "^5.11.1",
     "pg": "^8.22.0"
-  }
+  },
+  "devDependencies": {}
 }

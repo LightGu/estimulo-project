@@ -423,6 +423,22 @@
         return GROUP_SEGMENT_TO_TRAIL_PROFILE[segmento] || segmento;
       }
 
+      // Nomes de todas as trilhas, carregados uma vez no início. Sem isso o mapa só
+      // era preenchido quando o operador abria o seletor de trilha de um grupo, e a
+      // coluna "Trilha selecionada" mostrava "Sem trilha" para grupos que têm
+      // trilha_id — só os grupos com o campo legado trilha_override apareciam.
+      async function loadTrilhaNames() {
+        try {
+          const trilhas = await requestJson("/trilhas");
+          const list = Array.isArray(trilhas) ? trilhas : [];
+          list.forEach((trail) => {
+            state.trilhaNameById.set(trail.id, `${trail.macrotema} - ${trail.trilha}`);
+          });
+        } catch (error) {
+          // A tela continua utilizável sem os nomes; o rótulo cai no fallback.
+        }
+      }
+
       async function loadTrailsForProfile(segmento) {
         if (!segmento) return [];
         if (state.trailsByProfile.has(segmento)) return state.trailsByProfile.get(segmento);
@@ -447,7 +463,12 @@
 
       function resolveTrilhaLabel(g) {
         if (g.trilha_id) {
-          return state.trilhaNameById.get(g.trilha_id) || g.trilha_override || null;
+          // Último fallback: /groups/:id/video-progress também devolve o nome da
+          // trilha atual, então o rótulo não desaparece se /trilhas falhar.
+          const progress = state.progressByGroup.get(g.id);
+          const fromProgress = progress && progress.current ? progress.current.trilha : null;
+
+          return state.trilhaNameById.get(g.trilha_id) || g.trilha_override || fromProgress || null;
         }
 
         return g.trilha_override || null;
@@ -1379,6 +1400,7 @@
           const [groups, organizations] = await Promise.all([
             requestJson("/groups/search"),
             requestJson("/organizations"),
+            loadTrilhaNames(),
           ]);
           state.groups = Array.isArray(groups) ? groups : [];
           state.organizations = Array.isArray(organizations) ? organizations : [];

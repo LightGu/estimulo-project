@@ -31,6 +31,10 @@ function createCampaignsController(dependencies = {}) {
         return res.status(404).json({ error: message });
       }
 
+      if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
+        return res.status(409).json({ error: message, conflicts: error.conflicts });
+      }
+
       console.error(
         JSON.stringify({
           event: "campaigns.create.failed",
@@ -108,6 +112,10 @@ function createCampaignsController(dependencies = {}) {
 
       if (message === "Group not found") {
         return res.status(404).json({ error: message });
+      }
+
+      if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
+        return res.status(409).json({ error: message, conflicts: error.conflicts });
       }
 
       console.error(

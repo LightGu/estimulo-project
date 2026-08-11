@@ -19,6 +19,12 @@ const FAILED_STATUS = "falhou";
 // cada retry so repete o download do video do Drive e a montagem do mesmo
 // payload recusado — ate esgotar MAX_RETRY_ATTEMPTS. Sem legenda aprovada ou com
 // credencial/grupo invalidos vale o mesmo raciocinio.
+// "Nao confirmou a entrega" tambem entra aqui, e por um motivo diferente dos
+// outros: nesse caso a Evolution ACEITOU o envio e a midia ja subiu para o
+// WhatsApp. Reenviar nao muda o ACK (para grupo ele simplesmente nao existe - ver
+// services/delivery-confirmation.js) e arrisca postar o mesmo video de novo no
+// grupo que ja recebeu. Logs antigos com essa mensagem, gravados antes de a regra
+// de grupo ser corrigida, sao falso-negativo: precisam ficar de fora do sweep.
 const PERMANENT_FAILURE_PATTERNS = [
   /HTTP 413/i,
   /HTTP 40[0134]/i,
@@ -26,6 +32,7 @@ const PERMANENT_FAILURE_PATTERNS = [
   /HTTP 422/i,
   /excede o limite/i,
   /entity too large/i,
+  /nao confirmou a entrega/i,
 ];
 
 function isPermanentFailureMessage(message) {

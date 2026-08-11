@@ -4,6 +4,7 @@ const groupsRepository = require("../repositories/groups.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultCampaignVideoCaptionsService = require("./campaign-video-captions.service");
 const defaultSettingsService = require("./settings.service");
+const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
 const {
   addCampaignTriggerJob,
   createPendingDispatchLogsForCampaign: defaultCreatePendingDispatchLogsForCampaign,
@@ -168,6 +169,20 @@ function createCampaignsService(dependencies = {}) {
     });
   }
 
+  // Regra compartilhada com o disparo pontual agendado - ver
+  // campaign-window-conflict.js.
+  async function assertNoWindowConflict(groupIds, scheduleOptions, options = {}) {
+    return assertNoCampaignWindowConflict({
+      campaignsRepository: repository,
+      campaignGroupsRepository: campaignGroupsRepositoryDependency,
+      groupIds,
+      windowStart: scheduleOptions.window_start,
+      windowEnd: scheduleOptions.window_end,
+      excludeId: options.excludeId,
+      timezone: options.timezone,
+    });
+  }
+
   async function createAndQueue(payload = {}) {
     const groupIds = normalizeGroupIds(payload);
     const executionDate = normalizeScheduledDate(
@@ -189,6 +204,11 @@ function createCampaignsService(dependencies = {}) {
 
     const scheduleSettings = await resolveScheduleSettings();
     const scheduleOptions = resolveDispatchScheduleOptions(payload, executionDate, scheduleSettings);
+
+    await assertNoWindowConflict(groupIds, scheduleOptions, {
+      timezone: payload.timezone || scheduleSettings.timezone,
+    });
+
     const campaign = await createForToday({
       reference_date: executionDate,
       schedule_settings: scheduleSettings,

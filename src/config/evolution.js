@@ -25,6 +25,43 @@ const evolutionConfig = {
   maxMediaPayloadBytes: Number(process.env.EVOLUTION_API_MAX_MEDIA_PAYLOAD_BYTES || 136 * 1024 * 1024),
 };
 
+// Confirmacao de entrega: a resposta HTTP da Evolution so diz que ela aceitou a
+// mensagem, nunca que o WhatsApp entregou. Quem sabe a diferenca e o ACK
+// (PENDING -> SERVER_ACK -> DELIVERY_ACK -> READ) que a Evolution grava na
+// coluna `status` da tabela `Message` do banco dela. Como a rota
+// `POST /chat/findMessages` da v2.3.7 nao devolve esse campo (conferido contra a
+// instancia real: o `select` do Prisma omite `status`, e `MessageUpdate` vem
+// vazio ate para mensagens de grupo ja lidas), o unico jeito de ler o ACK sem
+// depender de webhook e consultar o Postgres da propria Evolution. As variaveis
+// EVOLUTION_DB_* ja existiam para o Compose; aqui elas passam a ser usadas
+// tambem como fonte de verdade da entrega.
+const deliveryConfirmationConfig = {
+  // Desligar volta ao comportamento antigo (aceite = "enviado"). Existe como
+  // valvula de escape para instalacoes em que o banco da Evolution nao e
+  // alcancavel pela aplicacao.
+  enabled: String(process.env.DELIVERY_CONFIRMATION_ENABLED || "true").toLowerCase() !== "false",
+  // Quanto tempo esperar o ACK antes de considerar o envio nao confirmado.
+  timeoutMs: Number(process.env.DELIVERY_CONFIRMATION_TIMEOUT_MS || 90000),
+  // Janela separada, curta, para destino de grupo (@g.us). O WhatsApp nao devolve
+  // ACK por mensagem que a gente manda em grupo: conferido contra a instancia
+  // real, as 18 mensagens enviadas pela API para grupo ficaram em `PENDING` para
+  // sempre e nenhuma gerou linha em `MessageUpdate`, enquanto as 352 linhas de
+  // ACK existentes (DELIVERY_ACK/READ/PLAYED) eram todas de conversa 1-a-1.
+  // Esperar os 90s cheios por um ACK que nunca vem so ocupava o worker e deixava
+  // o relatorio 90s atrasado; a janela curta ainda da tempo de a Evolution
+  // persistir a mensagem (que e a evidencia que sobra) e de um ACK de erro
+  // aparecer.
+  groupTimeoutMs: Number(process.env.DELIVERY_CONFIRMATION_GROUP_TIMEOUT_MS || 15000),
+  pollIntervalMs: Number(process.env.DELIVERY_CONFIRMATION_POLL_INTERVAL_MS || 5000),
+  databaseUrl: process.env.EVOLUTION_DB_URL || null,
+  databaseHost: process.env.EVOLUTION_DB_HOST || "localhost",
+  databasePort: Number(process.env.EVOLUTION_DB_PORT || 5433),
+  databaseUser: process.env.EVOLUTION_DB_USER || "evolution",
+  databasePassword: process.env.EVOLUTION_DB_PASSWORD || "",
+  databaseName: process.env.EVOLUTION_DB_NAME || "evolution",
+};
+
 module.exports = {
+  deliveryConfirmationConfig,
   evolutionConfig,
 };
