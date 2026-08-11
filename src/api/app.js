@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("node:path");
-const { createAccessGate } = require("./access-gate");
+const { createAuthGate } = require("./auth-gate");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createCampaignVideoCaptionsController = require("./controllers/campaign-video-captions.controller");
 const createGroupProfilesController = require("./controllers/group-profiles.controller");
@@ -48,16 +48,22 @@ function createApp(dependencies = {}) {
           callback(null, false);
         }
       },
+      // Necessario para o cookie de sessao (estimulo_session) ser aceito quando o
+      // painel e' aberto fora da porta da API (ex.: direto do file://, cenario que
+      // o fallback do nav.js/access.html cobre) - sem isso o navegador descarta o
+      // Set-Cookie de respostas cross-origin mesmo com fetch({ credentials: "include" }).
+      credentials: true,
     })
   );
   app.use(express.json());
 
   const publicRoot = path.join(__dirname, "../../public");
-  const accessGate = createAccessGate(dependencies.accessGate || {});
+  const authGate = createAuthGate(dependencies.authGate || {});
 
-  app.get("/access/status", accessGate.statusHandler);
-  app.post("/access/login", accessGate.loginHandler);
-  app.use(accessGate.middleware);
+  app.get("/access/status", authGate.statusHandler);
+  app.post("/access/login", authGate.loginHandler);
+  app.post("/access/logout", authGate.logoutHandler);
+  app.use(authGate.middleware);
   app.use(express.static(publicRoot));
 
   const campaignService = dependencies.campaignService || campaignsService;

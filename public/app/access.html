@@ -25,13 +25,17 @@
         <img src="assets/img/logo-mark.svg" alt="" class="access-logo">
         <div class="access-copy">
           <h1 id="accessTitle">Acesso ao painel</h1>
-          <p>Digite a senha para liberar esta maquina.</p>
+          <p>Entre com seu usuario e senha para continuar.</p>
         </div>
 
         <form id="accessForm" class="access-form">
           <div class="field">
+            <label for="accessUsername">Usuario</label>
+            <input id="accessUsername" name="username" type="text" autocomplete="username" required autofocus>
+          </div>
+          <div class="field">
             <label for="accessPassword">Senha</label>
-            <input id="accessPassword" name="password" type="password" autocomplete="current-password" required autofocus>
+            <input id="accessPassword" name="password" type="password" autocomplete="current-password" required>
           </div>
           <button class="btn" type="submit" id="accessButton">Entrar</button>
           <p class="access-error" id="accessError" role="alert" hidden></p>
@@ -42,6 +46,7 @@
     <script>
       (function () {
         const form = document.getElementById("accessForm");
+        const usernameInput = document.getElementById("accessUsername");
         const input = document.getElementById("accessPassword");
         const button = document.getElementById("accessButton");
         const errorEl = document.getElementById("accessError");
@@ -86,7 +91,7 @@
 
         async function checkStatus() {
           try {
-            const response = await fetch(apiUrl("/access/status"), { cache: "no-store" });
+            const response = await fetch(apiUrl("/access/status"), { cache: "no-store", credentials: "include" });
             const payload = await response.json();
             if (!payload.required || payload.authorized) goNext();
           } catch (error) {
@@ -103,18 +108,23 @@
           try {
             const response = await fetch(apiUrl("/access/login"), {
               method: "POST",
+              credentials: "include",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ password: input.value }),
+              body: JSON.stringify({ username: usernameInput.value, password: input.value }),
             });
             const payload = await response.json().catch(() => ({}));
 
+            if (response.status === 429) {
+              throw new Error(payload.error || "Muitas tentativas. Aguarde antes de tentar novamente.");
+            }
+
             if (!response.ok || !payload.authorized) {
-              throw new Error(payload.error || "Senha incorreta");
+              throw new Error(payload.error || "Usuario ou senha incorretos");
             }
 
             goNext();
           } catch (error) {
-            showError(error.message || "Senha incorreta");
+            showError(error.message || "Usuario ou senha incorretos");
             input.select();
           } finally {
             button.disabled = false;

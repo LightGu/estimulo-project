@@ -5,8 +5,8 @@ const createApp = require("../src/api/app");
 
 async function main() {
   const app = createApp({
-    accessGate: {
-      password: null,
+    authGate: {
+      enabled: false,
     },
     healthController: {
       redisClient: {
