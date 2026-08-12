@@ -15,6 +15,7 @@ const DEFAULT_AUDIO_BITRATE_KBPS = 96;
 const DEFAULT_MIN_VIDEO_BITRATE_KBPS = 300;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
+const DEFAULT_REMUX_TIMEOUT_MS = 5 * 60 * 1000;
 // O x264 nao acerta o bitrate pedido no alvo exato (overhead de container, GOP,
 // picos de cena). Miramos abaixo do orcamento para nao gastar uma recompressao
 // inteira por causa de alguns MB de estouro.
@@ -159,6 +160,138 @@ function resolveInputExtension(downloadedVideo) {
   const extension = path.extname(String((downloadedVideo && downloadedVideo.name) || "")).toLowerCase();
 
   return extension || OUTPUT_EXTENSION;
+}
+
+function isMp4Container(downloadedVideo) {
+  return String((downloadedVideo && downloadedVideo.mime_type) || "").toLowerCase() === OUTPUT_MIME_TYPE;
+}
+
+function buildRemuxFfmpegArgs(inputPath, outputPath) {
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-y",
+    "-i",
+    inputPath,
+    // -c copy troca so o container (mp4 em vez de mov/mkv/etc), sem recodificar
+    // video/audio: e quase instantaneo e sem perda, mas so funciona quando os
+    // streams de origem (tipicamente H.264/AAC em .mov de iPhone) sao aceitos
+    // dentro de um container mp4. +faststart move o moov atom para o inicio do
+    // arquivo, que o WhatsApp espera para tocar o video sem baixar tudo antes.
+    "-c",
+    "copy",
+    "-movflags",
+    "+faststart",
+    outputPath,
+  ];
+}
+
+// O WhatsApp so exibe video de container mp4 (H.264/AAC) de forma confiavel;
+// .mov, .mkv, .avi etc chegam pela Evolution API com HTTP 200 (aceite) mas o
+// destinatario nao recebe nada visivel, sem qualquer erro no nosso lado. Este
+// modulo tenta primeiro um remux (copia de stream, ~instantaneo) antes de cair
+// para a recompressao completa, que e bem mais lenta.
+async function remuxVideoToMp4(downloadedVideo, options = {}) {
+  const logger = options.logger || console;
+  const ffmpegPath = resolveFfmpegPath(options);
+  const workingDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "estimulo-remux-"));
+  const inputPath = path.join(workingDirectory, `input${resolveInputExtension(downloadedVideo)}`);
+  const outputPath = path.join(workingDirectory, `output${OUTPUT_EXTENSION}`);
+
+  try {
+    await fs.writeFile(inputPath, downloadedVideo.bytes);
+
+    const { code, signal, stderr } = await runFfmpeg(ffmpegPath, buildRemuxFfmpegArgs(inputPath, outputPath), {
+      ...options,
+      timeoutMs: options.timeoutMs || DEFAULT_REMUX_TIMEOUT_MS,
+    });
+
+    if (code !== 0) {
+      const details = String(stderr || "").trim().split("\n").slice(-5).join(" | ");
+
+      logger.warn &&
+        logger.warn(
+          JSON.stringify({
+            event: "video_compression.remux_failed",
+            video_id: downloadedVideo.video_id,
+            source_mime_type: downloadedVideo.mime_type,
+            code,
+            signal,
+            details,
+          })
+        );
+
+      return null;
+    }
+
+    const remuxedBytes = await fs.readFile(outputPath);
+
+    if (!remuxedBytes.length) {
+      return null;
+    }
+
+    const name = resolveCompressedFileName(downloadedVideo);
+
+    logger.info &&
+      logger.info(
+        JSON.stringify({
+          event: "video_compression.remux_completed",
+          video_id: downloadedVideo.video_id,
+          source_mime_type: downloadedVideo.mime_type,
+          original_bytes: downloadedVideo.bytes.length,
+          remuxed_bytes: remuxedBytes.length,
+        })
+      );
+
+    return {
+      ...downloadedVideo,
+      bytes: remuxedBytes,
+      name,
+      mime_type: OUTPUT_MIME_TYPE,
+      file_extension: OUTPUT_EXTENSION.replace(/^\./, ""),
+      remuxed: true,
+      source_mime_type: downloadedVideo.mime_type,
+      source_size_bytes: downloadedVideo.bytes.length,
+      metadata: {
+        ...(downloadedVideo.metadata || {}),
+        name,
+        mime_type: OUTPUT_MIME_TYPE,
+        size_bytes: remuxedBytes.length,
+        remuxed: true,
+        source_mime_type: downloadedVideo.mime_type,
+        source_size_bytes: downloadedVideo.bytes.length,
+      },
+    };
+  } finally {
+    await fs.rm(workingDirectory, { force: true, recursive: true }).catch(() => {});
+  }
+}
+
+// Garante que o video sai deste modulo em container mp4, que e o unico que o
+// WhatsApp exibe de forma confiavel em grupo. Tenta o remux rapido (sem perda)
+// primeiro; se ele falhar (codec incompativel, ex. HEVC/ProRes em .mov), cai
+// para a recompressao completa (que ja e usada para caber no limite de
+// payload) — ela sempre produz mp4 valido, custando apenas mais tempo de CPU.
+async function normalizeVideoContainerToMp4(downloadedVideo, options = {}) {
+  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes) || downloadedVideo.bytes.length === 0) {
+    throw new Error("Bytes do video sao obrigatorios para normalizar o container");
+  }
+
+  if (isMp4Container(downloadedVideo)) {
+    return downloadedVideo;
+  }
+
+  const remuxed = await remuxVideoToMp4(downloadedVideo, options);
+
+  if (remuxed) {
+    return remuxed;
+  }
+
+  const maxBase64Bytes = Number(options.maxBase64Bytes);
+  const fallbackBudget = Number.isFinite(maxBase64Bytes) && maxBase64Bytes > 0 ? maxBase64Bytes : base64Length(downloadedVideo.bytes.length);
+
+  return compressVideoToFitBase64Budget(downloadedVideo, { ...options, maxBase64Bytes: fallbackBudget });
 }
 
 // Recebe o objeto de downloadFromDrive e devolve o mesmo formato com os bytes
@@ -311,14 +444,19 @@ module.exports = {
   DEFAULT_MAX_ATTEMPTS,
   DEFAULT_MAX_HEIGHT,
   DEFAULT_MIN_VIDEO_BITRATE_KBPS,
+  DEFAULT_REMUX_TIMEOUT_MS,
   TARGET_FILL_RATIO,
   base64Length,
   buildCompressionFfmpegArgs,
+  buildRemuxFfmpegArgs,
   compressVideoToFitBase64Budget,
   fitsBase64Budget,
+  isMp4Container,
   maxRawBytesForBase64Budget,
+  normalizeVideoContainerToMp4,
   parseFfmpegDurationSeconds,
   probeDurationSeconds,
+  remuxVideoToMp4,
   resolveCompressedFileName,
   resolveVideoBitrateKbps,
 };
