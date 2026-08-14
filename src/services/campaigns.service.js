@@ -4,11 +4,20 @@ const groupsRepository = require("../repositories/groups.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultCampaignVideoCaptionsService = require("./campaign-video-captions.service");
 const defaultSettingsService = require("./settings.service");
+const defaultMensagensService = require("./mensagens.service");
 const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
+// Modulos inteiros (nao desestruturados): campaignTriggerQueue/dispatchQueue/
+// mensagensDispatchQueue sao getters que criam a conexao BullMQ na primeira
+// leitura - desestruturar aqui no topo do arquivo criaria as 3 filas so por
+// importar campaigns.service.js, mesmo em contexto que nunca chega a usa-las.
+const campaignTriggerQueueModule = require("../queues/campaign-trigger");
+const dispatchQueueModule = require("../queues/dispatch");
+const mensagensDispatchQueueModule = require("../queues/mensagens-dispatch");
 const {
   addCampaignTriggerJob,
   createPendingDispatchLogsForCampaign: defaultCreatePendingDispatchLogsForCampaign,
-} = require("../queues/campaign-trigger");
+  requeuePendingDispatchJobsForCampaign: defaultRequeuePendingDispatchJobsForCampaign,
+} = campaignTriggerQueueModule;
 const { formatCampaignDayName, formatDateOnlyInTimezone } = require("../utils/campaign-naming");
 
 const TRIGGER_ENQUEUE_TIMEOUT_MS = Number(process.env.CAMPAIGN_TRIGGER_ENQUEUE_TIMEOUT_MS) || 5000;
@@ -134,7 +143,25 @@ function createCampaignsService(dependencies = {}) {
   const campaignVideoCaptionsServiceDependency =
     dependencies.campaignVideoCaptionsService || defaultCampaignVideoCaptionsService;
   const settingsServiceDependency = dependencies.settingsService || defaultSettingsService;
+  const mensagensServiceDependency = dependencies.mensagensService || defaultMensagensService;
   const enqueueCampaignTrigger = dependencies.addCampaignTriggerJob || addCampaignTriggerJob;
+  const requeuePendingDispatchJobs =
+    dependencies.requeuePendingDispatchJobsForCampaign || defaultRequeuePendingDispatchJobsForCampaign;
+
+  // So resolvidas quando de fato chamadas (dentro de resumeCampaign) - sao
+  // getters que criam a conexao BullMQ na primeira leitura, e resumeCampaign e
+  // uma acao rara, nao algo que deva acontecer so por instanciar o service.
+  function getCampaignTriggerQueueDependency() {
+    return dependencies.campaignTriggerQueue || campaignTriggerQueueModule.campaignTriggerQueue;
+  }
+
+  function getDispatchQueueDependency() {
+    return dependencies.dispatchQueue || dispatchQueueModule.dispatchQueue;
+  }
+
+  function getMensagensDispatchQueueDependency() {
+    return dependencies.mensagensDispatchQueue || mensagensDispatchQueueModule.mensagensDispatchQueue;
+  }
 
   async function resolveScheduleSettings() {
     try {
@@ -262,6 +289,10 @@ function createCampaignsService(dependencies = {}) {
       }
     );
 
+    if (triggerJob && triggerJob.id) {
+      await repository.update(campaign.id, { campaign_trigger_job_id: triggerJob.id }).catch(() => undefined);
+    }
+
     return {
       campaign,
       campaign_groups: campaignGroups,
@@ -332,6 +363,16 @@ function createCampaignsService(dependencies = {}) {
       throw new Error("Campaign not found");
     }
 
+    // Fecha a corrida entre o cancelamento e a confirmacao automatica (sweep
+    // de review timeout, ou a geracao de legendas que termina depois do
+    // cancelamento): sem isto, uma campanha ja cancelada podia ainda assim
+    // ganhar logs novos e um job de trigger.
+    if (campaign.status === "cancelado") {
+      const error = new Error("Campanha foi cancelada e nao pode ser confirmada");
+      error.code = "CAMPAIGN_CANCELLED";
+      throw error;
+    }
+
     const progress = await campaignVideoCaptionsServiceDependency.getCaptionProgress(campaignId);
 
     if (progress.pendente > 0) {
@@ -392,6 +433,12 @@ function createCampaignsService(dependencies = {}) {
         TRIGGER_ENQUEUE_TIMEOUT_MS,
         "Timeout ao enfileirar campaign-trigger"
       );
+
+      // Guardado para pauseCampaign/resumeCampaign conseguirem localizar este
+      // job direto (queue.getJob(id)) em vez de escanear a fila.
+      if (triggerJob && triggerJob.id) {
+        await repository.update(campaign.id, { campaign_trigger_job_id: triggerJob.id }).catch(() => undefined);
+      }
     } catch (error) {
       triggerJobError = error.message;
       console.error &&
@@ -482,6 +529,260 @@ function createCampaignsService(dependencies = {}) {
     return repository.delete(id);
   }
 
+  // Ramo do resume para campanha de video cujo campaign-trigger ainda nao
+  // tinha disparado (trigger_fired_at nulo): tenta reagendar o mesmo job (se
+  // ainda estiver "delayed" no Redis) em vez de recriar - preserva o job_id e
+  // evita depender de removeOnFail/removeOnComplete para achar o antigo.
+  async function resumeVideoTrigger(campaign, shiftedLogs, newWindowStart, newWindowEnd) {
+    const precomputedSchedule = shiftedLogs
+      .filter((log) => log.video_id && log.horario_envio_planejado)
+      .map((log) => ({ group_id: log.group_id, video_id: log.video_id, scheduled_at: log.horario_envio_planejado }));
+
+    let triggerJob = null;
+
+    if (campaign.campaign_trigger_job_id) {
+      try {
+        triggerJob = await getCampaignTriggerQueueDependency().getJob(campaign.campaign_trigger_job_id);
+      } catch (error) {
+        triggerJob = null;
+      }
+    }
+
+    if (triggerJob) {
+      const state = await triggerJob.getState().catch(() => null);
+
+      if (state === "delayed") {
+        await triggerJob.changeDelay(Math.max(new Date(newWindowStart).getTime() - Date.now(), 0));
+        await triggerJob.updateData({
+          ...triggerJob.data,
+          execution_at: newWindowStart,
+          window_start: newWindowStart,
+          window_end: newWindowEnd,
+          precomputed_schedule: precomputedSchedule,
+        });
+        return;
+      }
+    }
+
+    const newTriggerJob = await enqueueCampaignTrigger(
+      {
+        campaign_id: campaign.id,
+        execution_at: newWindowStart,
+        window_start: newWindowStart,
+        window_end: newWindowEnd,
+        jitter_delay_min_ms: campaign.jitter_delay_min_ms,
+        jitter_delay_max_ms: campaign.jitter_delay_max_ms,
+        precomputed_schedule: precomputedSchedule,
+      },
+      { removeOnComplete: false, removeOnFail: false }
+    );
+
+    if (newTriggerJob && newTriggerJob.id) {
+      await repository.update(campaign.id, { campaign_trigger_job_id: newTriggerJob.id });
+    }
+  }
+
+  // Ramo do resume para campanha de video cujo campaign-trigger ja tinha
+  // disparado (ja existem jobs de dispatch por grupo). Tenta reagendar o job
+  // que sobreviveu no Redis (changeDelay); so recria via
+  // requeuePendingDispatchJobsForCampaign quando o job nao existe mais (ja
+  // tinha disparado-e-virado-no-op durante a pausa).
+  async function resumeVideoDispatchJobs(campaign, shiftedLogs) {
+    const missingJobLogs = [];
+
+    for (const log of shiftedLogs) {
+      let job = null;
+
+      if (log.dispatch_job_id) {
+        try {
+          job = await getDispatchQueueDependency().getJob(log.dispatch_job_id);
+        } catch (error) {
+          job = null;
+        }
+      }
+
+      if (!job) {
+        missingJobLogs.push(log);
+        continue;
+      }
+
+      const state = await job.getState().catch(() => null);
+
+      if (state === "delayed") {
+        await job.changeDelay(Math.max(new Date(log.horario_envio_planejado).getTime() - Date.now(), 0));
+      }
+      // "active" ou outro estado: nao toca - ou ja esta em voo, ou o
+      // claim/guarda de status decide o resultado quando ele rodar.
+    }
+
+    if (missingJobLogs.length) {
+      await requeuePendingDispatchJobs(campaign.id, missingJobLogs);
+    }
+  }
+
+  // Mesma logica do video, mas para campanha pontual (fila mensagens-dispatch,
+  // sem fase de trigger separada - trigger_fired_at ja nasce preenchido).
+  async function resumeTextMessages(campaign, shiftedLogs) {
+    const missingJobLogs = [];
+
+    for (const log of shiftedLogs) {
+      let job = null;
+
+      if (log.dispatch_job_id) {
+        try {
+          job = await getMensagensDispatchQueueDependency().getJob(log.dispatch_job_id);
+        } catch (error) {
+          job = null;
+        }
+      }
+
+      if (!job) {
+        missingJobLogs.push(log);
+        continue;
+      }
+
+      const state = await job.getState().catch(() => null);
+
+      if (state === "delayed") {
+        await job.changeDelay(Math.max(new Date(log.horario_envio_planejado).getTime() - Date.now(), 0));
+      }
+    }
+
+    if (missingJobLogs.length) {
+      await mensagensServiceDependency.requeuePendingMessages(campaign, missingJobLogs);
+    }
+  }
+
+  async function pauseCampaign(id) {
+    if (!id) {
+      throw new Error("Campaign id is required");
+    }
+
+    const campaign = await repository.findById(id);
+
+    if (!campaign) {
+      throw new Error("Campaign not found");
+    }
+
+    if (campaign.status !== "programado") {
+      const error = new Error(
+        "Campanha so pode ser pausada enquanto estiver programada para envio"
+      );
+      error.code = "CAMPAIGN_NOT_PAUSABLE";
+      throw error;
+    }
+
+    const pendingLogs = await dispatchLogsRepositoryDependency.listPendingByCampaign(id);
+
+    if (!pendingLogs.length) {
+      const error = new Error("Nao ha envios pendentes para pausar nesta campanha");
+      error.code = "CAMPAIGN_NOT_PAUSABLE";
+      throw error;
+    }
+
+    return repository.update(id, {
+      status: "pausado",
+      paused_at: new Date().toISOString(),
+    });
+  }
+
+  async function resumeCampaign(id) {
+    if (!id) {
+      throw new Error("Campaign id is required");
+    }
+
+    const campaign = await repository.findById(id);
+
+    if (!campaign) {
+      throw new Error("Campaign not found");
+    }
+
+    if (campaign.status !== "pausado") {
+      const error = new Error("Campanha nao esta pausada");
+      error.code = "CAMPAIGN_NOT_PAUSED";
+      throw error;
+    }
+
+    const pausedAtMs = campaign.paused_at ? new Date(campaign.paused_at).getTime() : NaN;
+    const pauseDurationMs = Number.isFinite(pausedAtMs) ? Math.max(Date.now() - pausedAtMs, 0) : 0;
+
+    let newWindowStart = campaign.window_start;
+    let newWindowEnd = campaign.window_end;
+
+    if (campaign.window_start && campaign.window_end && pauseDurationMs > 0) {
+      newWindowStart = new Date(new Date(campaign.window_start).getTime() + pauseDurationMs).toISOString();
+      newWindowEnd = new Date(new Date(campaign.window_end).getTime() + pauseDurationMs).toISOString();
+
+      const groupRows = await campaignGroupsRepositoryDependency.listGroups(id);
+
+      await assertNoWindowConflict(
+        groupRows.map((row) => row.group_id),
+        { window_start: newWindowStart, window_end: newWindowEnd },
+        { excludeId: id }
+      );
+    }
+
+    const pendingLogs = await dispatchLogsRepositoryDependency.listPendingByCampaign(id);
+    const shiftedLogs = [];
+
+    for (const log of pendingLogs) {
+      if (pauseDurationMs <= 0) {
+        shiftedLogs.push(log);
+        continue;
+      }
+
+      const currentPlannedMs = log.horario_envio_planejado ? new Date(log.horario_envio_planejado).getTime() : Date.now();
+      const newPlanned = new Date(currentPlannedMs + pauseDurationMs).toISOString();
+      const updated = await dispatchLogsRepositoryDependency.updatePlannedSchedule(log.id, newPlanned);
+      shiftedLogs.push(updated || { ...log, horario_envio_planejado: newPlanned });
+    }
+
+    // tipo decide primeiro: campanha pontual nunca passa pelo campaign-trigger
+    // (nem mesmo campanhas antigas, de antes de scheduleAdHoc gravar
+    // trigger_fired_at na criacao, e que por isso tem esse campo nulo aqui).
+    if (campaign.tipo === "pontual") {
+      await resumeTextMessages(campaign, shiftedLogs);
+    } else if (!campaign.trigger_fired_at) {
+      await resumeVideoTrigger(campaign, shiftedLogs, newWindowStart, newWindowEnd);
+    } else {
+      await resumeVideoDispatchJobs(campaign, shiftedLogs);
+    }
+
+    return repository.update(id, {
+      status: "programado",
+      paused_at: null,
+      total_paused_ms: (campaign.total_paused_ms || 0) + pauseDurationMs,
+      window_start: newWindowStart,
+      window_end: newWindowEnd,
+    });
+  }
+
+  async function cancelCampaign(id) {
+    if (!id) {
+      throw new Error("Campaign id is required");
+    }
+
+    const campaign = await repository.findById(id);
+
+    if (!campaign) {
+      throw new Error("Campaign not found");
+    }
+
+    if (campaign.status === "cancelado") {
+      return campaign;
+    }
+
+    if (campaign.status === "concluido") {
+      const error = new Error("Campanha ja concluida nao pode ser cancelada");
+      error.code = "CAMPAIGN_NOT_CANCELABLE";
+      throw error;
+    }
+
+    await dispatchLogsRepositoryDependency.cancelPendingByCampaign(id);
+
+    return repository.update(id, { status: "cancelado" });
+  }
+
   async function getById(id) {
     if (!id) {
       throw new Error("Campaign id is required");
@@ -516,6 +817,14 @@ function createCampaignsService(dependencies = {}) {
   }
 
   async function computeStatus(campaignId, campaignGroupRows, campaign) {
+    // Pausado/cancelado sao estados persistidos e definitivos daqui: recalcular
+    // por cima a partir dos logs/janela podia reclassificar uma campanha
+    // pausada como "processada" (janela ja passou) ou uma cancelada com todos
+    // os grupos ja resolvidos como "concluido", escondendo a acao do usuario.
+    if (campaign && (campaign.status === "pausado" || campaign.status === "cancelado")) {
+      return campaign.status;
+    }
+
     const groupRows = campaignGroupRows || (await campaignGroupsRepositoryDependency.listGroups(campaignId));
 
     if (!groupRows.length) {
@@ -591,12 +900,15 @@ function createCampaignsService(dependencies = {}) {
   }
 
   return {
+    cancelCampaign,
     confirmDispatch,
     create,
     createAndQueue,
     delete: remove,
     dispatchCampaign,
+    pauseCampaign,
     remove,
+    resumeCampaign,
     createForToday,
     getById,
     getGroupsDetail,

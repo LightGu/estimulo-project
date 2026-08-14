@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -21,6 +26,7 @@
     <link rel="stylesheet" href="assets/css/components.css">
   </head>
   <body data-page="relatorios">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -35,7 +41,7 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <section class="page-section">
             <div class="toolbar">
               <div class="field">
@@ -91,13 +97,17 @@
                     <th>Campanha</th>
                     <th>Conteúdo</th>
                     <th>Status</th>
-                    <th>Confirmação</th>
                   </tr>
                 </thead>
                 <tbody id="reportBody"></tbody>
               </table>
             </div>
-            <div class="actions-bar-end">
+            <div class="actions-bar-end" style="justify-content:space-between;">
+              <div class="pager" id="pagerControls" style="display:flex;align-items:center;gap:10px;">
+                <button class="btn btn-secondary" id="prevPageButton" type="button">Anterior</button>
+                <span class="text-muted" id="pageLabel"></span>
+                <button class="btn btn-secondary" id="nextPageButton" type="button">Próxima</button>
+              </div>
               <button class="btn" id="exportCsvButton" type="button">Exportar CSV</button>
             </div>
           </section>
@@ -123,27 +133,6 @@
         falhou: "badge-danger",
       };
 
-      // ACKs do WhatsApp que comprovam entrega. Espelham CONFIRMED_ACK_STATUSES
-      // em src/services/delivery-confirmation.js.
-      const ACK_CONFIRMADO = ["SERVER_ACK", "DELIVERY_ACK", "READ", "PLAYED"];
-      // Espelham as constantes de mesmo nome em delivery-confirmation.js.
-      const ACK_SEM_ACK_DE_GRUPO = "SEM_ACK_DE_GRUPO";
-      const ACK_NAO_VERIFICADO = "NAO_VERIFICADO";
-
-      function providerStatus(row) {
-        return String(row.provider_status || "").toUpperCase();
-      }
-
-      function isEntregaConfirmada(row) {
-        return ACK_CONFIRMADO.includes(providerStatus(row));
-      }
-
-      // Status e confirmacao respondem perguntas diferentes e por isso viram duas
-      // colunas: "o envio saiu?" e "alguem confirmou o recebimento?". Enquanto as
-      // duas dividiam uma celula, "enviado sem ACK" tinha de ser pintado como
-      // entrega ou como problema — e o WhatsApp nao devolve ACK de mensagem que a
-      // gente manda em grupo, ou seja, era a coluna inteira dizendo o que nao
-      // sabia.
       function dispatchStatusPresentation(row) {
         return {
           label: STATUS_LABEL[row.status] || row.status,
@@ -151,53 +140,15 @@
         };
       }
 
-      function dispatchConfirmationPresentation(row) {
-        if (row.status !== "enviado") {
-          return { label: "—", badgeClass: null, tip: "" };
-        }
-
-        if (isEntregaConfirmada(row)) {
-          return {
-            label: "Confirmado",
-            badgeClass: "badge-success",
-            tip: "O WhatsApp confirmou o recebimento desta mensagem.",
-          };
-        }
-
-        if (providerStatus(row) === ACK_SEM_ACK_DE_GRUPO) {
-          return {
-            label: "Sem ACK (grupo)",
-            badgeClass: "badge-neutral",
-            tip:
-              "Normal em grupo: o WhatsApp não devolve confirmação por mensagem enviada a grupo. " +
-              "A Evolution aceitou o envio e a mídia subiu — só não existe ACK para conferir.",
-          };
-        }
-
-        if (providerStatus(row) === ACK_NAO_VERIFICADO) {
-          return {
-            label: "Não verificado",
-            badgeClass: "badge-warning",
-            tip:
-              "Não foi possível consultar a confirmação (banco da Evolution inacessível ou confirmação desligada). " +
-              "O envio foi aceito, mas ninguém checou o ACK.",
-          };
-        }
-
-        return {
-          label: "Aguardando ACK",
-          badgeClass: "badge-warning",
-          tip: "O envio foi aceito e o WhatsApp ainda não confirmou o recebimento.",
-        };
-      }
-
       const todayIso = new Date().toISOString().slice(0, 10);
+      const PAGE_SIZE = 100;
 
       const state = {
         organizations: [],
         groups: [],
         logs: [],
         timezone: null,
+        currentPage: 1,
       };
 
       function escapeHtml(value) {
@@ -241,17 +192,6 @@
         return DISPATCH_STATUS_TIP[row.status] || "";
       }
 
-      // A evidência crua (id da mensagem, estado no provedor) fica no selo de
-      // confirmação, que é onde ela responde alguma pergunta.
-      function dispatchConfirmationTip(row) {
-        const { tip } = dispatchConfirmationPresentation(row);
-        const evidencia = [
-          row.provider_status ? `estado no provedor: ${row.provider_status}` : null,
-          row.provider_message_id ? `id da mensagem: ${row.provider_message_id}` : null,
-        ].filter(Boolean);
-        return [tip, ...evidencia].filter(Boolean).join(" · ");
-      }
-
       function campaignLabel(campaign) {
         if (!campaign) return "—";
         if (campaign.tipo === "pontual") return campaign.trilha || "—";
@@ -283,6 +223,34 @@
         document.getElementById("groupFilter").innerHTML =
           '<option value="todos">Todos</option>' +
           state.groups.map((g) => `<option value="${g.id}">${escapeHtml(g.nome)}</option>`).join("");
+      }
+
+      function readFiltersFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        document.getElementById("dataInicio").value = params.get("start_date") || "";
+        document.getElementById("dataFim").value = params.get("end_date") || "";
+        document.getElementById("orgFilter").value = params.get("organization_id") || "todas";
+        document.getElementById("groupFilter").value = params.get("group_id") || "todos";
+        document.getElementById("statusFilter").value = params.get("status") || "todos";
+      }
+
+      function writeFiltersToUrl() {
+        const dataInicio = document.getElementById("dataInicio").value;
+        const dataFim = document.getElementById("dataFim").value;
+        const org = document.getElementById("orgFilter").value;
+        const group = document.getElementById("groupFilter").value;
+        const status = document.getElementById("statusFilter").value;
+
+        const params = new URLSearchParams();
+        if (dataInicio) params.set("start_date", dataInicio);
+        if (dataFim) params.set("end_date", dataFim);
+        if (org !== "todas") params.set("organization_id", org);
+        if (group !== "todos") params.set("group_id", group);
+        if (status !== "todos") params.set("status", status);
+
+        const query = params.toString();
+        const newUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+        history.replaceState(null, "", newUrl);
       }
 
       function clampToToday(inputEl) {
@@ -330,23 +298,35 @@
           .join("");
       }
 
+      function totalPages(rows) {
+        return Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      }
+
+      function renderPager(rows) {
+        const pages = totalPages(rows);
+        if (state.currentPage > pages) state.currentPage = pages;
+        document.getElementById("pageLabel").textContent = `Página ${state.currentPage} de ${pages}`;
+        document.getElementById("prevPageButton").disabled = state.currentPage <= 1;
+        document.getElementById("nextPageButton").disabled = state.currentPage >= pages;
+        document.getElementById("pagerControls").style.display = rows.length > PAGE_SIZE ? "flex" : "none";
+      }
+
       function renderTable(rows) {
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
+        renderPager(rows);
         if (!rows.length) {
           document.getElementById("reportBody").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
-        document.getElementById("reportBody").innerHTML = rows
+        const start = (state.currentPage - 1) * PAGE_SIZE;
+        const pageRows = rows.slice(start, start + PAGE_SIZE);
+        document.getElementById("reportBody").innerHTML = pageRows
           .map((r) => {
             const organizacao = r.groups?.organizations?.nome || "—";
             const grupo = r.groups?.nome || "—";
             const campanha = campaignLabel(r.campaigns);
             const conteudo = r.video_catalog?.nome_do_arquivo || "—";
             const { label: statusLabel, badgeClass } = dispatchStatusPresentation(r);
-            const confirmacao = dispatchConfirmationPresentation(r);
-            const confirmacaoCell = confirmacao.badgeClass
-              ? `<span class="badge has-tip ${confirmacao.badgeClass}" data-tip="${escapeHtml(dispatchConfirmationTip(r))}" data-tip-tone="${confirmacao.badgeClass.replace("badge-", "")}">${confirmacao.label}</span>`
-              : `<span class="text-muted">${confirmacao.label}</span>`;
             return `
             <tr>
               <td class="mono">${formatDateTime(r.criado_em)}</td>
@@ -356,13 +336,14 @@
               <td>${escapeHtml(campanha)}</td>
               <td>${escapeHtml(conteudo)}</td>
               <td><span class="badge has-tip ${badgeClass}" data-tip="${escapeHtml(dispatchStatusTip(r))}" data-tip-tone="${badgeClass.replace("badge-", "")}">${statusLabel}</span></td>
-              <td>${confirmacaoCell}</td>
             </tr>`;
           })
           .join("");
       }
 
-      async function renderAll() {
+      async function renderAll({ resetPage = false } = {}) {
+        if (resetPage) state.currentPage = 1;
+        writeFiltersToUrl();
         try {
           await fetchLogs();
           renderSummary(state.logs);
@@ -378,7 +359,7 @@
         })
       );
 
-      document.getElementById("applyFiltersButton").addEventListener("click", renderAll);
+      document.getElementById("applyFiltersButton").addEventListener("click", () => renderAll({ resetPage: true }));
 
       document.getElementById("clearFiltersButton").addEventListener("click", () => {
         document.getElementById("dataInicio").value = "";
@@ -386,7 +367,21 @@
         document.getElementById("orgFilter").value = "todas";
         document.getElementById("groupFilter").value = "todos";
         document.getElementById("statusFilter").value = "todos";
-        renderAll();
+        renderAll({ resetPage: true });
+      });
+
+      document.getElementById("prevPageButton").addEventListener("click", () => {
+        if (state.currentPage > 1) {
+          state.currentPage--;
+          renderTable(state.logs);
+        }
+      });
+
+      document.getElementById("nextPageButton").addEventListener("click", () => {
+        if (state.currentPage < totalPages(state.logs)) {
+          state.currentPage++;
+          renderTable(state.logs);
+        }
       });
 
       function toCsvValue(value) {
@@ -403,9 +398,6 @@
           "Campanha",
           "Conteúdo",
           "Status",
-          "Confirmação",
-          "Estado no provedor",
-          "ID da mensagem no provedor",
         ];
         const lines = [headers.join(";")].concat(
           state.logs.map((r) =>
@@ -417,9 +409,6 @@
               campaignLabel(r.campaigns),
               r.video_catalog?.nome_do_arquivo || "",
               dispatchStatusPresentation(r).label,
-              dispatchConfirmationPresentation(r).label,
-              r.provider_status || "",
-              r.provider_message_id || "",
             ]
               .map(toCsvValue)
               .join(";")
@@ -459,6 +448,7 @@
           state.timezone = (scheduleSettings && scheduleSettings.timezone) || null;
           updateTimezoneLabel();
           populateFilters();
+          readFiltersFromUrl();
           await renderAll();
         } catch (error) {
           renderLoadError(error);

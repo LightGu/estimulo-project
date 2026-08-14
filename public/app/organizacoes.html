@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -37,6 +42,7 @@
     </style>
   </head>
   <body data-page="organizacoes">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -51,7 +57,7 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <section class="page-section">
             <div class="toolbar">
               <div class="field" style="min-width:260px;">
@@ -69,7 +75,7 @@
     </div>
 
     <div class="overlay" id="orgOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="orgModalTitle">
         <div class="modal-header">
           <h3 id="orgModalTitle">Nova organização</h3>
           <button class="icon-btn-close" id="closeOrgModal" type="button" aria-label="Fechar">&times;</button>
@@ -97,7 +103,7 @@
     </div>
 
     <div class="overlay" id="orgInfoOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="orgInfoTitle">
         <div class="modal-header">
           <h3 id="orgInfoTitle">Organização</h3>
           <button class="icon-btn-close" id="closeOrgInfoModal" type="button" aria-label="Fechar">&times;</button>
@@ -127,6 +133,8 @@
       };
       let editingOrgId = null;
       let infoOrgId = null;
+      let orgModalReleaseTrap = null;
+      let orgInfoModalReleaseTrap = null;
 
       function escapeHtml(value) {
         return String(value === null || value === undefined ? "" : value)
@@ -167,14 +175,14 @@
 
             return `
               <div class="org-item${index === 0 ? " open" : ""}" data-org="${escapeHtml(org.id)}">
-                <div class="org-item-head" data-toggle="${escapeHtml(org.id)}">
+                <div class="org-item-head" data-toggle="${escapeHtml(org.id)}" aria-expanded="${index === 0 ? "true" : "false"}" aria-label="Organização ${escapeHtml(org.nome)}">
                   <div>
                     <strong>${escapeHtml(org.nome)}</strong>
                     <div class="text-faint" style="font-size:12.5px;margin-top:2px;">${groups.length} grupo(s) sincronizado(s)</div>
                   </div>
                   <div class="org-meta">
                     <button class="kebab-btn" data-info-toggle="${escapeHtml(org.id)}" type="button" aria-label="Mais opções">&#8942;</button>
-                    <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+                    <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
                   </div>
                 </div>
                 <div class="org-item-body">
@@ -207,18 +215,22 @@
           .join("");
 
         document.querySelectorAll("[data-toggle]").forEach((head) => {
-          head.addEventListener("click", () => {
+          const activate = () => {
             const item = head.closest(".org-item");
             const wasOpen = item.classList.contains("open");
 
             document.querySelectorAll(".org-item.open").forEach((openItem) => {
               openItem.classList.remove("open");
+              openItem.querySelector("[data-toggle]").setAttribute("aria-expanded", "false");
             });
 
             if (!wasOpen) {
               item.classList.add("open");
+              head.setAttribute("aria-expanded", "true");
             }
-          });
+          };
+          head.addEventListener("click", activate);
+          window.estimuloMakeKeyboardClickable(head, activate);
         });
 
         document.querySelectorAll("[data-info-toggle]").forEach((button) => {
@@ -244,11 +256,16 @@
         document.getElementById("orgInfoStatus").textContent = "";
         document.getElementById("orgInfoStatus").className = "status-line";
         document.getElementById("orgInfoOverlay").hidden = false;
+        orgInfoModalReleaseTrap = window.estimuloTrapFocus(document.getElementById("orgInfoOverlay"));
       }
 
       function closeOrgInfoModal() {
         document.getElementById("orgInfoOverlay").hidden = true;
         infoOrgId = null;
+        if (orgInfoModalReleaseTrap) {
+          orgInfoModalReleaseTrap();
+          orgInfoModalReleaseTrap = null;
+        }
       }
 
       async function deleteOrgFromInfoModal() {
@@ -270,7 +287,7 @@
         const status = document.getElementById("orgInfoStatus");
 
         deleteButton.disabled = true;
-        status.textContent = "Excluindo organização...";
+        status.textContent = "Excluindo organização…";
         status.className = "status-line";
 
         try {
@@ -303,11 +320,16 @@
         document.getElementById("orgModalStatus").textContent = "";
         document.getElementById("orgModalStatus").className = "status-line";
         document.getElementById("orgOverlay").hidden = false;
+        orgModalReleaseTrap = window.estimuloTrapFocus(document.getElementById("orgOverlay"));
       }
 
       function closeOrgModal() {
         document.getElementById("orgOverlay").hidden = true;
         editingOrgId = null;
+        if (orgModalReleaseTrap) {
+          orgModalReleaseTrap();
+          orgModalReleaseTrap = null;
+        }
       }
 
       async function saveOrgModal() {
@@ -326,7 +348,7 @@
         }
 
         saveButton.disabled = true;
-        status.textContent = "Salvando organização...";
+        status.textContent = "Salvando organização…";
         status.className = "status-line";
 
         try {
@@ -390,11 +412,17 @@
         if (event.target.id === "orgOverlay") closeOrgModal();
       });
       document.getElementById("saveOrgModal").addEventListener("click", saveOrgModal);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !document.getElementById("orgOverlay").hidden) closeOrgModal();
+      });
 
       document.getElementById("closeOrgInfoModal").addEventListener("click", closeOrgInfoModal);
       document.getElementById("cancelOrgInfoModal").addEventListener("click", closeOrgInfoModal);
       document.getElementById("orgInfoOverlay").addEventListener("click", (event) => {
         if (event.target.id === "orgInfoOverlay") closeOrgInfoModal();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !document.getElementById("orgInfoOverlay").hidden) closeOrgInfoModal();
       });
       document.getElementById("deleteFromOrgInfoModal").addEventListener("click", deleteOrgFromInfoModal);
       document.getElementById("editFromOrgInfoModal").addEventListener("click", () => {

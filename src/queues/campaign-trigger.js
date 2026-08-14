@@ -5,6 +5,7 @@ const campaignGroupsRepository = require("../repositories/campaign-groups.reposi
 const campaignVideoCaptionsRepository = require("../repositories/campaign-video-captions.repository");
 const campaignsRepository = require("../repositories/campaigns.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
+const groupsRepository = require("../repositories/groups.repository");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
@@ -682,16 +683,40 @@ function hasExistingDispatchLog(existingLogs, payload) {
   ));
 }
 
+// Best-effort: grava o id do job do BullMQ no log correspondente, para o
+// resume conseguir localiza-lo direto (queue.getJob(id)) em vez de escanear a
+// fila. Perder este id so degrada o resume para o caminho de recriar o job do
+// zero - nunca pode impedir o envio atual.
+async function recordDispatchJobId(dispatchLogs, log, job, logger = console) {
+  if (!log || !log.id || !job || !job.id || typeof dispatchLogs.updateDispatchJobId !== "function") {
+    return;
+  }
+
+  try {
+    await dispatchLogs.updateDispatchJobId(log.id, job.id);
+  } catch (error) {
+    logger.error &&
+      logger.error(
+        JSON.stringify({
+          event: "dispatch_log.record_job_id_failed",
+          log_id: log.id,
+          job_id: job.id,
+          error_message: error.message,
+        })
+      );
+  }
+}
+
 async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs, logger = console) {
   if (!dispatchLogs || typeof dispatchLogs.createLog !== "function" || !Array.isArray(dispatchJobs)) {
     return 0;
   }
 
-  const payloads = dispatchJobs
-    .map(extractDispatchLogPayloadFromJob)
-    .filter(Boolean);
+  const entries = dispatchJobs
+    .map((job) => ({ job, payload: extractDispatchLogPayloadFromJob(job) }))
+    .filter((entry) => entry.payload);
 
-  if (payloads.length === 0) {
+  if (entries.length === 0) {
     return 0;
   }
 
@@ -700,7 +725,7 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
     : [];
   let created = 0;
 
-  for (const payload of payloads) {
+  for (const { job, payload } of entries) {
     const existingLog = existingLogs.find((entry) => (
       entry.campaign_id === payload.campaign_id &&
       entry.group_id === payload.group_id &&
@@ -736,12 +761,14 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
             })
           );
       }
+      await recordDispatchJobId(dispatchLogs, existingLog, job, logger);
       continue;
     }
 
     const log = await dispatchLogs.createLog(payload);
     existingLogs.push(log || payload);
     created += 1;
+    await recordDispatchJobId(dispatchLogs, log, job, logger);
 
     logger.info &&
       logger.info(
@@ -756,6 +783,95 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
   }
 
   return created;
+}
+
+// Usado pelo resumeCampaign quando o campaign-trigger ja tinha disparado (ja
+// existiam jobs de disparo por grupo) e o job original de algum log pendente
+// nao sobreviveu no Redis (ex.: ja tinha disparado-e-virado-no-op durante a
+// pausa). Recria o job so para esses logs, reaproveitando video/legenda ja
+// fixados no log - nao pode re-resolver "proximo video", so reenviar o que ja
+// estava decidido.
+async function requeuePendingDispatchJobsForCampaign(campaignId, pendingLogs, options = {}) {
+  const {
+    groupsRepository: groupsRepositoryOption = groupsRepository,
+    videoCatalogRepository: videoCatalogRepositoryOption = videoCatalogRepository,
+    campaignVideoCaptionsRepository: campaignVideoCaptionsRepositoryOption = campaignVideoCaptionsRepository,
+    dispatchLogs: dispatchLogsOption = dispatchLogsRepository,
+    addDispatchJob: addSingleDispatchJob = addDispatchJob,
+    logger = console,
+  } = options;
+
+  if (!Array.isArray(pendingLogs) || pendingLogs.length === 0) {
+    return [];
+  }
+
+  const { whatsappInstances, rotationGroupCount } = await resolveActiveInstancesAndRotation(options);
+  const captionRows = typeof campaignVideoCaptionsRepositoryOption.listByCampaign === "function"
+    ? await campaignVideoCaptionsRepositoryOption.listByCampaign(campaignId)
+    : [];
+  const captionByKey = new Map(
+    captionRows
+      .filter((row) => row.status === "gerado" && row.caption_text)
+      .map((row) => [`${row.group_id}::${row.video_id}`, row])
+  );
+
+  const jobs = [];
+
+  for (const [index, log] of pendingLogs.entries()) {
+    try {
+      const group = await groupsRepositoryOption.findById(log.group_id);
+
+      if (!group || !group.evolution_group_id) {
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "campaign_trigger.requeue_skipped_missing_group",
+              campaign_id: campaignId,
+              log_id: log.id,
+              group_id: log.group_id,
+            })
+          );
+        continue;
+      }
+
+      const video = log.video_id && typeof videoCatalogRepositoryOption.findById === "function"
+        ? await videoCatalogRepositoryOption.findById(log.video_id)
+        : null;
+      const caption = captionByKey.get(`${log.group_id}::${log.video_id}`);
+      const dispatchOrder = index + 1;
+
+      const job = await addSingleDispatchJob({
+        group_id: group.evolution_group_id,
+        progress_group_id: log.group_id,
+        campaign_id: campaignId,
+        video_id: log.video_id,
+        drive_file_id: video && video.drive_file_id,
+        video_catalog: video || undefined,
+        trilha_id: group.trilha_id,
+        legenda: (caption && caption.caption_text) || "",
+        caption_id: caption && caption.id,
+        caption_generated: Boolean(caption),
+        scheduled_at: log.horario_envio_planejado,
+        dispatch_order: dispatchOrder,
+        whatsapp_instance_id: resolveInstanceForOrder(dispatchOrder, whatsappInstances, rotationGroupCount),
+      });
+
+      jobs.push(job);
+      await recordDispatchJobId(dispatchLogsOption, log, job, logger);
+    } catch (error) {
+      logger.error &&
+        logger.error(
+          JSON.stringify({
+            event: "campaign_trigger.requeue_dispatch_job_failed",
+            campaign_id: campaignId,
+            log_id: log.id,
+            error_message: error.message,
+          })
+        );
+    }
+  }
+
+  return jobs;
 }
 
 async function updateCampaignScheduledDispatch(campaigns, campaignId, dispatchJobs, timezone) {
@@ -976,6 +1092,31 @@ function createCampaignTriggerProcessor(options = {}) {
       const campaign = campaigns && typeof campaigns.findById === "function"
         ? await campaigns.findById(job.data.campaign_id)
         : null;
+
+      if (campaign && (campaign.status === "pausado" || campaign.status === "cancelado")) {
+        const completedAt = new Date().toISOString();
+        const result = {
+          campaign_id: job.data.campaign_id,
+          status: "skipped",
+          reason: campaign.status === "pausado" ? "campaign_paused" : "campaign_cancelled",
+          started_at: startedAt,
+          completed_at: completedAt,
+        };
+
+        await job.updateData({ ...job.data, ...result });
+
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "campaign_trigger.skipped_campaign_not_active",
+              job_id: job.id,
+              ...result,
+            })
+          );
+
+        return result;
+      }
+
       const campaignGroupRows = await campaignGroups.listGroups(job.data.campaign_id);
       const groupsWithFallback = await Promise.all(
         campaignGroupRows
@@ -997,6 +1138,40 @@ function createCampaignTriggerProcessor(options = {}) {
       const dispatchGroupsWithCaptions = await applyGeneratedCaptions(job.data.campaign_id, dispatchableGroups, {
         campaignVideoCaptionsRepository: campaignVideoCaptionsRepositoryOption,
       });
+
+      // Reivindicacao atomica: so cria os jobs de disparo se ainda for a
+      // primeira vez (trigger_fired_at nulo) e a campanha nao tiver sido
+      // pausada/cancelada entre a checagem acima e este ponto. Fecha a corrida
+      // de um segundo job de trigger perdido para a mesma campanha, e a janela
+      // entre a checagem de status e a criacao efetiva dos jobs.
+      if (campaigns && typeof campaigns.claimTriggerFired === "function") {
+        const claimedCampaign = await campaigns.claimTriggerFired(job.data.campaign_id);
+
+        if (!claimedCampaign) {
+          const completedAt = new Date().toISOString();
+          const result = {
+            campaign_id: job.data.campaign_id,
+            status: "skipped",
+            reason: "trigger_already_claimed_or_not_active",
+            started_at: startedAt,
+            completed_at: completedAt,
+          };
+
+          await job.updateData({ ...job.data, ...result });
+
+          logger.warn &&
+            logger.warn(
+              JSON.stringify({
+                event: "campaign_trigger.skipped_claim_lost",
+                job_id: job.id,
+                ...result,
+              })
+            );
+
+          return result;
+        }
+      }
+
       const dispatchJobs = await enqueueResolvedDispatchJobs(job.data, dispatchGroupsWithCaptions, options);
       const pendingLogsCreated = await ensurePendingDispatchLogs(dispatchLogs, job.data.campaign_id, dispatchJobs, logger);
       await updateCampaignScheduledDispatch(campaigns, job.data.campaign_id, dispatchJobs, job.data.timezone);
@@ -1151,6 +1326,7 @@ module.exports = {
   formatScheduledDateTime,
   ensurePendingDispatchLogs,
   isVideoEnabledGroup,
+  requeuePendingDispatchJobsForCampaign,
   get campaignTriggerQueue() {
     return getCampaignTriggerQueue();
   },

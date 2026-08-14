@@ -1,5 +1,6 @@
 const groupsRepository = require("../repositories/groups.repository");
 const organizationsRepository = require("../repositories/organizations.repository");
+const groupProfilesRepository = require("../repositories/group-profiles.repository");
 const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const whatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
@@ -8,6 +9,7 @@ const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
 const whatsappInstancesService = require("./whatsapp-instances.service");
 const defaultSettingsService = require("./settings.service");
+const defaultTrilhaSequenceService = require("./trilha-sequence.service");
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
@@ -101,6 +103,7 @@ function normalizeNullableText(value, fieldName) {
 function createGroupsService(dependencies = {}) {
   const repository = dependencies.repository || groupsRepository;
   const organizationRepository = dependencies.organizationRepository || organizationsRepository;
+  const groupProfilesRepositoryDependency = dependencies.groupProfilesRepository || groupProfilesRepository;
   const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
   const instancesRepository = dependencies.whatsappInstancesRepository || whatsappInstancesRepository;
   const groupInstancesRepository = dependencies.groupWhatsappInstancesRepository || groupWhatsappInstancesRepository;
@@ -109,6 +112,7 @@ function createGroupsService(dependencies = {}) {
   const enqueueDispatch = dependencies.addDispatchJob || addDispatchJob;
   const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
   const settingsService = dependencies.settingsService || defaultSettingsService;
+  const trilhaSequenceServiceDependency = dependencies.trilhaSequenceService || defaultTrilhaSequenceService;
 
   async function create(payload) {
     const nome = payload?.nome?.trim();
@@ -201,7 +205,7 @@ function createGroupsService(dependencies = {}) {
       throw new Error("Group id is required");
     }
 
-    const allowedFields = ["organization_id", "segmento", "envia_video", "trilha_override", "trilha_id"];
+    const allowedFields = ["organization_id", "profile_id", "segmento", "setor", "envia_video", "trilha_override", "trilha_id"];
     const hasAllowedField = allowedFields.some((field) => Object.prototype.hasOwnProperty.call(payload, field));
 
     if (!hasAllowedField) {
@@ -218,6 +222,29 @@ function createGroupsService(dependencies = {}) {
 
     if (Object.prototype.hasOwnProperty.call(payload, "segmento")) {
       nextPayload.segmento = normalizeNullableText(payload.segmento, "Segmento");
+    }
+
+    // profile_id e a identidade canonica do perfil do grupo (FK para group_profiles).
+    // Um trigger de banco (trg_sync_groups_segmento_text) espelha group_profiles.nome
+    // em groups.segmento sempre que profile_id muda, entao nao precisamos setar
+    // segmento manualmente aqui - so validar que o perfil existe.
+    if (Object.prototype.hasOwnProperty.call(payload, "profile_id")) {
+      const profileId = normalizeNullableText(payload.profile_id, "Profile id");
+
+      if (profileId) {
+        const profiles = await groupProfilesRepositoryDependency.findAll();
+        const profile = profiles.find((item) => item.id === profileId);
+
+        if (!profile) {
+          throw new Error("Profile not found");
+        }
+      }
+
+      nextPayload.profile_id = profileId;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(payload, "setor")) {
+      nextPayload.setor = normalizeNullableText(payload.setor, "Setor");
     }
 
     if (Object.prototype.hasOwnProperty.call(payload, "organization_id")) {
@@ -552,6 +579,36 @@ function createGroupsService(dependencies = {}) {
     };
   }
 
+  // Pre-visualizacao (nao persiste nada) da trilha que o motor de sequenciamento
+  // automatico atribuiria a este grupo agora - usada pela tela de envio
+  // automatizado para mostrar a "trilha recomendada" mesmo antes do primeiro
+  // disparo, quando o grupo ainda nao tem trilha_id nenhum.
+  async function previewNextTrilha(id) {
+    if (!id) {
+      throw new Error("Group id is required");
+    }
+
+    const group = await repository.findById(id);
+
+    if (!group) {
+      throw new Error("Group not found");
+    }
+
+    const next = await trilhaSequenceServiceDependency.resolveNextTrilhaForGroup(group);
+
+    if (!next) {
+      return null;
+    }
+
+    const trilha = await trilhasRepositoryDependency.findById(next.trilha_id);
+
+    return {
+      ...next,
+      macrotema: trilha ? trilha.macrotema : null,
+      trilha: trilha ? trilha.trilha : null,
+    };
+  }
+
   async function forceNextVideo(id, payload = {}) {
     if (!id) {
       throw new Error("Group id is required");
@@ -604,6 +661,7 @@ function createGroupsService(dependencies = {}) {
     listByOrganization,
     listVideoEnabled,
     listWithoutSegment,
+    previewNextTrilha,
     search,
     dispatchTestVideo,
     syncGroupsFromEvolution,

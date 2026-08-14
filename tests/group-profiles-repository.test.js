@@ -322,6 +322,42 @@ async function main() {
     assert.equal(record, null);
   }
 
+  // ---------- reorder ----------
+  {
+    const client = createMockClient({ updateResult: { id: "profile-x", ordem: 1 } });
+
+    const result = await groupProfilesRepository.reorder(["profile-2", "profile-1"], client);
+
+    assert.equal(result.length, 2);
+    const updateCalls = client.__calls.filter((call) => call.type === "update" && call.tableName === "group_profiles");
+    assert.deepEqual(updateCalls.map((call) => call.payload.ordem), [1, 2]);
+    const eqCalls = client.__calls.filter((call) => call.type === "eq" && call.tableName === "group_profiles");
+    assert.deepEqual(eqCalls.map((call) => call.value), ["profile-2", "profile-1"]);
+  }
+
+  // ---------- clearOrdem ----------
+  {
+    const client = createMockClient();
+
+    await groupProfilesRepository.clearOrdem(["profile-3"], client);
+
+    assert.ok(
+      client.__calls.some(
+        (call) => call.type === "update" && call.tableName === "group_profiles" && call.payload.ordem === null
+      )
+    );
+    assert.ok(client.__calls.some((call) => call.type === "in" && call.tableName === "group_profiles" && call.column === "id"));
+  }
+
+  // ---------- clearOrdem is a no-op for empty id lists ----------
+  {
+    const client = createMockClient();
+
+    await groupProfilesRepository.clearOrdem([], client);
+
+    assert.equal(client.__calls.length, 0);
+  }
+
   // ---------- removeMergeRecord ----------
   {
     const client = createMockClient();

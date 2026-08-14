@@ -314,7 +314,14 @@ async function main() {
   const fakeWhatsappInstancesService = {
     assertGroupsDispatchable: async () => {},
   };
+  const fakeGroupProfilesRepository = {
+    findAll: async () => [
+      { id: "profile-1", nome: "Pré-infância" },
+      { id: "profile-2", nome: "Infância" },
+    ],
+  };
   const groupService = groupsService.createGroupsService({
+    groupProfilesRepository: fakeGroupProfilesRepository,
     trilhasRepository: trilhasFakeRepository,
     addDispatchJob: async (payload) => ({ id: "dispatch-test-1", name: "dispatch-content", queueName: "dispatch", data: payload }),
     fetchEvolutionGroups: async () => ({
@@ -449,6 +456,19 @@ async function main() {
     () => groupService.updateOperationalSettings(insertedGroup.id, { trilha_id: "trilha-inexistente" }),
     /Trilha not found/,
   );
+
+  const updatedWithProfileId = await groupService.updateOperationalSettings(insertedGroup.id, {
+    profile_id: "profile-1",
+  });
+  assert.equal(updatedWithProfileId.profile_id, "profile-1");
+  await assert.rejects(
+    () => groupService.updateOperationalSettings(insertedGroup.id, { profile_id: "profile-inexistente" }),
+    /Profile not found/,
+  );
+  const clearedProfileId = await groupService.updateOperationalSettings(insertedGroup.id, {
+    profile_id: null,
+  });
+  assert.equal(clearedProfileId.profile_id, null);
 
   const dispatchByTrilhaId = await groupService.dispatchTestVideo(insertedGroup.id, {
     trilha_id: "trilha-1",

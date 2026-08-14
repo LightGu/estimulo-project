@@ -149,12 +149,31 @@ function createGroupProfilesController(dependencies = {}) {
     }
   }
 
+  async function reorder(req, res) {
+    try {
+      const profiles = await groupProfilesService.reorder(req.body?.ordered_ids);
+
+      return res.status(200).json(profiles);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Profile not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      logUnexpected("group_profiles.reorder.failed", error);
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   return {
     create,
     list,
     listMerges,
     merge,
     remove,
+    reorder,
     unmerge,
     update,
   };
