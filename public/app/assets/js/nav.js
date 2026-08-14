@@ -170,6 +170,8 @@
     return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${THEME_ICONS[iconName]}</svg>`;
   }
 
+  const THEME_COLOR = { light: "#f4f5fa", dark: "#0d0e1a" };
+
   function applyTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
     try {
@@ -177,6 +179,8 @@
     } catch (e) {
       /* localStorage unavailable (e.g. file:// in some browsers) — theme just won't persist */
     }
+    const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+    if (metaThemeColor) metaThemeColor.setAttribute("content", THEME_COLOR[theme]);
     const btn = document.getElementById("themeToggleButton");
     if (btn) {
       btn.innerHTML = themeToggleSvg(theme);
@@ -341,9 +345,12 @@
     notifPanelEl.innerHTML = `
       <div class="notif-panel-header">
         <h4>Notificações</h4>
-        <button type="button" class="notif-panel-mark-all">Marcar todas como lidas</button>
+        <div class="notif-panel-header-actions">
+          <button type="button" class="notif-panel-mark-all">Marcar todas como lidas</button>
+          <button type="button" class="notif-panel-clear">Limpar</button>
+        </div>
       </div>
-      <div class="notif-panel-list"></div>
+      <div class="notif-panel-list" aria-live="polite"></div>
     `;
     wrap.appendChild(notifPanelEl);
 
@@ -355,6 +362,18 @@
         renderNotifList(data && data.items);
       } catch (error) {
         /* ignora falha ao marcar como lida */
+      }
+    });
+
+    notifPanelEl.querySelector(".notif-panel-clear").addEventListener("click", async () => {
+      try {
+        await fetch("/notifications/read-all", { method: "POST" });
+        await fetch("/notifications/read", { method: "DELETE" });
+        setNotifCount(0);
+        const data = await refreshNotifications();
+        renderNotifList(data && data.items);
+      } catch (error) {
+        /* ignora falha ao limpar notificações */
       }
     });
 
@@ -449,6 +468,7 @@
   // destructive actions never trigger the browser's own popup.
   let confirmOverlay = null;
   let confirmResolve = null;
+  let confirmReleaseTrap = null;
 
   function ensureConfirmModal() {
     if (confirmOverlay) return confirmOverlay;
@@ -476,6 +496,10 @@
 
     const settle = (result) => {
       confirmOverlay.hidden = true;
+      if (confirmReleaseTrap) {
+        confirmReleaseTrap();
+        confirmReleaseTrap = null;
+      }
       if (confirmResolve) {
         const resolve = confirmResolve;
         confirmResolve = null;
@@ -509,6 +533,7 @@
       confirmResolve = resolve;
       overlay.hidden = false;
       overlay.querySelector('[data-action="confirm"]').focus();
+      confirmReleaseTrap = window.estimuloTrapFocus(overlay);
     });
   };
 
@@ -517,6 +542,7 @@
   // in-app modal instead of the browser's own popup.
   let alertOverlay = null;
   let alertResolve = null;
+  let alertReleaseTrap = null;
 
   function ensureAlertModal() {
     if (alertOverlay) return alertOverlay;
@@ -543,6 +569,10 @@
 
     const settle = () => {
       alertOverlay.hidden = true;
+      if (alertReleaseTrap) {
+        alertReleaseTrap();
+        alertReleaseTrap = null;
+      }
       if (alertResolve) {
         const resolve = alertResolve;
         alertResolve = null;
@@ -573,6 +603,7 @@
       alertResolve = resolve;
       overlay.hidden = false;
       overlay.querySelector('[data-action="ok"]').focus();
+      alertReleaseTrap = window.estimuloTrapFocus(overlay);
     });
   };
 
@@ -580,6 +611,7 @@
   // Replaces window.prompt() with an in-app modal with a text field.
   let promptOverlay = null;
   let promptResolve = null;
+  let promptReleaseTrap = null;
 
   function ensurePromptModal() {
     if (promptOverlay) return promptOverlay;
@@ -610,6 +642,10 @@
 
     const settle = (result) => {
       promptOverlay.hidden = true;
+      if (promptReleaseTrap) {
+        promptReleaseTrap();
+        promptReleaseTrap = null;
+      }
       if (promptResolve) {
         const resolve = promptResolve;
         promptResolve = null;
@@ -644,8 +680,61 @@
     return new Promise((resolve) => {
       promptResolve = resolve;
       overlay.hidden = false;
-      overlay.querySelector('[data-action="ok"]').focus();
       input.focus();
+      promptReleaseTrap = window.estimuloTrapFocus(overlay);
+    });
+  };
+
+  // ---------- Modal focus trap ----------
+  // Keeps Tab/Shift+Tab cycling within an open modal instead of escaping to the page
+  // behind it, and restores focus to whatever triggered the modal when it closes.
+  // Usage: const releaseTrap = window.estimuloTrapFocus(overlayEl); ...; releaseTrap();
+  const FOCUSABLE_SELECTOR =
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  window.estimuloTrapFocus = function estimuloTrapFocus(overlay) {
+    const previouslyFocused = document.activeElement;
+
+    function handleKeydown(event) {
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(overlay.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
+        (el) => el.offsetParent !== null
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    overlay.addEventListener("keydown", handleKeydown);
+
+    return function releaseTrap() {
+      overlay.removeEventListener("keydown", handleKeydown);
+      if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+        previouslyFocused.focus();
+      }
+    };
+  };
+
+  // ---------- Keyboard-activatable clickable rows/cards ----------
+  // Makes a non-native clickable element (a <tr> or <div> with a click listener)
+  // reachable and activatable from the keyboard: adds tabindex/role="button" and
+  // triggers the same handler on Enter/Space, matching native <button> behavior.
+  // Usage: window.estimuloMakeKeyboardClickable(el, () => el.click());
+  window.estimuloMakeKeyboardClickable = function estimuloMakeKeyboardClickable(el, onActivate) {
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "0");
+    if (!el.hasAttribute("role")) el.setAttribute("role", "button");
+    el.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onActivate(event);
     });
   };
 })();

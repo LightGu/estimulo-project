@@ -239,6 +239,170 @@ async function testResolvesMultipleGroupsForDispatch() {
   assert.equal(result.pausedGroups[0].group.id, "group-2");
 }
 
+async function testAutoAdvancesToNextTrilhaWhenEnabled() {
+  const videosByTrilha = {
+    "trilha-1": [],
+    "trilha-2": [createVideo({ id: "video-2" })],
+  };
+  const updateCalls = [];
+  const notifyCalls = [];
+  const resolveCalls = [];
+
+  const result = await resolveGroupVideoFlow({
+    campaign_id: "campaign-1",
+    group: createGroup({ trilha_id: "trilha-1", profile_id: "profile-1" }),
+    dispatchRules: { auto_advance_trilha: true },
+    repository: {
+      async findNextApprovedUnsentVideoForGroup(group) {
+        return (videosByTrilha[group.trilha_id] || [])[0];
+      },
+    },
+    trilhaSequenceService: {
+      async countReachableSteps() {
+        return 5;
+      },
+      async resolveNextTrilhaForGroup(group, options) {
+        resolveCalls.push({ trilha_id: group.trilha_id, excluded: [...(options?.excludeTrilhaIds || [])] });
+        return { trilha_id: "trilha-2", profile_id: "profile-1", checkpoint: false, reason: "sequencia" };
+      },
+    },
+    groupsRepository: {
+      async updateTrilhaIfCurrent(groupId, expectedTrilhaId, payload) {
+        updateCalls.push({ groupId, expectedTrilhaId, payload });
+        return { ...createGroup({ trilha_id: "trilha-1", profile_id: "profile-1" }), ...payload };
+      },
+    },
+    inAppNotificationsService: {
+      async notifyTrailAdvanced(payload) {
+        notifyCalls.push(payload);
+      },
+    },
+  });
+
+  assert.equal(result.status, "eligible");
+  assert.equal(result.trilha_id, "trilha-2");
+  assert.equal(result.video_id, "video-2");
+  assert.equal(resolveCalls.length, 1);
+  assert.equal(updateCalls.length, 1);
+  assert.equal(updateCalls[0].groupId, "group-1");
+  assert.equal(updateCalls[0].expectedTrilhaId, "trilha-1");
+  assert.equal(updateCalls[0].payload.trilha_id, "trilha-2");
+  assert.equal(notifyCalls.length, 1);
+  assert.equal(notifyCalls[0].reason, "sequencia");
+}
+
+async function testAutoAdvanceDisabledByDefaultFallsBackToPause() {
+  let resolveCalled = false;
+
+  const result = await resolveGroupVideoFlow({
+    campaign_id: "campaign-1",
+    group: createGroup({ trilha_id: "trilha-1", profile_id: "profile-1" }),
+    repository: {
+      async findNextApprovedUnsentVideoForGroup() {
+        return undefined;
+      },
+    },
+    trilhaSequenceService: {
+      async resolveNextTrilhaForGroup() {
+        resolveCalled = true;
+        return null;
+      },
+    },
+    inAppNotificationsService: {
+      async notifyTrailFinished() {},
+    },
+  });
+
+  assert.equal(result.status, "paused");
+  assert.equal(resolveCalled, false);
+}
+
+async function testAutoAdvanceStopsOnLostRace() {
+  let resolveCalls = 0;
+
+  const result = await resolveGroupVideoFlow({
+    campaign_id: "campaign-1",
+    group: createGroup({ trilha_id: "trilha-1", profile_id: "profile-1" }),
+    dispatchRules: { auto_advance_trilha: true },
+    repository: {
+      async findNextApprovedUnsentVideoForGroup() {
+        return undefined;
+      },
+    },
+    trilhaSequenceService: {
+      async countReachableSteps() {
+        return 5;
+      },
+      async resolveNextTrilhaForGroup() {
+        resolveCalls += 1;
+        return { trilha_id: "trilha-2", profile_id: "profile-1", checkpoint: false, reason: "sequencia" };
+      },
+    },
+    groupsRepository: {
+      async updateTrilhaIfCurrent() {
+        // Corrida perdida: outro processo ja avancou o grupo, zero linhas afetadas.
+        return null;
+      },
+    },
+    inAppNotificationsService: {
+      async notifyTrailFinished() {},
+    },
+  });
+
+  assert.equal(result.status, "paused");
+  assert.equal(resolveCalls, 1);
+}
+
+async function testAutoAdvanceSkipsEmptyTrilhaUntilVideoFound() {
+  const videosByTrilha = {
+    "trilha-1": [],
+    "trilha-2": [],
+    "trilha-3": [createVideo({ id: "video-3" })],
+  };
+  const resolveCalls = [];
+
+  const result = await resolveGroupVideoFlow({
+    campaign_id: "campaign-1",
+    group: createGroup({ trilha_id: "trilha-1", profile_id: "profile-1" }),
+    dispatchRules: { auto_advance_trilha: true },
+    repository: {
+      async findNextApprovedUnsentVideoForGroup(group) {
+        return (videosByTrilha[group.trilha_id] || [])[0];
+      },
+    },
+    trilhaSequenceService: {
+      async countReachableSteps() {
+        return 5;
+      },
+      async resolveNextTrilhaForGroup(group, options) {
+        const excluded = [...(options?.excludeTrilhaIds || [])];
+        resolveCalls.push(excluded);
+
+        if (!excluded.includes("trilha-2")) {
+          return { trilha_id: "trilha-2", profile_id: "profile-1", checkpoint: false, reason: "sequencia" };
+        }
+
+        return { trilha_id: "trilha-3", profile_id: "profile-1", checkpoint: false, reason: "sequencia" };
+      },
+    },
+    groupsRepository: {
+      async updateTrilhaIfCurrent(groupId, expectedTrilhaId, payload) {
+        return { ...createGroup({ trilha_id: expectedTrilhaId, profile_id: "profile-1" }), ...payload };
+      },
+    },
+    inAppNotificationsService: {
+      async notifyTrailAdvanced() {},
+    },
+  });
+
+  assert.equal(result.status, "eligible");
+  assert.equal(result.trilha_id, "trilha-3");
+  assert.equal(result.video_id, "video-3");
+  assert.equal(resolveCalls.length, 2);
+  assert.deepEqual(resolveCalls[0], []);
+  assert.deepEqual(resolveCalls[1], ["trilha-2"]);
+}
+
 async function main() {
   await testSelectsFirstApprovedUnsentVideoForGroupTrail();
   await testPausesGroupWhenQueueEndsAndLogsTransition();
@@ -249,6 +413,10 @@ async function main() {
   await testSelectsFirstApprovedUnsentVideoForGroupTrailId();
   await testResolvesGroupEligibleForDispatchByTrilhaId();
   await testResolvesMultipleGroupsForDispatch();
+  await testAutoAdvancesToNextTrilhaWhenEnabled();
+  await testAutoAdvanceDisabledByDefaultFallsBackToPause();
+  await testAutoAdvanceStopsOnLostRace();
+  await testAutoAdvanceSkipsEmptyTrilhaUntilVideoFound();
 
   console.log("group-video-flow tests OK");
 }

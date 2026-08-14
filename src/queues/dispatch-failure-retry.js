@@ -3,6 +3,7 @@ const { queueNames } = require("./names");
 const { addDispatchJob } = require("./dispatch");
 const defaultDispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultGroupsRepository = require("../repositories/groups.repository");
+const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 const defaultSettingsService = require("../services/settings.service");
 
 const DISPATCH_FAILURE_RETRY_JOB_NAME = "dispatch-failure-retry-sweep";
@@ -100,10 +101,33 @@ function createDispatchFailureRetryProcessor(options = {}) {
   const {
     dispatchLogsRepository = defaultDispatchLogsRepository,
     groupsRepository = defaultGroupsRepository,
+    campaignsRepository = defaultCampaignsRepository,
     settingsService = defaultSettingsService,
     enqueueDispatch = addDispatchJob,
     logger = console,
   } = options;
+
+  // Sem isto, o sweep reenfileirava um "falhou" mesmo com a campanha ja
+  // pausada/cancelada pelo usuario - o reenvio automatico driblava a acao
+  // manual. So busca o status de campanhas distintas do lote, nao uma a uma.
+  async function filterOutPausedOrCancelledCampaigns(logs) {
+    if (!logs.length || typeof campaignsRepository.findById !== "function") {
+      return logs;
+    }
+
+    const campaignIds = [...new Set(logs.map((log) => log.campaign_id).filter(Boolean))];
+    const campaigns = await Promise.all(
+      campaignIds.map((campaignId) => campaignsRepository.findById(campaignId).catch(() => null))
+    );
+    const statusByCampaignId = new Map(
+      campaigns.filter(Boolean).map((campaign) => [campaign.id, campaign.status])
+    );
+
+    return logs.filter((log) => {
+      const status = statusByCampaignId.get(log.campaign_id);
+      return status !== "pausado" && status !== "cancelado";
+    });
+  }
 
   return async function dispatchFailureRetryWorker() {
     const dispatchRules = await settingsService.getDispatchRulesSettings();
@@ -122,10 +146,11 @@ function createDispatchFailureRetryProcessor(options = {}) {
     // Rede de seguranca: o filtro acima ja vem do banco, mas manter a checagem
     // aqui evita reprocessar logs caso a query seja trocada/mockada.
     const permanentLogs = failedLogs.filter((log) => isPermanentFailureMessage(log.mensagem_erro));
-    const retryableLogs = failedLogs
+    const retryableCandidates = failedLogs
       .filter((log) => (log.retry_count || 0) < MAX_RETRY_ATTEMPTS)
       .filter((log) => !isPermanentFailureMessage(log.mensagem_erro))
       .slice(0, MAX_RETRIES_PER_SWEEP);
+    const retryableLogs = await filterOutPausedOrCancelledCampaigns(retryableCandidates);
 
     for (const log of permanentLogs) {
       logger.warn &&

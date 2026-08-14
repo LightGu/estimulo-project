@@ -857,6 +857,10 @@ function createDispatchProcessor(options = {}) {
   return async function dispatchWorker(job) {
     const startedAt = new Date().toISOString();
 
+    // A checagem de campanha pausada fica dentro de dispatch-consistency.js
+    // (reaproveita o fetch que ensureDispatchEntities ja faz, sem round-trip
+    // extra) - colocar aqui tambem serializava essa consulta antes do download
+    // do video e da resolucao da legenda, que precisam comecar em paralelo.
     try {
       await job.updateData({
         ...job.data,

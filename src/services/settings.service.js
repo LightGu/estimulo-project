@@ -51,6 +51,12 @@ const DEFAULT_DISPATCH_RULES = {
   require_human_review: true,
   auto_send_after_timeout: { enabled: false, minutes: 60 },
   auto_retry_failures: true,
+  // Motor de sequenciamento automatico de trilhas (ordem por perfil + desvios por
+  // setor + checkpoint de proximo perfil) - ligado por padrao porque e o novo
+  // comportamento esperado do envio automatizado; desligar volta ao fluxo manual
+  // de sempre (grupo pausa ao terminar a trilha, operador escolhe a proxima).
+  auto_advance_trilha: true,
+  notify_on_trail_advanced: true,
 };
 
 function buildDailyCronExpression(hour, minute) {
@@ -489,6 +495,8 @@ function createSettingsService(dependencies = {}) {
       "auto_generate_caption",
       "require_human_review",
       "auto_retry_failures",
+      "auto_advance_trilha",
+      "notify_on_trail_advanced",
     ];
 
     for (const field of booleanFields) {

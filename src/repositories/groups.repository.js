@@ -145,6 +145,26 @@ async function update(id, payload, client) {
   return data;
 }
 
+// Compare-and-swap: so aplica o update se trilha_id ainda for o valor esperado no
+// momento da leitura. Usado pelo avanco automatico de trilha (group-video-flow.js)
+// para nao corromper o progresso quando dois ticks de disparo sobrepostos (ou duas
+// campanhas) leem o mesmo grupo e tentam avancar ao mesmo tempo - quem perde a
+// corrida recebe null e pula o avanco nesta rodada em vez de sobrescrever o outro.
+async function updateTrilhaIfCurrent(id, expectedTrilhaId, payload, client) {
+  const resolvedClient = getClient(client);
+  let query = resolvedClient.from("groups").update(payload).eq("id", id);
+
+  query = expectedTrilhaId === null ? query.is("trilha_id", null) : query.eq("trilha_id", expectedTrilhaId);
+
+  const { data, error } = await query.select("*").maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
 async function remove(id, client) {
   const { data, error } = await getClient(client)
     .from("groups")
@@ -172,4 +192,5 @@ module.exports = {
   listWithoutSegment,
   remove,
   update,
+  updateTrilhaIfCurrent,
 };

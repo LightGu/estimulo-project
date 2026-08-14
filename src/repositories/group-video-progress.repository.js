@@ -79,6 +79,28 @@ async function getLastVideo(groupId, client) {
   return data || null;
 }
 
+// "Ja recebeu" para o motor de sequenciamento automatico (desvios por setor devem
+// ser entregues no maximo uma vez na vida do grupo): so conta entrega real
+// (enviado_em preenchido), nunca a mera atribuicao de trilha_id sem video enviado -
+// caso contrario um desvio com zero videos aprovados no momento queimaria a unica
+// chance do grupo sem entregar nada.
+async function hasGroupReceivedTrilha(groupId, trilhaId, client) {
+  const { data, error } = await getClient(client)
+    .from("group_video_progress")
+    .select("id")
+    .eq("group_id", groupId)
+    .eq("trilha_id", trilhaId)
+    .not("enviado_em", "is", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(data);
+}
+
 async function hasDuplicate(groupId, videoId, client) {
   const { data, error } = await getClient(client)
     .from("group_video_progress")
@@ -97,6 +119,7 @@ async function hasDuplicate(groupId, videoId, client) {
 module.exports = {
   getLastVideo,
   hasDuplicate,
+  hasGroupReceivedTrilha,
   listDelivered,
   listDeliveredWithVideo,
   registerDelivery,

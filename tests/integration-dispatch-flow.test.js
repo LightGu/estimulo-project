@@ -24,6 +24,17 @@ async function main() {
       }
       return record;
     },
+    claimForSend: async (id) => {
+      const record = createdLogs.find((entry) => entry.id === id);
+
+      if (!record || record.status !== "pendente") {
+        return null;
+      }
+
+      record.status = "processando";
+      operationOrder.push("log:processando");
+      return record;
+    },
     listByCampaign: async () => createdLogs,
   };
 
