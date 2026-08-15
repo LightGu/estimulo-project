@@ -69,6 +69,7 @@
                   <option value="enviado">Enviado</option>
                   <option value="erro">Erro</option>
                   <option value="falhou">Falhou</option>
+                  <option value="cancelado">Cancelado</option>
                 </select>
               </div>
               <div class="toolbar-spacer"></div>
@@ -78,7 +79,7 @@
           </section>
 
           <section class="page-section">
-            <div class="grid grid-cols-4" id="summaryCards"></div>
+            <div class="grid grid-cols-5" id="summaryCards"></div>
           </section>
 
           <section class="page-section">
@@ -124,6 +125,7 @@
         enviado: "Enviado",
         erro: "Erro",
         falhou: "Falhou",
+        cancelado: "Cancelado",
       };
       const STATUS_BADGE = {
         pendente: "badge-neutral",
@@ -131,6 +133,7 @@
         enviado: "badge-success",
         erro: "badge-danger",
         falhou: "badge-danger",
+        cancelado: "badge-neutral",
       };
 
       function dispatchStatusPresentation(row) {
@@ -183,6 +186,7 @@
         pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
         processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
         enviado: "A Evolution aceitou o envio e postou a mensagem no grupo.",
+        cancelado: "Este envio foi cancelado e não será disparado.",
       };
 
       function dispatchStatusTip(row) {
@@ -277,7 +281,7 @@
       }
 
       function renderSummary(rows) {
-        const counts = { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0 };
+        const counts = { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0, cancelado: 0 };
         rows.forEach((r) => {
           if (counts[r.status] !== undefined) counts[r.status]++;
         });
@@ -286,6 +290,7 @@
           { label: "Enviados", value: counts.enviado, bar: "var(--success)" },
           { label: "Aguardando envio", value: counts.pendente + counts.processando, bar: "var(--warning)" },
           { label: "Erros", value: counts.erro + counts.falhou, bar: "var(--danger)" },
+          { label: "Cancelados", value: counts.cancelado, bar: "var(--text-muted)" },
         ];
         document.getElementById("summaryCards").innerHTML = cards
           .map(

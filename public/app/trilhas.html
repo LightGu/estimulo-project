@@ -133,11 +133,14 @@
               </div>
               <p class="text-muted" id="sequenceProfileHint" style="margin-bottom:14px;"></p>
 
-              <div class="settings-row" style="margin-bottom:14px;">
-                <label for="sequenceSetorFilter" style="font-size:12.5px;font-weight:600;color:var(--text-muted);">Setor:</label>
-                <select id="sequenceSetorFilter" style="min-width:220px;">
-                  <option value="">Todos os setores</option>
-                </select>
+              <div class="settings-row" style="margin-bottom:14px;justify-content:space-between;">
+                <div class="settings-row" style="gap:8px;">
+                  <label for="sequenceSetorFilter" style="font-size:12.5px;font-weight:600;color:var(--text-muted);">Setor:</label>
+                  <select id="sequenceSetorFilter" style="min-width:220px;">
+                    <option value="">Todos os setores</option>
+                  </select>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="addSequenceTrilhaButton" type="button">+ Adicionar trilha</button>
               </div>
 
               <div class="table-wrap">
@@ -147,7 +150,6 @@
                       <th>Ordem</th>
                       <th>Macrotema · Trilha</th>
                       <th>Vídeos</th>
-                      <th>Desvio por setor</th>
                       <th>Ações</th>
                     </tr>
                   </thead>
@@ -304,7 +306,6 @@
         setores: [],
       };
       const NEW_MACROTEMA_OPTION = "__new_macrotema__";
-      const NEW_SETOR_OPTION = "__new_setor__";
       let activePerfil = "todos";
       let activeView = "catalogo";
       let selectedMacrotemaKey = null;
@@ -317,6 +318,7 @@
       let sequenceProfileId = null;
       let sequenceSetorFilter = "";
       let addSequenceTrilhaAnchorId = null;
+      let addSequenceTrilhaSetorMode = null;
       let newTrailReleaseTrap = null;
       let newVideoReleaseTrap = null;
       let moveReleaseTrap = null;
@@ -766,6 +768,21 @@
         });
       }
 
+      function renderSequenceProfileHint() {
+        const hint = document.getElementById("sequenceProfileHint");
+        const profile = state.groupProfiles.find((p) => p.id === sequenceProfileId);
+
+        if (profile && (profile.ordem === null || profile.ordem === undefined)) {
+          hint.textContent =
+            "Este perfil está fora da jornada automática — inclua-o em Configurações → Perfis de grupo para que ele participe do avanço automático.";
+        } else if (sequenceSetorFilter) {
+          hint.textContent =
+            "Caminho deste setor dentro do perfil, com os desvios já aplicados. A 1ª trilha é sempre a mesma para todos os setores; a partir da 2ª você pode adicionar, remover e reordenar livremente só para este setor.";
+        } else {
+          hint.textContent = "Arraste para reordenar. Esta é a ordem que o motor de disparo automático segue para grupos deste perfil.";
+        }
+      }
+
       async function loadSequenceForProfile() {
         const body = document.getElementById("sequenceBody");
         const hint = document.getElementById("sequenceProfileHint");
@@ -776,12 +793,8 @@
           return;
         }
 
-        const profile = state.groupProfiles.find((p) => p.id === sequenceProfileId);
-        hint.textContent =
-          profile && (profile.ordem === null || profile.ordem === undefined)
-            ? "Este perfil está fora da jornada automática — inclua-o em Configurações → Perfis de grupo para que ele participe do avanço automático."
-            : "Arraste para reordenar. Esta é a ordem que o motor de disparo automático segue para grupos deste perfil.";
-        body.innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Carregando…</strong></div></td></tr>`;
+        renderSequenceProfileHint();
+        body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Carregando…</strong></div></td></tr>`;
 
         try {
           const [sequence, desvios] = await Promise.all([
@@ -794,7 +807,7 @@
           renderSequenceSetorFilter();
           renderSequenceBody();
         } catch (error) {
-          body.innerHTML = `<tr><td colspan="5"><div class="empty-state"><strong>Falha ao carregar sequência</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+          body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar sequência</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
         }
       }
 
@@ -803,12 +816,239 @@
         return trail ? `${trail.macrotema} · ${trail.trilha}` : trilhaId;
       }
 
+      // Acha o desvio configurado para (afterTrilhaId, setor) - mesmo criterio de
+      // matchingDesvio em trilha-sequence.service.js (desempate pelo mais antigo),
+      // usado aqui so para simular visualmente o caminho, sem tocar em progresso
+      // real de grupo.
+      function matchingDesvioForSetor(afterTrilhaId, setor) {
+        const normalizedSetor = normalizeSetorKey(setor);
+        if (!normalizedSetor) return null;
+
+        const candidates = state.desvios
+          .filter((desvio) => desvio.after_trilha_id === afterTrilhaId)
+          .filter((desvio) => (desvio.setores || []).some((s) => normalizeSetorKey(s) === normalizedSetor))
+          .sort((left, right) => new Date(left.created_at) - new Date(right.created_at));
+
+        return candidates[0] || null;
+      }
+
+      // Simula o caminho que um grupo do setor informado percorreria: comeca na
+      // primeira trilha da sequencia e, a cada passo, segue o desvio configurado
+      // para aquele setor (se houver) em vez da proxima trilha da lista. Para ao
+      // reencontrar uma trilha ja visitada (ciclo) ou ao esgotar a sequencia -
+      // ver resolveNextTrilhaForGroup em trilha-sequence.service.js para o
+      // equivalente com estado real de entrega usado no motor de disparo.
+      function buildSequencePathForSetor(setor) {
+        const byId = new Map(state.sequence.map((item) => [item.trilha_id, item]));
+        const visited = new Set();
+        const path = [];
+
+        let current = state.sequence[0];
+
+        while (current && !visited.has(current.trilha_id)) {
+          path.push(current);
+          visited.add(current.trilha_id);
+
+          const desvio = matchingDesvioForSetor(current.trilha_id, setor);
+          if (desvio && byId.has(desvio.trilha_destino_id)) {
+            current = byId.get(desvio.trilha_destino_id);
+            continue;
+          }
+
+          const currentIndex = state.sequence.indexOf(current);
+          current = state.sequence[currentIndex + 1] || null;
+        }
+
+        return path;
+      }
+
+      // Remove o setor informado de um desvio existente (apagando a linha e
+      // recriando so com os setores restantes, ja que a API nao tem PATCH pra
+      // desvios) - preserva o comportamento de outros setores que compartilhavam
+      // o mesmo desvio.
+      async function detachSetorFromDesvio(desvio, setor) {
+        await requestJson(`/trilhas/desvios/${encodeURIComponent(desvio.id)}`, { method: "DELETE" });
+
+        const remaining = (desvio.setores || []).filter((s) => normalizeSetorKey(s) !== normalizeSetorKey(setor));
+        if (!remaining.length) return;
+
+        await requestJson("/trilhas/desvios", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            profile_id: sequenceProfileId,
+            after_trilha_id: desvio.after_trilha_id,
+            trilha_destino_id: desvio.trilha_destino_id,
+            setores: remaining,
+          }),
+        });
+      }
+
+      // Reconcilia os desvios deste setor para que buildSequencePathForSetor
+      // volte a produzir newPath: para cada par consecutivo (ancora, proximo) do
+      // caminho desejado, cria/ajusta um desvio so quando o proximo desejado
+      // difere do proximo natural da sequencia base - do contrario, remove o
+      // setor de qualquer desvio que estivesse la (deixa cair no fallthrough
+      // padrao). A posicao 0 nunca e ancora de remocao/insercao por si so, mas
+      // pode ter um desvio de saida normalmente.
+      async function applySetorPathEdit(setor, newPath) {
+        for (let index = 0; index < newPath.length - 1; index += 1) {
+          const anchor = newPath[index];
+          const desiredNext = newPath[index + 1];
+
+          const anchorBaseIndex = state.sequence.findIndex((item) => item.trilha_id === anchor.trilha_id);
+          const naturalNext = state.sequence[anchorBaseIndex + 1] || null;
+          const existingDesvio = matchingDesvioForSetor(anchor.trilha_id, setor);
+
+          const needsDesvio = !naturalNext || naturalNext.trilha_id !== desiredNext.trilha_id;
+
+          if (needsDesvio) {
+            if (existingDesvio && existingDesvio.trilha_destino_id === desiredNext.trilha_id) {
+              continue;
+            }
+
+            if (existingDesvio) {
+              await detachSetorFromDesvio(existingDesvio, setor);
+            }
+
+            await requestJson("/trilhas/desvios", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                profile_id: sequenceProfileId,
+                after_trilha_id: anchor.trilha_id,
+                trilha_destino_id: desiredNext.trilha_id,
+                setores: [setor],
+              }),
+            });
+          } else if (existingDesvio) {
+            await detachSetorFromDesvio(existingDesvio, setor);
+          }
+        }
+      }
+
+      async function removeTrilhaFromSetorPath(setor, trilhaId) {
+        const path = buildSequencePathForSetor(setor);
+        const index = path.findIndex((item) => item.trilha_id === trilhaId);
+        if (index <= 0) return;
+
+        const confirmed = await window.estimuloConfirm(
+          `Remover "${trilhaLabelById(trilhaId)}" do caminho deste setor?`,
+          { title: "Remover trilha do caminho do setor", confirmLabel: "Remover" }
+        );
+        if (!confirmed) return;
+
+        const newPath = path.filter((_, i) => i !== index);
+
+        try {
+          await applySetorPathEdit(setor, newPath);
+          await loadSequenceForProfile();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          await loadSequenceForProfile();
+        }
+      }
+
+      async function reorderSetorPathByStep(setor, trilhaId, delta) {
+        const path = buildSequencePathForSetor(setor);
+        const fromIndex = path.findIndex((item) => item.trilha_id === trilhaId);
+        const toIndex = fromIndex + delta;
+        if (fromIndex <= 0 || toIndex <= 0 || toIndex >= path.length) return;
+
+        const newPath = [...path];
+        newPath.splice(toIndex, 0, newPath.splice(fromIndex, 1)[0]);
+
+        try {
+          await applySetorPathEdit(setor, newPath);
+          await loadSequenceForProfile();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          await loadSequenceForProfile();
+        }
+      }
+
+      async function addTrilhaToSetorPath(setor, trilhaId) {
+        const alreadyInBase = state.sequence.some((item) => item.trilha_id === trilhaId);
+
+        if (!alreadyInBase) {
+          await requestJson("/trilhas/sequence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profile_id: sequenceProfileId, trilha_id: trilhaId }),
+          });
+
+          const refreshed = await requestJson(`/trilhas/sequence?profile_id=${encodeURIComponent(sequenceProfileId)}`);
+          state.sequence = Array.isArray(refreshed) ? refreshed : state.sequence;
+        }
+
+        const newItem = state.sequence.find((item) => item.trilha_id === trilhaId);
+        if (!newItem) {
+          throw new Error("Trilha não encontrada na sequência do perfil.");
+        }
+
+        const currentPath = buildSequencePathForSetor(setor);
+        const newPath = [...currentPath, newItem];
+
+        await applySetorPathEdit(setor, newPath);
+      }
+
+      function attachSetorPathDragAndDrop(setor, path) {
+        const rows = document.querySelectorAll("#sequenceBody tr.sequence-row[data-setor-path-index]");
+
+        rows.forEach((row) => {
+          if (Number(row.dataset.setorPathIndex) === 0) return;
+
+          row.addEventListener("dragstart", () => {
+            draggingTrilhaId = row.dataset.trilhaRowId;
+            row.classList.add("dragging");
+          });
+
+          row.addEventListener("dragend", () => {
+            row.classList.remove("dragging");
+            document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+          });
+
+          row.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            row.classList.add("drag-over");
+          });
+
+          row.addEventListener("dragleave", () => {
+            row.classList.remove("drag-over");
+          });
+
+          row.addEventListener("drop", async (event) => {
+            event.preventDefault();
+            row.classList.remove("drag-over");
+
+            const targetId = row.dataset.trilhaRowId;
+            if (!draggingTrilhaId || draggingTrilhaId === targetId) return;
+
+            const fromIndex = path.findIndex((item) => item.trilha_id === draggingTrilhaId);
+            const toIndex = path.findIndex((item) => item.trilha_id === targetId);
+            draggingTrilhaId = null;
+            if (fromIndex <= 0 || toIndex <= 0) return;
+
+            const newPath = [...path];
+            newPath.splice(toIndex, 0, newPath.splice(fromIndex, 1)[0]);
+
+            try {
+              await applySetorPathEdit(setor, newPath);
+              await loadSequenceForProfile();
+            } catch (error) {
+              window.estimuloAlert(error.message);
+              await loadSequenceForProfile();
+            }
+          });
+        });
+      }
+
       function renderSequenceBody() {
         const body = document.getElementById("sequenceBody");
 
         if (!state.sequence.length) {
           body.innerHTML = `
-            <tr><td colspan="5">
+            <tr><td colspan="4">
               <div class="empty-state">
                 <strong>Nenhuma trilha na sequência deste perfil</strong>
                 <span>Vincule este perfil a trilhas existentes na aba Catálogo.</span>
@@ -819,31 +1059,43 @@
 
         const activeSetor = sequenceSetorFilter;
 
+        if (activeSetor) {
+          const path = buildSequencePathForSetor(activeSetor);
+
+          body.innerHTML = path
+            .map((item, index) => {
+              const locked = index === 0;
+
+              return `
+              <tr class="sequence-row"${locked ? "" : ' draggable="true"'} data-trilha-row-id="${escapeHtml(item.trilha_id)}" data-setor-path-index="${index}">
+                <td>
+                  ${locked ? "" : '<span class="drag-handle" aria-hidden="true">⠿</span>'}${index + 1}
+                  ${locked ? "" : `<button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-up="${escapeHtml(item.trilha_id)}" aria-label="Mover para cima"${index === 1 ? " disabled" : ""}>&#8593;</button>`}
+                  ${locked ? "" : `<button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-down="${escapeHtml(item.trilha_id)}" aria-label="Mover para baixo"${index === path.length - 1 ? " disabled" : ""}>&#8595;</button>`}
+                </td>
+                <td>${escapeHtml(item.macrotema)} · ${escapeHtml(item.trilha)}</td>
+                <td><span class="badge badge-success">${item.approved_count}/${item.videos_count} aprovado(s)</span></td>
+                <td>${locked ? "" : `<button class="btn btn-secondary btn-sm" data-remove-trilha-from-setor-path="${escapeHtml(item.trilha_id)}" type="button">Remover</button>`}</td>
+              </tr>`;
+            })
+            .join("");
+
+          body.querySelectorAll("[data-reorder-setor-path-up]").forEach((btn) =>
+            btn.addEventListener("click", () => reorderSetorPathByStep(activeSetor, btn.dataset.reorderSetorPathUp, -1))
+          );
+          body.querySelectorAll("[data-reorder-setor-path-down]").forEach((btn) =>
+            btn.addEventListener("click", () => reorderSetorPathByStep(activeSetor, btn.dataset.reorderSetorPathDown, 1))
+          );
+          body.querySelectorAll("[data-remove-trilha-from-setor-path]").forEach((btn) =>
+            btn.addEventListener("click", () => removeTrilhaFromSetorPath(activeSetor, btn.dataset.removeTrilhaFromSetorPath))
+          );
+          attachSetorPathDragAndDrop(activeSetor, path);
+          return;
+        }
+
         body.innerHTML = state.sequence
-          .map((item, index) => {
-            let desvioCellHtml;
-
-            if (!activeSetor) {
-              desvioCellHtml = '<span class="text-faint" style="font-size:11.5px;">Selecione um setor acima</span>';
-            } else {
-              const desvio = state.desvios.find(
-                (d) =>
-                  d.after_trilha_id === item.trilha_id &&
-                  (d.setores || []).some((s) => normalizeSetorKey(s) === normalizeSetorKey(activeSetor))
-              );
-
-              const optionsWithSelection = [
-                `<option value="">Nenhum destino</option>`,
-                ...allTrilhasSortedForDesvio().map(
-                  (t) =>
-                    `<option value="${escapeHtml(t.id)}" ${desvio && t.id === desvio.trilha_destino_id ? "selected" : ""}>${escapeHtml(t.macrotema)} · ${escapeHtml(t.trilha)}</option>`
-                ),
-              ].join("");
-
-              desvioCellHtml = `<select data-desvio-select data-trilha-id="${escapeHtml(item.trilha_id)}" data-desvio-id="${escapeHtml(desvio ? desvio.id : "")}">${optionsWithSelection}</select>`;
-            }
-
-            return `
+          .map(
+            (item, index) => `
             <tr class="sequence-row" draggable="true" data-trilha-row-id="${escapeHtml(item.trilha_id)}">
               <td>
                 <span class="drag-handle" aria-hidden="true">⠿</span>${index + 1}
@@ -852,10 +1104,9 @@
               </td>
               <td>${escapeHtml(item.macrotema)} · ${escapeHtml(item.trilha)}</td>
               <td><span class="badge badge-success">${item.approved_count}/${item.videos_count} aprovado(s)</span></td>
-              <td>${desvioCellHtml}</td>
-              <td><button class="btn btn-secondary btn-sm" data-add-trilha-after="${escapeHtml(item.trilha_id)}" type="button">+ Adicionar trilha</button></td>
-            </tr>`;
-          })
+              <td><button class="btn btn-secondary btn-sm" data-remove-trilha-from-sequence="${escapeHtml(item.trilha_id)}" type="button">Remover</button></td>
+            </tr>`
+          )
           .join("");
 
         body.querySelectorAll("[data-reorder-trilha-up]").forEach((btn) =>
@@ -864,15 +1115,30 @@
         body.querySelectorAll("[data-reorder-trilha-down]").forEach((btn) =>
           btn.addEventListener("click", () => reorderTrilhaSequenceByStep(btn.dataset.reorderTrilhaDown, 1))
         );
-        body.querySelectorAll("[data-add-trilha-after]").forEach((btn) =>
-          btn.addEventListener("click", () => openAddSequenceTrilhaModal(btn.dataset.addTrilhaAfter))
-        );
-        body.querySelectorAll("[data-desvio-select]").forEach((select) =>
-          select.addEventListener("change", () =>
-            handleDesvioSelectChange(select.dataset.trilhaId, select.dataset.desvioId, select.value)
-          )
+        body.querySelectorAll("[data-remove-trilha-from-sequence]").forEach((btn) =>
+          btn.addEventListener("click", () => removeTrilhaFromSequence(btn.dataset.removeTrilhaFromSequence))
         );
         attachSequenceDragAndDrop();
+      }
+
+      async function removeTrilhaFromSequence(trilhaId) {
+        const confirmed = await window.estimuloConfirm(
+          `Remover "${trilhaLabelById(trilhaId)}" da sequência deste perfil?`,
+          { title: "Remover trilha da sequência", confirmLabel: "Remover" }
+        );
+        if (!confirmed) return;
+
+        try {
+          const updated = await requestJson(
+            `/trilhas/sequence/${encodeURIComponent(trilhaId)}?profile_id=${encodeURIComponent(sequenceProfileId)}`,
+            { method: "DELETE" }
+          );
+
+          state.sequence = Array.isArray(updated) ? updated : state.sequence;
+          renderSequenceBody();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+        }
       }
 
       async function handleDesvioSelectChange(afterTrilhaId, existingDesvioId, trilhaDestinoId) {
@@ -994,7 +1260,6 @@
         select.innerHTML = [
           `<option value="">Todos os setores</option>`,
           ...state.setores.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`),
-          `<option value="${NEW_SETOR_OPTION}">+ Novo setor</option>`,
         ].join("");
 
         if (state.setores.some((s) => normalizeSetorKey(s) === normalizeSetorKey(previousValue))) {
@@ -1006,26 +1271,8 @@
       }
 
       document.getElementById("sequenceSetorFilter").addEventListener("change", (event) => {
-        if (event.target.value === NEW_SETOR_OPTION) {
-          const novoSetor = window.prompt("Nome do novo setor:");
-          const trimmedNovoSetor = (novoSetor || "").trim();
-
-          if (!trimmedNovoSetor) {
-            event.target.value = sequenceSetorFilter;
-            return;
-          }
-
-          if (!state.setores.some((s) => normalizeSetorKey(s) === normalizeSetorKey(trimmedNovoSetor))) {
-            state.setores.push(trimmedNovoSetor);
-            state.setores.sort((left, right) => left.localeCompare(right));
-          }
-
-          sequenceSetorFilter = trimmedNovoSetor;
-          renderSequenceSetorFilter();
-        } else {
-          sequenceSetorFilter = event.target.value;
-        }
-
+        sequenceSetorFilter = event.target.value;
+        renderSequenceProfileHint();
         renderSequenceBody();
       });
 
@@ -1105,14 +1352,22 @@
       // clicada (POST /trilhas/sequence com after_trilha_id).
       const addSequenceTrilhaOverlay = document.getElementById("addSequenceTrilhaOverlay");
 
-      function openAddSequenceTrilhaModal(afterTrilhaId) {
-        addSequenceTrilhaAnchorId = afterTrilhaId;
-        document.getElementById("addSequenceTrilhaAnchorLabel").textContent = `Inserir logo após: ${trilhaLabelById(afterTrilhaId)}`;
+      function openAddSequenceTrilhaModal(afterTrilhaId, setorMode) {
+        addSequenceTrilhaAnchorId = afterTrilhaId || null;
+        addSequenceTrilhaSetorMode = setorMode || null;
+
+        document.getElementById("addSequenceTrilhaAnchorLabel").textContent = setorMode
+          ? `A trilha será adicionada ao final do caminho do setor "${setorMode}". Você pode reordenar depois, só para este setor.`
+          : afterTrilhaId
+            ? `Inserir logo após: ${trilhaLabelById(afterTrilhaId)}`
+            : "A trilha será adicionada ao final da sequência. Você pode reordenar depois.";
         document.getElementById("addSequenceTrilhaStatus").textContent = "";
         document.getElementById("addSequenceTrilhaStatus").className = "status-line";
 
-        const idsNaSequencia = new Set(state.sequence.map((item) => item.trilha_id));
-        const disponiveis = allTrilhasSortedForDesvio().filter((t) => !idsNaSequencia.has(t.id));
+        const idsJaNoCaminho = new Set(
+          (setorMode ? buildSequencePathForSetor(setorMode) : state.sequence).map((item) => item.trilha_id)
+        );
+        const disponiveis = allTrilhasSortedForDesvio().filter((t) => !idsJaNoCaminho.has(t.id));
 
         document.getElementById("addSequenceTrilhaSelect").innerHTML = disponiveis.length
           ? disponiveis.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.macrotema)} · ${escapeHtml(t.trilha)}</option>`).join("")
@@ -1125,11 +1380,16 @@
       function closeAddSequenceTrilhaModal() {
         addSequenceTrilhaOverlay.hidden = true;
         addSequenceTrilhaAnchorId = null;
+        addSequenceTrilhaSetorMode = null;
         if (addSequenceTrilhaReleaseTrap) {
           addSequenceTrilhaReleaseTrap();
           addSequenceTrilhaReleaseTrap = null;
         }
       }
+
+      document.getElementById("addSequenceTrilhaButton").addEventListener("click", () =>
+        openAddSequenceTrilhaModal(null, sequenceSetorFilter || null)
+      );
 
       document.querySelectorAll("[data-close-add-sequence-trilha]").forEach((el) =>
         el.addEventListener("click", closeAddSequenceTrilhaModal)
@@ -1154,15 +1414,19 @@
         status.className = "status-line";
 
         try {
-          await requestJson("/trilhas/sequence", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              profile_id: sequenceProfileId,
-              trilha_id: trilhaId,
-              after_trilha_id: addSequenceTrilhaAnchorId,
-            }),
-          });
+          if (addSequenceTrilhaSetorMode) {
+            await addTrilhaToSetorPath(addSequenceTrilhaSetorMode, trilhaId);
+          } else {
+            await requestJson("/trilhas/sequence", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                profile_id: sequenceProfileId,
+                trilha_id: trilhaId,
+                after_trilha_id: addSequenceTrilhaAnchorId,
+              }),
+            });
+          }
 
           closeAddSequenceTrilhaModal();
           await loadSequenceForProfile();

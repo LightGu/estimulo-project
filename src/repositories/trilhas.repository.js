@@ -393,6 +393,25 @@ async function addTrilhaToProfileSequence(trilhaId, profileId, perfilNome, clien
   return data;
 }
 
+// Remove uma trilha da sequencia de um perfil (usada pelo botao "Remover" da
+// aba "Ordem por perfil"). Nao renumera as ordens restantes: ha gaps depois da
+// remocao, mas o ORDER BY ordem da listTrilhaPerfisByProfile continua correto.
+async function removeTrilhaFromProfileSequence(trilhaId, profileId, client) {
+  const { data, error } = await getClient(client)
+    .from("trilha_perfis")
+    .delete()
+    .eq("trilha_id", trilhaId)
+    .eq("profile_id", profileId)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
 // Mesmo padrao de reorderVideosWithinTrilha (trilha_videos.ordem): uma escrita por
 // linha, sem transacao explicita - nao ha unique constraint em (profile_id, ordem)
 // de proposito (ver migration 202607310006), entao nao existe estado intermediario
@@ -508,6 +527,7 @@ module.exports = {
   listTrilhasByPerfil,
   listTrilhasByProfileId,
   reorderTrilhaPerfisForProfile,
+  removeTrilhaFromProfileSequence,
   listTrilhasForVideo,
   listVideoLinksByTrilha,
   remove,

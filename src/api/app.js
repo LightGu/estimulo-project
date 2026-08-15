@@ -133,6 +133,7 @@ function createApp(dependencies = {}) {
   app.get("/trilhas/sequence", trilhasController.listSequence);
   app.post("/trilhas/sequence", trilhasController.addTrilhaToSequence);
   app.patch("/trilhas/sequence/reorder", trilhasController.reorderSequence);
+  app.delete("/trilhas/sequence/:trilhaId", trilhasController.removeFromSequence);
   app.get("/trilhas/desvios", trilhasController.listDesvios);
   app.post("/trilhas/desvios", trilhasController.createDesvio);
   app.delete("/trilhas/desvios/:id", trilhasController.removeDesvio);
