@@ -80,6 +80,11 @@ function buildFixtures() {
       });
       return trilhaPerfis.filter((row) => row.profile_id === profileId).sort((left, right) => left.ordem - right.ordem);
     },
+    removeTrilhaFromProfileSequence: async (trilhaId, profileId) => {
+      const index = trilhaPerfis.findIndex((row) => row.trilha_id === trilhaId && row.profile_id === profileId);
+      if (index === -1) return null;
+      return trilhaPerfis.splice(index, 1)[0];
+    },
     findFirstApprovedVideoByTrilhaAndProfile: async (trilhaId, profile) => {
       const hasPerfil = trilhaPerfis.some((row) => row.trilha_id === trilhaId && row.perfil === profile);
 
@@ -231,12 +236,17 @@ async function testReorderSequenceForProfileValidatesAndPersists() {
   trilhaPerfis.push({ id: "tp-2", trilha_id: "trilha-2", profile_id: "profile-infancia", perfil: "Infância", ordem: 2 });
   const service = createTrilhasService({ repository, videoCatalogRepository, groupProfilesService });
 
-  await service.reorderSequenceForProfile("profile-infancia", ["trilha-2", "trilha-1"]);
+  const result = await service.reorderSequenceForProfile("profile-infancia", ["trilha-2", "trilha-1"]);
 
   const reordered = trilhaPerfis
     .filter((row) => row.profile_id === "profile-infancia")
     .sort((left, right) => left.ordem - right.ordem);
   assert.deepEqual(reordered.map((row) => row.trilha_id), ["trilha-2", "trilha-1"]);
+
+  assert.deepEqual(result.map((item) => item.trilha_id), ["trilha-2", "trilha-1"]);
+  assert.equal(result[0].macrotema, "MARKETING");
+  assert.equal(result[1].videos_count, 1);
+  assert.equal(result.some((item) => item.macrotema === undefined), false);
 
   await assert.rejects(() => service.reorderSequenceForProfile("", ["trilha-1"]), /Profile id is required/);
   await assert.rejects(
@@ -293,6 +303,28 @@ async function testAddTrilhaToSequenceInsertsAfterAnchor() {
   assert.deepEqual(sequence.map((row) => row.trilha_id), ["trilha-1", "trilha-3", "trilha-2"]);
 }
 
+async function testRemoveTrilhaFromSequenceRemovesAndReturnsRemainingDisplayData() {
+  const { repository, videoCatalogRepository, groupProfilesService, trilhas, trilhaPerfis } = buildFixtures();
+  trilhas.push({ id: "trilha-2", macrotema: "MARKETING", trilha: "4.1 Zero" });
+  trilhaPerfis.push({ id: "tp-2", trilha_id: "trilha-2", profile_id: "profile-infancia", perfil: "Infância", ordem: 2 });
+  const service = createTrilhasService({ repository, videoCatalogRepository, groupProfilesService });
+
+  const result = await service.removeTrilhaFromSequence("profile-infancia", "trilha-1");
+
+  assert.deepEqual(result.map((item) => item.trilha_id), ["trilha-2"]);
+  assert.equal(
+    trilhaPerfis.some((row) => row.trilha_id === "trilha-1" && row.profile_id === "profile-infancia"),
+    false
+  );
+
+  await assert.rejects(() => service.removeTrilhaFromSequence("", "trilha-2"), /Profile id is required/);
+  await assert.rejects(() => service.removeTrilhaFromSequence("profile-infancia", ""), /Trilha id is required/);
+  await assert.rejects(
+    () => service.removeTrilhaFromSequence("profile-infancia", "trilha-inexistente"),
+    /Trilha is not part of this profile's sequence/
+  );
+}
+
 async function main() {
   await testCreateTrilhaBuildsOverviewAndValidates();
   await testUpdateTrailPerfisValidatesAndPersists();
@@ -303,6 +335,7 @@ async function main() {
   await testReorderSequenceForProfileValidatesAndPersists();
   await testAddTrilhaToSequenceAppendsAtEndByDefault();
   await testAddTrilhaToSequenceInsertsAfterAnchor();
+  await testRemoveTrilhaFromSequenceRemovesAndReturnsRemainingDisplayData();
 
   console.log("trilhas-service tests OK");
 }

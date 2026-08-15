@@ -114,6 +114,10 @@
       .timeline-step-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
       .timeline-desvio-line { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; padding-left: 10px; border-left: 2px dashed var(--line); }
       .timeline-footer-note { font-size: 12px; color: var(--text-faint); margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+      .timeline-step-clickable { cursor: pointer; border-radius: var(--radius-md); }
+      .timeline-step-clickable:hover { background: var(--surface-sunken); }
+      .timeline-step-clickable:hover .timeline-step-title { color: var(--brand-blue); }
+      .timeline-step-clickable:focus-visible { outline: 2px solid var(--brand-blue); outline-offset: -2px; }
     </style>
   </head>
   <body data-page="envio-automatizado">
@@ -181,6 +185,12 @@
                   <div class="field field-action">
                     <label>Ação</label>
                     <button class="btn" id="dispatchButton" type="button">Disparar campanha</button>
+                    <p class="field-hint">.</p>
+                  </div>
+
+                  <div class="field field-action">
+                    <label>Trilhas concluídas</label>
+                    <button class="btn btn-secondary" id="updateFinishedTrilhasButton" type="button">Atualizar trilhas finalizadas</button>
                     <p class="field-hint">.</p>
                   </div>
                 </div>
@@ -643,14 +653,20 @@
           })
           .join("");
 
+        const assistidos = step.history ? step.history.enviados : 0;
+        const clickable = step.status !== "atual";
+        const clickAttrs = clickable
+          ? ` data-select-step-trilha="${escapeHtml(step.trilha_id)}" tabindex="0" role="button" aria-label="Selecionar a trilha ${escapeHtml(step.trilha)} para este grupo"`
+          : "";
+
         return `
-          <div class="timeline-step is-${step.status}">
+          <div class="timeline-step is-${step.status}${clickable ? " timeline-step-clickable" : ""}"${clickAttrs}>
             <span class="timeline-step-index">${step.status === "concluida" ? "✓" : index + 1}</span>
             <div class="timeline-step-body">
               <div class="timeline-step-title">${escapeHtml(step.macrotema)} · ${escapeHtml(step.trilha)}</div>
               <div class="timeline-step-meta">
                 <span class="badge ${TIMELINE_STATUS_BADGE_CLASS[step.status]}">${TIMELINE_STATUS_LABEL[step.status]}</span>
-                <span style="margin-left:6px;">${step.approved_count}/${step.videos_count} vídeo(s) aprovado(s)</span>
+                <span style="margin-left:6px;">${assistidos}/${step.videos_count} vídeo(s) assistido(s)</span>
               </div>
               ${desviosHtml}
             </div>
@@ -691,13 +707,7 @@
               </div>`
             : `<div class="callout callout-warning" style="margin-top:6px;">Este perfil não tem trilhas cadastradas na jornada automática — configure a ordem em Trilhas de conteúdo.</div>`;
         } else {
-          recommendHtml =
-            nextTrilha && nextTrilha.trilha_id !== group.trilha_id
-              ? `
-                <p class="journey-next-hint">Quando a trilha atual terminar, o avanço automático segue para: <strong>${escapeHtml(formatTrilhaLabel(nextTrilha))}</strong> ${journeyReasonBadgeHtml(nextTrilha.reason)}</p>`
-              : !nextTrilha
-              ? `<p class="journey-next-hint">Esta é a última trilha da jornada automática configurada para este grupo.</p>`
-              : "";
+          recommendHtml = "";
         }
 
         const nextProfile = nextProfileInfo(group.profile_id);
@@ -819,6 +829,72 @@
         );
       }
 
+      // Avança em lote todo grupo cuja trilha atual já terminou (todos os vídeos
+      // aprovados enviados) para a próxima trilha recomendada pela jornada
+      // automática — substitui a confirmação manual grupo a grupo por uma única
+      // ação no topo da página.
+      async function updateFinishedTrilhas() {
+        const groups = eligibleGroups();
+        let updated = 0;
+        let skippedNoNext = 0;
+
+        for (const g of groups) {
+          const progress = state.progressByGroup.get(g.id);
+          if (!progress || !progress.current || !progress.current.concluida) continue;
+
+          const nextTrilha = await loadNextTrilha(g.id);
+          if (!nextTrilha) {
+            skippedNoNext += 1;
+            continue;
+          }
+
+          const payload = { trilha_id: nextTrilha.trilha_id };
+          if (nextTrilha.profile_id && nextTrilha.profile_id !== g.profile_id) {
+            payload.profile_id = nextTrilha.profile_id;
+          }
+
+          const updatedGroup = await requestJson(`/groups/${encodeURIComponent(g.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const index = state.groups.findIndex((item) => item.id === g.id);
+          if (index >= 0) state.groups[index] = updatedGroup;
+          state.progressByGroup.delete(g.id);
+          state.nextTrilhaByGroup.delete(g.id);
+          await loadProgressForGroup(g.id);
+          updated += 1;
+        }
+
+        return { updated, skippedNoNext };
+      }
+
+      document.getElementById("updateFinishedTrilhasButton").addEventListener("click", async () => {
+        const button = document.getElementById("updateFinishedTrilhasButton");
+        button.disabled = true;
+
+        try {
+          const { updated, skippedNoNext } = await updateFinishedTrilhas();
+          renderGroupList();
+          renderDetail();
+
+          if (updated === 0 && skippedNoNext === 0) {
+            window.estimuloAlert("Nenhuma trilha concluída para atualizar no momento.");
+          } else {
+            const parts = [`${updated} trilha(s) atualizada(s) para a próxima da jornada.`];
+            if (skippedNoNext > 0) {
+              parts.push(`${skippedNoNext} grupo(s) concluído(s) não tinham próxima trilha configurada e não foram alterados.`);
+            }
+            window.estimuloAlert(parts.join(" "));
+          }
+        } catch (error) {
+          window.estimuloAlert(`Falha ao atualizar trilhas finalizadas: ${error.message}`);
+        } finally {
+          button.disabled = false;
+        }
+      });
+
       async function renderDetail() {
         const detailCard = document.getElementById("detailCard");
         const group = state.groups.find((g) => g.id === selectedGroupId);
@@ -841,31 +917,6 @@
 
         const history = progress.history || [];
         const status = progress.current || null;
-
-        const historyHtml = history.length
-          ? `
-            <details class="trail-history">
-              <summary class="trail-history-toggle">${icon("chevron")} Histórico de trilhas executadas neste grupo (${history.length})</summary>
-              <div class="table-wrap table-flat" style="margin-top:8px;">
-                <table class="table-compact">
-                  <thead><tr><th>Trilha</th><th>Progresso</th><th>Status</th><th>Última atividade</th></tr></thead>
-                  <tbody>
-                    ${history
-                      .map(
-                        (h) => `
-                      <tr>
-                        <td class="strong">${escapeHtml(h.trilha)}</td>
-                        <td>${h.enviados}/${h.total} vídeos</td>
-                        <td>${h.concluida ? '<span class="badge has-tip badge-success" data-tip="Todos os vídeos aprovados desta trilha já foram enviados a este grupo." data-tip-tone="success">Concluída</span>' : '<span class="badge has-tip badge-warning" data-tip="Ainda há vídeos aprovados desta trilha que não foram enviados a este grupo." data-tip-tone="warning">Parcial</span>'}</td>
-                        <td class="mono">${escapeHtml(h.ultima_atividade || "—")}</td>
-                      </tr>`
-                      )
-                      .join("")}
-                  </tbody>
-                </table>
-              </div>
-            </details>`
-          : `<p class="text-faint" style="font-size:12.5px;">Nenhuma trilha executada anteriormente neste grupo.</p>`;
 
         const trilhaOptions = group.profile_id ? await loadTrailsForProfile(group.profile_id) : [];
         const currentTrilhaLabel = resolveTrilhaLabel(group);
@@ -943,10 +994,6 @@
                   </tbody>
                 </table>
               </div>`;
-
-            if (status.concluida) {
-              progressHtml += `<div class="callout callout-danger" style="margin-top:12px;">Esta trilha já foi concluída para este grupo. Escolha uma nova trilha para continuar os envios.</div>`;
-            }
           }
         }
 
@@ -956,8 +1003,6 @@
             <span class="badge badge-info">Envia vídeo ✓</span>
           </div>
           <div class="card-body">
-            ${historyHtml}
-            <div class="divider" style="margin:14px 0;"></div>
             ${journeyPanelHtml}
             <div class="divider" style="margin:14px 0;"></div>
             <span class="text-muted" style="font-size:12.5px;font-weight:600;display:block;margin-bottom:8px;">Trilha selecionada</span>
@@ -1026,6 +1071,25 @@
             }
           });
         }
+
+        // Clicar numa trilha da linha do tempo ("Ver jornada completa") a seleciona
+        // diretamente para o grupo, dispensando o seletor manual — o backend já
+        // escolhe sozinho o primeiro vídeo aprovado ainda não enviado dessa trilha.
+        document.querySelectorAll("[data-select-step-trilha]").forEach((el) => {
+          const activate = async () => {
+            if (el.dataset.selecting === "1") return;
+            el.dataset.selecting = "1";
+
+            try {
+              await applyTrilhaChange(el.dataset.selectStepTrilha, group.profile_id);
+            } catch (error) {
+              window.estimuloAlert(error.message);
+              el.dataset.selecting = "0";
+            }
+          };
+          el.addEventListener("click", activate);
+          window.estimuloMakeKeyboardClickable(el, activate);
+        });
       }
 
       async function forceNextVideo(groupId, videoId, button) {

@@ -71,6 +71,19 @@ function createTrilhasController(dependencies = {}) {
     }
   }
 
+  async function removeFromSequence(req, res) {
+    try {
+      const sequence = await trilhasService.removeTrilhaFromSequence(
+        req.query?.profile_id,
+        req.params?.trilhaId
+      );
+
+      return res.status(200).json(sequence);
+    } catch (error) {
+      return handleError(error, res);
+    }
+  }
+
   async function listDesvios(req, res) {
     try {
       const desvios = await trilhaSequenceService.listDesviosByProfile(req.query?.profile_id);
@@ -258,6 +271,7 @@ function createTrilhasController(dependencies = {}) {
     listSequence,
     addTrilhaToSequence,
     reorderSequence,
+    removeFromSequence,
     listDesvios,
     createDesvio,
     removeDesvio,

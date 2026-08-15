@@ -161,6 +161,14 @@ function createTrilhasService(dependencies = {}) {
       repository.listTrilhasByProfileId(trimmed),
     ]);
 
+    return enrichSequenceRows(sequenceRows, trilhas);
+  }
+
+  // Compartilhado por listSequenceForProfile e reorderSequenceForProfile: junta
+  // as linhas de trilha_perfis (trilha_id+ordem) com os dados de exibicao da
+  // trilha (macrotema, trilha, contagem de videos) - sem isso a tela "Ordem por
+  // perfil" recebe so os campos crus e renderiza "undefined/undefined".
+  async function enrichSequenceRows(sequenceRows, trilhas) {
     const overview = await buildOverview(trilhas);
     const overviewById = new Map(overview.map((trilha) => [trilha.id, trilha]));
 
@@ -250,7 +258,40 @@ function createTrilhasService(dependencies = {}) {
       throw new Error("orderedTrilhaIds must include every trilha currently in this profile's sequence");
     }
 
-    return repository.reorderTrilhaPerfisForProfile(trimmed, orderedTrilhaIds);
+    const [reordered, trilhas] = await Promise.all([
+      repository.reorderTrilhaPerfisForProfile(trimmed, orderedTrilhaIds),
+      repository.listTrilhasByProfileId(trimmed),
+    ]);
+
+    return enrichSequenceRows(reordered, trilhas);
+  }
+
+  // Usada pelo botao "Remover" da aba "Ordem por perfil". Nao renumera as
+  // ordens restantes - ver removeTrilhaFromProfileSequence no repository.
+  async function removeTrilhaFromSequence(profileId, trilhaId) {
+    const trimmedProfileId = String(profileId || "").trim();
+    const trimmedTrilhaId = String(trilhaId || "").trim();
+
+    if (!trimmedProfileId) {
+      throw new Error("Profile id is required");
+    }
+
+    if (!trimmedTrilhaId) {
+      throw new Error("Trilha id is required");
+    }
+
+    const existing = await repository.listTrilhaPerfisByProfile(trimmedProfileId);
+
+    if (!existing.some((row) => row.trilha_id === trimmedTrilhaId)) {
+      throw new Error("Trilha is not part of this profile's sequence");
+    }
+
+    await repository.removeTrilhaFromProfileSequence(trimmedTrilhaId, trimmedProfileId);
+
+    const trilhas = await repository.listTrilhasByProfileId(trimmedProfileId);
+    const remaining = await repository.listTrilhaPerfisByProfile(trimmedProfileId);
+
+    return enrichSequenceRows(remaining, trilhas);
   }
 
   async function listSelectableVideos() {
@@ -475,6 +516,7 @@ function createTrilhasService(dependencies = {}) {
     addTrilhaToSequence,
     listSelectableVideos,
     reorderSequenceForProfile,
+    removeTrilhaFromSequence,
     createTrilha,
     addVideoToTrilha,
     removeVideoFromTrilha,
