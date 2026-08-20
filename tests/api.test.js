@@ -5,8 +5,8 @@ const createApp = require("../src/api/app");
 
 async function main() {
   const app = createApp({
-    accessGate: {
-      password: null,
+    authGate: {
+      enabled: false,
     },
     healthController: {
       redisClient: {
@@ -279,6 +279,22 @@ async function main() {
         current: { trilha: "Trilha A", total: 2, enviados: 1, concluida: false, next_video: { id: "video-a2" }, rows: [] },
         history: [{ trilha: "Trilha B", enviados: 3, total: 3, concluida: true, ultima_atividade: "2026-07-10" }],
       }),
+    },
+    authService: {
+      listUsers: async () => [
+        { id: "app-user-1", username: "operador", active: true, created_at: "2026-07-01T00:00:00.000Z", last_login_at: null },
+      ],
+      createUser: async ({ username, password }) => {
+        if (!username) throw new Error("Informe um nome de usuario.");
+        if (!password || password.length < 8) throw new Error("A senha deve ter ao menos 8 caracteres.");
+        if (username === "operador") {
+          const error = new Error("duplicate key value violates unique constraint");
+          error.code = "23505";
+          throw error;
+        }
+        return { id: "app-user-2", username, active: true, created_at: "2026-08-20T00:00:00.000Z", last_login_at: null };
+      },
+      setActive: async (id, active) => ({ id, username: "operador", active, created_at: "2026-07-01T00:00:00.000Z" }),
     },
   });
 
@@ -842,6 +858,50 @@ async function main() {
 
     const missingGroupProgressResponse = await fetch(`http://127.0.0.1:${port}/groups/group-missing/video-progress`);
     assert.equal(missingGroupProgressResponse.status, 404);
+
+    process.env.ESTIMULO_ADMIN_MASTER_PASSWORD = "!35Estimulo@246";
+
+    const listAppUsersResponse = await fetch(`http://127.0.0.1:${port}/settings/app-users`);
+    assert.equal(listAppUsersResponse.status, 200);
+    const appUsersPayload = await listAppUsersResponse.json();
+    assert.equal(appUsersPayload[0].username, "operador");
+    assert.equal(appUsersPayload[0].password_hash, undefined);
+
+    // /access/register fica fora do authGate de proposito: qualquer um pode
+    // criar seu proprio login sabendo so a senha mestra, sem sessao previa.
+    const wrongMasterPasswordResponse = await fetch(`http://127.0.0.1:${port}/access/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "novo", password: "senhaforte1", master_password: "errada" }),
+    });
+    assert.equal(wrongMasterPasswordResponse.status, 403);
+
+    const duplicateAppUserResponse = await fetch(`http://127.0.0.1:${port}/access/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "operador", password: "senhaforte1", master_password: "!35Estimulo@246" }),
+    });
+    assert.equal(duplicateAppUserResponse.status, 409);
+
+    const createAppUserResponse = await fetch(`http://127.0.0.1:${port}/access/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: "novo", password: "senhaforte1", master_password: "!35Estimulo@246" }),
+    });
+    assert.equal(createAppUserResponse.status, 201);
+    const createAppUserPayload = await createAppUserResponse.json();
+    assert.equal(createAppUserPayload.username, "novo");
+
+    const deactivateAppUserResponse = await fetch(`http://127.0.0.1:${port}/settings/app-users/app-user-1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active: false, master_password: "!35Estimulo@246" }),
+    });
+    assert.equal(deactivateAppUserResponse.status, 200);
+    const deactivateAppUserPayload = await deactivateAppUserResponse.json();
+    assert.equal(deactivateAppUserPayload.active, false);
+
+    delete process.env.ESTIMULO_ADMIN_MASTER_PASSWORD;
 
     const healthResponse = await fetch(`http://127.0.0.1:${port}/health`);
     assert.equal(healthResponse.status, 200);
