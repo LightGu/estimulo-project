@@ -1,0 +1,17 @@
+.git
+.env
+.env.*
+!.env.example
+node_modules
+coverage
+logs
+storage/*
+!storage/.gitkeep
+.tmp
+tmp
+.tmp_preview
+credentials
+*.log
+README.md
+docs
+tests

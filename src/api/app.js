@@ -32,6 +32,10 @@ const whatsappInstancesService = require("../services/whatsapp-instances.service
 
 function createApp(dependencies = {}) {
   const app = express();
+  const allowedOrigins = String(process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   app.set("trust proxy", dependencies.trustProxy || process.env.EXPRESS_TRUST_PROXY || "loopback");
   app.use(
     cors({
@@ -43,7 +47,10 @@ function createApp(dependencies = {}) {
 
         try {
           const url = new URL(origin);
-          callback(null, ["localhost", "127.0.0.1", "::1"].includes(url.hostname));
+          callback(
+            null,
+            ["localhost", "127.0.0.1", "::1"].includes(url.hostname) || allowedOrigins.includes(origin)
+          );
         } catch (error) {
           callback(null, false);
         }
