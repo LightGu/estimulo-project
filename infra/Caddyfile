@@ -1,0 +1,3 @@
+{$ESTIMULO_PUBLIC_HOSTNAME} {
+	reverse_proxy api:3000
+}

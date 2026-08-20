@@ -123,6 +123,44 @@ Reiniciar:
 docker compose --env-file .env -f infra/docker-compose.yml restart
 ```
 
+## 4.1. HTTPS sem dominio proprio
+
+Acessar so por IP em HTTP (sem TLS) costuma ser bloqueado por firewall/proxy
+corporativo (categoria "desconhecida" por nao ter dominio nem certificado) e
+sempre mostra "Nao seguro" no navegador. Sem comprar dominio, resolve com um
+host gratuito que resolve para o IP da VM, tipo `sslip.io` (troque os pontos
+do IP por hifen): para `163.176.107.172`, o host e' `163-176-107-172.sslip.io`.
+
+Isso nao e garantido contra todo filtro corporativo - alguns bloqueiam esses
+hosts de "wildcard DNS" tambem, por serem usados historicamente para burlar
+bloqueio por dominio. Se persistir bloqueado, o caminho mais confiavel e' um
+dominio de verdade (mesmo o mais barato de um registrador resolve isso melhor).
+
+Passo a passo com o perfil `proxy` (roda o Caddy, que emite/renova o
+certificado Let's Encrypt automaticamente):
+
+```env
+# no .env
+ESTIMULO_PUBLIC_HOSTNAME=163-176-107-172.sslip.io
+ESTIMULO_COOKIE_SECURE=true
+EXPRESS_TRUST_PROXY=1
+```
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.yml --profile workers --profile proxy up -d --build
+```
+
+Libere as portas 80 e 443 na Security List/NSG (mesmo passo da secao de rede
+abaixo, so que para essas portas). Depois teste:
+
+```bash
+curl -i https://163-176-107-172.sslip.io/health
+```
+
+Se `ESTIMULO_COOKIE_SECURE` continuar em `false` (do teste por IP puro em
+HTTP), o cookie de sessao nao vai ser aceito em HTTPS por SameSite/Secure
+incoerentes - sempre volte para `true` (ou remova a variavel) ao ligar o Caddy.
+
 Atualizar (use os mesmos perfis escolhidos no deploy):
 
 ```bash
