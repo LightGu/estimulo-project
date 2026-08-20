@@ -6,6 +6,7 @@
 (function () {
   const LOCAL_API_BASE_URL = "http://127.0.0.1:3000";
   const API_PATH_PREFIXES = [
+    "/access",
     "/campaigns",
     "/groups",
     "/health",
@@ -58,7 +59,16 @@
     }
 
     const nativeFetch = window.fetch.bind(window);
-    window.fetch = (input, options) => nativeFetch(resolveLocalApiInput(input), options);
+    window.fetch = (input, options) => {
+      const resolvedInput = resolveLocalApiInput(input);
+      // Quando a chamada foi redirecionada para a porta da API (dev, painel
+      // aberto via file://), o cookie de sessao so viaja se a request pedir
+      // credentials explicitamente - sem isso o /access/logout e as chamadas
+      // autenticadas nesse modo cairiam sempre como anonimas.
+      const crossOrigin = typeof resolvedInput === "string" && resolvedInput !== input;
+      const finalOptions = crossOrigin ? { credentials: "include", ...(options || {}) } : options;
+      return nativeFetch(resolvedInput, finalOptions);
+    };
     window.__estimuloLocalApiFetchFallbackInstalled = true;
   }
 
@@ -400,6 +410,42 @@
     notifPollTimer = setInterval(refreshNotifications, NOTIF_POLL_INTERVAL_MS);
   }
 
+  // ---------- Logout button (topbar) ----------
+  // Encerra a sessao no servidor (invalida o cookie estimulo_session) e manda
+  // o usuario de volta para a tela de login. Fica ao lado do sino/tema em
+  // toda pagina que carrega nav.js.
+  const LOGOUT_ICON_SVG =
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></svg>';
+
+  async function handleLogoutClick() {
+    const button = document.getElementById("logoutButton");
+    if (button) button.disabled = true;
+
+    try {
+      await fetch("/access/logout", { method: "POST" });
+    } catch (error) {
+      /* mesmo se a chamada falhar, manda para o login: a sessao pode ja ter expirado */
+    }
+
+    window.location.href = "access.html";
+  }
+
+  function initLogoutButton() {
+    const actions = document.querySelector(".topbar-actions");
+    if (!actions || document.getElementById("logoutButton")) return;
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "logoutButton";
+    btn.className = "logout-btn";
+    btn.setAttribute("aria-label", "Sair");
+    btn.title = "Sair";
+    btn.innerHTML = LOGOUT_ICON_SVG;
+    btn.addEventListener("click", handleLogoutClick);
+
+    actions.appendChild(btn);
+  }
+
   // ---------- User chip (topbar) ----------
   // Loads the current user's display name from /settings/profile and fills
   // in the topbar chip (avatar initials + name) on every page.
@@ -440,6 +486,7 @@
     render();
     initThemeToggle();
     initNotificationBell();
+    initLogoutButton();
     window.estimuloRefreshUserChip();
   });
 
