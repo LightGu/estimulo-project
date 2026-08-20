@@ -8,15 +8,27 @@
 */
 (function () {
   let bubble = null;
+  const BUBBLE_ID = "shared-tooltip-bubble";
+  const FOCUSABLE_SELECTOR = "a[href], button, input, select, textarea, [tabindex]";
 
   function ensureBubble() {
     if (!bubble) {
       bubble = document.createElement("div");
+      bubble.id = BUBBLE_ID;
       bubble.className = "tooltip-bubble";
+      bubble.setAttribute("role", "tooltip");
       document.body.appendChild(bubble);
     }
     return bubble;
   }
+
+  function makeFocusable(target) {
+    if (!target.matches(FOCUSABLE_SELECTOR)) {
+      target.setAttribute("tabindex", "0");
+    }
+  }
+
+  document.querySelectorAll(".has-tip").forEach(makeFocusable);
 
   function show(target) {
     const tip = target.dataset.tip;
@@ -25,6 +37,7 @@
     el.classList.remove("visible");
     el.className = `tooltip-bubble${target.dataset.tipTone ? ` tooltip-bubble--${target.dataset.tipTone}` : ""}`;
     el.textContent = tip;
+    target.setAttribute("aria-describedby", BUBBLE_ID);
 
     const targetRect = target.getBoundingClientRect();
     const bubbleRect = el.getBoundingClientRect();
@@ -55,4 +68,8 @@
   });
   window.addEventListener("scroll", hide, true);
   window.addEventListener("resize", hide);
+
+  new MutationObserver(() => {
+    document.querySelectorAll(".has-tip").forEach(makeFocusable);
+  }).observe(document.body, { childList: true, subtree: true });
 })();

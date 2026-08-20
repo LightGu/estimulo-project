@@ -99,6 +99,29 @@ async function create(payload, client) {
   return data;
 }
 
+// Reivindicacao atomica de "este trigger e quem cria os jobs de disparo":
+// so grava trigger_fired_at se ainda estiver nulo e a campanha nao estiver
+// pausada/cancelada. Evita que uma campanha pausada/cancelada bem no instante
+// em que o job do campaign-trigger dispara ainda assim gere os jobs por grupo,
+// e tambem protege contra um segundo job de trigger perdido para a mesma
+// campanha (so o primeiro a reivindicar segue adiante).
+async function claimTriggerFired(id, client) {
+  const { data, error } = await getClient(client)
+    .from("campaigns")
+    .update({ trigger_fired_at: new Date().toISOString() })
+    .eq("id", id)
+    .is("trigger_fired_at", null)
+    .not("status", "in", "(pausado,cancelado)")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
 async function update(id, payload, client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
@@ -130,6 +153,7 @@ async function remove(id, client) {
 }
 
 module.exports = {
+  claimTriggerFired,
   create,
   delete: remove,
   findAll,

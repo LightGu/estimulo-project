@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -89,6 +94,7 @@
     </style>
   </head>
   <body data-page="calendario">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -103,17 +109,17 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <section class="page-section">
             <div class="toolbar">
               <div class="cal-nav">
-                <button id="prevMonth" type="button">‹</button>
+                <button id="prevMonth" type="button" aria-label="Mês anterior">‹</button>
                 <strong id="monthLabel" style="min-width:170px;text-align:center;"></strong>
-                <button id="nextMonth" type="button">›</button>
+                <button id="nextMonth" type="button" aria-label="Próximo mês">›</button>
               </div>
               <div class="field" style="min-width:200px;">
                 <label for="nameFilter">Pesquisar por nome</label>
-                <input id="nameFilter" type="search" placeholder="Nome da campanha...">
+                <input id="nameFilter" type="search" placeholder="Nome da campanha…">
               </div>
               <div class="toolbar-spacer"></div>
               <span class="text-faint" style="font-size:12px;">Clique em um dia para ver os detalhes</span>
@@ -285,7 +291,7 @@
             }
             const count = campaignsForDate(cell.dateStr).length;
             return `
-              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}${count ? " has-items" : ""}" data-date="${cell.dateStr}">
+              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}${count ? " has-items" : ""}" data-date="${cell.dateStr}"${count ? ` aria-label="${count} programação${count > 1 ? "ões" : ""} em ${cell.day}"` : ""}>
                 <span class="cal-daynum">${cell.day}</span>
                 <div class="cal-cell-body">
                   ${count ? `<span class="cal-count-pill"><span class="dot"></span>${count} programação${count > 1 ? "ões" : ""}</span>` : ""}
@@ -295,7 +301,9 @@
           .join("");
 
         document.querySelectorAll(".cal-cell.has-items").forEach((el) => {
-          el.addEventListener("click", () => openDayDrawer(el.dataset.date));
+          const activate = () => openDayDrawer(el.dataset.date);
+          el.addEventListener("click", activate);
+          window.estimuloMakeKeyboardClickable(el, activate);
         });
       }
 

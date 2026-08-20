@@ -296,6 +296,37 @@ async function main() {
     assert.deepEqual(reassignTrilhaCalls[0], ["trilha-a"]);
   }
 
+  // ---------- reorder ----------
+  {
+    const reorderCalls = [];
+    const clearCalls = [];
+    const repository = {
+      findAll: async () => [
+        { id: "profile-1", nome: "Pré-infância", ordem: 1 },
+        { id: "profile-2", nome: "Infância", ordem: 2 },
+        { id: "profile-3", nome: "Adolescência", ordem: null },
+      ],
+      clearOrdem: async (ids) => {
+        clearCalls.push(ids);
+      },
+      reorder: async (ids) => {
+        reorderCalls.push(ids);
+        return ids.map((id, index) => ({ id, ordem: index + 1 }));
+      },
+    };
+    const service = createGroupProfilesService({ repository });
+
+    // Perfil-2 sai da jornada (nao esta na lista) e deveria ter ordem limpo; a
+    // ordem final da lista dada e o que conta, nao a ordem anterior.
+    const reordered = await service.reorder(["profile-3", "profile-1"]);
+
+    assert.deepEqual(reorderCalls[0], ["profile-3", "profile-1"]);
+    assert.deepEqual(clearCalls[0], ["profile-2"]);
+    assert.equal(reordered.length, 2);
+
+    await assert.rejects(() => service.reorder(["profile-inexistente"]), /Profile not found/);
+  }
+
   console.log("group profiles service tests OK");
 }
 

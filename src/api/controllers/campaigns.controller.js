@@ -222,14 +222,117 @@ function createCampaignsController(dependencies = {}) {
     }
   }
 
+  async function pause(req, res) {
+    try {
+      const campaign = await campaignService.pauseCampaign(req.params.id);
+
+      return res.status(200).json(campaign);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Campaign id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Campaign not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      if (error?.code === "CAMPAIGN_NOT_PAUSABLE") {
+        return res.status(409).json({ error: message });
+      }
+
+      console.error(
+        JSON.stringify({
+          event: "campaigns.pause.failed",
+          campaign_id: req.params.id,
+          error_message: message,
+        })
+      );
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  async function resume(req, res) {
+    try {
+      const campaign = await campaignService.resumeCampaign(req.params.id);
+
+      return res.status(200).json(campaign);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Campaign id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Campaign not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      if (error?.code === "CAMPAIGN_NOT_PAUSED") {
+        return res.status(409).json({ error: message });
+      }
+
+      if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
+        return res.status(409).json({ error: message, conflicts: error.conflicts });
+      }
+
+      console.error(
+        JSON.stringify({
+          event: "campaigns.resume.failed",
+          campaign_id: req.params.id,
+          error_message: message,
+        })
+      );
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  async function cancel(req, res) {
+    try {
+      const campaign = await campaignService.cancelCampaign(req.params.id);
+
+      return res.status(200).json(campaign);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Campaign id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Campaign not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      if (error?.code === "CAMPAIGN_NOT_CANCELABLE") {
+        return res.status(409).json({ error: message });
+      }
+
+      console.error(
+        JSON.stringify({
+          event: "campaigns.cancel.failed",
+          campaign_id: req.params.id,
+          error_message: message,
+        })
+      );
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   return {
+    cancel,
     confirmDispatch,
     create,
     dispatch,
     getById,
     list,
     listGroups,
+    pause,
     remove,
+    resume,
   };
 }
 

@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -28,6 +33,7 @@
     </style>
   </head>
   <body data-page="grupos">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -42,7 +48,7 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <section class="page-section">
             <div class="toolbar">
               <div class="field" style="min-width:240px;">
@@ -69,7 +75,7 @@
 
             <div class="card sync-panel" id="syncPanel">
               <div class="card-body" style="width:100%;">
-                <div id="syncStatus" class="text-muted">Sincronizando grupos com a Evolution API...</div>
+                <div id="syncStatus" class="text-muted" aria-live="polite">Sincronizando grupos com a Evolution API…</div>
                 <div id="newGroupsWrap" style="margin-top:14px;"></div>
               </div>
             </div>
@@ -86,6 +92,7 @@
                     <th>Grupo</th>
                     <th>Organiza&ccedil;&atilde;o</th>
                     <th>Perfil</th>
+                    <th>Setor</th>
                     <th>Classifica&ccedil;&atilde;o</th>
                     <th>Envia v&iacute;deo</th>
                     <th>Trilha</th>
@@ -102,7 +109,7 @@
     </div>
 
     <div class="overlay" id="editOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
         <div class="modal-header">
           <h3 id="editTitle">Editar grupo</h3>
           <button class="icon-btn-close" id="closeModal" type="button" aria-label="Fechar">&times;</button>
@@ -117,6 +124,18 @@
             <select id="editSegmento">
               <option value="">Sem perfil</option>
             </select>
+          </div>
+
+          <div class="field">
+            <label for="editSetor">Setor</label>
+            <select id="editSetor">
+              <option value="">Sem setor</option>
+              <option value="__new__">+ Adicionar novo setor</option>
+            </select>
+          </div>
+          <div class="field" id="newSetorField" hidden>
+            <label for="newSetorInput">Nome do novo setor</label>
+            <input id="newSetorInput" type="text" placeholder="Ex.: Comercial">
           </div>
 
           <div class="field" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
@@ -146,6 +165,7 @@
         whatsappInstances: [],
       };
       let editingGroupId = null;
+      let editReleaseTrap = null;
 
       function text(value, fallback = "-") {
         if (value === null || value === undefined || value === "") return fallback;
@@ -226,12 +246,26 @@
           .toLowerCase();
       }
 
-      function normalizeSegmentoOption(value) {
+      // Fallback so para grupos legados sem profile_id (ainda nao passaram pela
+      // migracao de backfill/re-selecao manual): tenta achar o perfil canonico cujo
+      // nome bate com o texto livre de segmento.
+      function resolveProfileIdFromSegmento(value) {
         const normalized = normalizeComparable(value);
         if (!normalized) return "";
 
-        const match = state.profiles.find((profile) => normalizeComparable(profile) === normalized);
-        return match || "";
+        const match = state.profiles.find((profile) => normalizeComparable(profile.nome) === normalized);
+        return match ? match.id : "";
+      }
+
+      function knownSetores() {
+        const seen = new Map();
+        state.groups.forEach((group) => {
+          const value = String(group.setor || "").trim();
+          if (!value) return;
+          const key = normalizeComparable(value);
+          if (!seen.has(key)) seen.set(key, value);
+        });
+        return [...seen.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
       }
 
       function matchesFilters(group) {
@@ -246,7 +280,7 @@
 
       function renderGroups() {
         const showInstanceColumn = hasMultipleInstances();
-        const colspan = showInstanceColumn ? 8 : 7;
+        const colspan = showInstanceColumn ? 9 : 8;
         document.getElementById("instanceColumnHeader").hidden = !showInstanceColumn;
 
         const filtered = state.groups.filter(matchesFilters);
@@ -274,6 +308,7 @@
                 </td>
                 <td>${escapeHtml(orgName(group))}</td>
                 <td>${group.segmento ? escapeHtml(group.segmento) : '<span class="text-faint">-</span>'}</td>
+                <td>${group.setor ? escapeHtml(group.setor) : '<span class="text-faint">-</span>'}</td>
                 <td>${classificationBadge(group)}</td>
                 <td>${enviaVideoBadge(group)}</td>
                 <td>${(() => {
@@ -307,10 +342,32 @@
 
         state.profiles.forEach((profile) => {
           const option = document.createElement("option");
-          option.value = profile;
-          option.textContent = profile;
+          option.value = profile.id;
+          option.textContent = profile.nome;
           select.appendChild(option);
         });
+      }
+
+      function populateSetores(select, selectedValue) {
+        select.innerHTML = '<option value="">Sem setor</option>';
+
+        knownSetores().forEach((setor) => {
+          const option = document.createElement("option");
+          option.value = setor;
+          option.textContent = setor;
+          select.appendChild(option);
+        });
+
+        const newOption = document.createElement("option");
+        newOption.value = "__new__";
+        newOption.textContent = "+ Adicionar novo setor";
+        select.appendChild(newOption);
+
+        const normalizedSelected = normalizeComparable(selectedValue);
+        const matchedOption = [...select.options].find(
+          (option) => option.value !== "__new__" && normalizeComparable(option.value) === normalizedSelected
+        );
+        select.value = matchedOption ? matchedOption.value : "";
       }
 
       function openEdit(groupId) {
@@ -322,16 +379,24 @@
         populateOrganizations(document.getElementById("editOrg"));
         document.getElementById("editOrg").value = group.organization_id || "";
         populateSegmentos(document.getElementById("editSegmento"));
-        document.getElementById("editSegmento").value = normalizeSegmentoOption(group.segmento);
+        document.getElementById("editSegmento").value = group.profile_id || resolveProfileIdFromSegmento(group.segmento);
+        populateSetores(document.getElementById("editSetor"), group.setor || "");
+        document.getElementById("newSetorField").hidden = true;
+        document.getElementById("newSetorInput").value = "";
         document.getElementById("editEnviaVideo").checked = group.envia_video === true;
         document.getElementById("editStatus").textContent = "";
         document.getElementById("editStatus").className = "status-line";
         document.getElementById("editOverlay").hidden = false;
+        editReleaseTrap = window.estimuloTrapFocus(document.getElementById("editOverlay"));
       }
 
       function closeEdit() {
         document.getElementById("editOverlay").hidden = true;
         editingGroupId = null;
+        if (editReleaseTrap) {
+          editReleaseTrap();
+          editReleaseTrap = null;
+        }
       }
 
       async function saveEdit() {
@@ -341,13 +406,25 @@
         const saveButton = document.getElementById("saveEdit");
         const status = document.getElementById("editStatus");
         saveButton.disabled = true;
-        status.textContent = "Salvando alteracoes...";
+        status.textContent = "Salvando alteracoes…";
         status.className = "status-line";
 
         try {
-          const selectedSegmento = document.getElementById("editSegmento").value;
-          if (group.segmento && !normalizeSegmentoOption(group.segmento) && !selectedSegmento) {
+          const selectedProfileId = document.getElementById("editSegmento").value;
+          const currentProfileId = group.profile_id || resolveProfileIdFromSegmento(group.segmento);
+          if (group.segmento && !currentProfileId && !selectedProfileId) {
             throw new Error("Selecione um dos perfis validos antes de salvar.");
+          }
+
+          let setor = document.getElementById("editSetor").value;
+
+          if (setor === "__new__") {
+            const novoSetorNome = document.getElementById("newSetorInput").value.trim();
+            if (!novoSetorNome) {
+              throw new Error("Informe o nome do novo setor.");
+            }
+
+            setor = novoSetorNome;
           }
 
           const updatedGroup = await requestJson(`/groups/${encodeURIComponent(editingGroupId)}`, {
@@ -355,7 +432,8 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               organization_id: document.getElementById("editOrg").value || null,
-              segmento: selectedSegmento || null,
+              profile_id: selectedProfileId || null,
+              setor: setor || null,
               envia_video: document.getElementById("editEnviaVideo").checked,
             }),
           });
@@ -374,7 +452,7 @@
       }
 
       function renderLoadError(error) {
-        const colspan = hasMultipleInstances() ? 8 : 7;
+        const colspan = hasMultipleInstances() ? 9 : 8;
         document.getElementById("resultCount").textContent = "";
         document.getElementById("groupsBody").innerHTML = `
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
@@ -406,7 +484,7 @@
 
       async function loadProfiles() {
         const profiles = await requestJson("/group-profiles");
-        state.profiles = Array.isArray(profiles) ? profiles.map((p) => p.nome) : [];
+        state.profiles = Array.isArray(profiles) ? profiles : [];
       }
 
       async function loadTrilhas() {
@@ -418,7 +496,7 @@
       }
 
       async function loadGroups() {
-        const colspan = hasMultipleInstances() ? 8 : 7;
+        const colspan = hasMultipleInstances() ? 9 : 8;
         document.getElementById("groupsBody").innerHTML = `
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
 
@@ -471,7 +549,7 @@
 
         panel.classList.add("open");
         processedWrap.innerHTML = "";
-        status.textContent = "Sincronizando grupos com a Evolution API...";
+        status.textContent = "Sincronizando grupos com a Evolution API…";
         button.disabled = true;
 
         try {
@@ -517,7 +595,15 @@
       document.getElementById("editOverlay").addEventListener("click", (event) => {
         if (event.target.id === "editOverlay") closeEdit();
       });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !document.getElementById("editOverlay").hidden) closeEdit();
+      });
       document.getElementById("saveEdit").addEventListener("click", saveEdit);
+      document.getElementById("editSetor").addEventListener("change", (event) => {
+        const newSetorField = document.getElementById("newSetorField");
+        newSetorField.hidden = event.target.value !== "__new__";
+        if (!newSetorField.hidden) document.getElementById("newSetorInput").focus();
+      });
       document.getElementById("searchInput").addEventListener("input", renderGroups);
       document.getElementById("statusFilter").addEventListener("change", renderGroups);
       document.getElementById("instanceFilter").addEventListener("change", loadGroups);

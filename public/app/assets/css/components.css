@@ -132,7 +132,15 @@
   font-size: 14px;
 }
 
-.notif-panel-mark-all {
+.notif-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+
+.notif-panel-mark-all,
+.notif-panel-clear {
   border: 0;
   background: none;
   color: var(--primary);
@@ -140,9 +148,15 @@
   font-weight: 600;
   cursor: pointer;
   padding: 0;
+  white-space: nowrap;
 }
 
-.notif-panel-mark-all:hover {
+.notif-panel-clear {
+  color: var(--text-muted);
+}
+
+.notif-panel-mark-all:hover,
+.notif-panel-clear:hover {
   text-decoration: underline;
 }
 
@@ -786,6 +800,7 @@ td.mono {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -802,6 +817,7 @@ td.mono {
   justify-content: center;
   padding: 24px;
   z-index: 50;
+  overscroll-behavior: contain;
 }
 
 .overlay[hidden] {
@@ -812,6 +828,7 @@ td.mono {
   width: min(560px, 100%);
   max-height: 90vh;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);

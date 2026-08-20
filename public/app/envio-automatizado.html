@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -94,9 +99,29 @@
       .kpi-inline-row .stat-value { font-size: 20px; }
       .kpi-inline-row .kpi-item-ring { text-align: center; font-size: 10.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
       .kpi-inline-row .kpi-item-ring .stat-ring { margin: 0 auto 4px; }
+
+      .journey-panel { margin-top: 4px; }
+      .journey-recommend-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-strong); margin-top: 6px; }
+      .journey-next-hint { font-size: 12px; color: var(--text-faint); margin-top: 10px; }
+      .journey-timeline-list { display: flex; flex-direction: column; margin-top: 8px; }
+      .timeline-step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+      .timeline-step:first-child { border-top: 0; }
+      .timeline-step-index { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex: none; color: var(--text-muted); }
+      .timeline-step.is-concluida .timeline-step-index { background: var(--success); color: #fff; }
+      .timeline-step.is-atual .timeline-step-index { background: var(--brand-blue); color: #fff; }
+      .timeline-step-body { flex: 1; min-width: 0; }
+      .timeline-step-title { font-size: 13px; font-weight: 600; }
+      .timeline-step-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+      .timeline-desvio-line { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; padding-left: 10px; border-left: 2px dashed var(--line); }
+      .timeline-footer-note { font-size: 12px; color: var(--text-faint); margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+      .timeline-step-clickable { cursor: pointer; border-radius: var(--radius-md); }
+      .timeline-step-clickable:hover { background: var(--surface-sunken); }
+      .timeline-step-clickable:hover .timeline-step-title { color: var(--brand-blue); }
+      .timeline-step-clickable:focus-visible { outline: 2px solid var(--brand-blue); outline-offset: -2px; }
     </style>
   </head>
   <body data-page="envio-automatizado">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -111,7 +136,7 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <!-- ETAPA 1: seleção de grupos e trilhas -->
           <div id="stepConfig">
             <section class="page-section">
@@ -136,12 +161,20 @@
                   </div>
 
                   <div class="field field-delay">
-                    <label>Delay randômico (min)</label>
+                    <label>Delay randômico mín.</label>
                     <div style="display:flex;gap:10px;">
-                      <input id="delayMin" type="number" min="1" value="15" title="Mínimo">
-                      <input id="delayMax" type="number" min="1" value="45" title="Máximo">
+                      <input id="delayMin" type="number" min="0" value="15" title="Minutos">
+                      <input id="delayMinSec" type="number" min="0" max="59" value="0" title="Segundos">
                     </div>
-                    <p class="field-hint">Mínimo e máximo entre envios.</p>
+                    <p class="field-hint">Minutos e segundos.</p>
+                  </div>
+
+                  <div class="field field-delay">
+                    <label>Delay randômico máx.</label>
+                    <div style="display:flex;gap:10px;">
+                      <input id="delayMax" type="number" min="0" value="45" title="Minutos">
+                    </div>
+                    <p class="field-hint">Minutos entre envios.</p>
                   </div>
 
                   <div class="field field-timezone">
@@ -154,9 +187,15 @@
                     <button class="btn" id="dispatchButton" type="button">Disparar campanha</button>
                     <p class="field-hint">.</p>
                   </div>
+
+                  <div class="field field-action">
+                    <label>Trilhas concluídas</label>
+                    <button class="btn btn-secondary" id="updateFinishedTrilhasButton" type="button">Atualizar trilhas finalizadas</button>
+                    <p class="field-hint">.</p>
+                  </div>
                 </div>
               </div>
-              <div class="callout callout-warning" id="validationCallout" style="display:none;"></div>
+              <div class="callout callout-warning" id="validationCallout" style="display:none;" aria-live="polite"></div>
             </section>
 
             <section class="page-section">
@@ -255,7 +294,7 @@
                     <button data-filter="gerado">Gerado</button>
                     <button data-filter="pendente">Pendente</button>
                   </div>
-                  <input type="search" id="captionSearch" placeholder="Buscar vídeo ou grupo..." style="width:220px;">
+                  <input type="search" id="captionSearch" placeholder="Buscar vídeo ou grupo…" style="width:220px;">
                 </div>
               </div>
               <div class="table-wrap">
@@ -289,9 +328,9 @@
     </div>
 
     <div class="overlay" id="backToConfigOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="backToConfigOverlayTitle">
         <div class="modal-header">
-          <h3>Voltar para grupos?</h3>
+          <h3 id="backToConfigOverlayTitle">Voltar para grupos?</h3>
           <button class="icon-btn-close" id="closeBackToConfigModal" type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
@@ -305,7 +344,7 @@
     </div>
 
     <div class="overlay" id="captionOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="captionModalTitle">
         <div class="modal-header">
           <h3 id="captionModalTitle">Legenda</h3>
           <button class="icon-btn-close" id="closeCaptionModal" type="button" aria-label="Fechar">✕</button>
@@ -343,16 +382,30 @@
       const state = {
         groups: [],
         organizations: [],
+        groupProfiles: [],
         trailsByProfile: new Map(),
         trilhaNameById: new Map(),
         progressByGroup: new Map(),
+        nextTrilhaByGroup: new Map(),
+        sequenceByProfile: new Map(),
+        desviosByProfile: new Map(),
         currentCampaignIds: [],
         timezone: null,
         dispatchRules: null,
       };
 
+      const JOURNEY_REASON_LABEL = {
+        sequencia: "Trilha seguinte da jornada",
+        setor_desvio: "Desvio por setor",
+        checkpoint_perfil: "Novo perfil da jornada",
+      };
+      const JOURNEY_REASON_BADGE_CLASS = {
+        sequencia: "badge-info",
+        setor_desvio: "badge-warning",
+        checkpoint_perfil: "badge-success",
+      };
+
       let selectedGroupId = null;
-      let editingTrilhaGroupId = null;
       let periods = [];
       let dispatchGroups = [];
       let captionItems = [];
@@ -372,6 +425,14 @@
       // fuso) nao reinterpretar essa mesma string como horario local dele.
       function localDateTimeToUtcIso(dataEnvio, horaStr) {
         return new Date(`${dataEnvio}T${horaStr}:00`).toISOString();
+      }
+
+      function readDelayMs(minInputId, secInputId) {
+        const minutes = Number(document.getElementById(minInputId).value) || 0;
+        const secInput = secInputId ? document.getElementById(secInputId) : null;
+        const seconds = secInput ? Number(secInput.value) || 0 : 0;
+
+        return minutes * 60000 + seconds * 1000;
       }
 
       async function requestJson(url, options) {
@@ -409,18 +470,7 @@
       }
 
       function eligibleGroups() {
-        return state.groups.filter((g) => g.segmento && g.envia_video === true);
-      }
-
-      const GROUP_SEGMENT_TO_TRAIL_PROFILE = {
-        "Pré-Infância": "Pré-infância",
-        "Infância": "Infância",
-        "Adolescente": "Adolescência",
-        "Maturidade": "Maturidade",
-      };
-
-      function trailProfileForSegment(segmento) {
-        return GROUP_SEGMENT_TO_TRAIL_PROFILE[segmento] || segmento;
+        return state.groups.filter((g) => g.profile_id && g.envia_video === true);
       }
 
       // Nomes de todas as trilhas, carregados uma vez no início. Sem isso o mapa só
@@ -439,15 +489,13 @@
         }
       }
 
-      async function loadTrailsForProfile(segmento) {
-        if (!segmento) return [];
-        if (state.trailsByProfile.has(segmento)) return state.trailsByProfile.get(segmento);
-
-        const profile = trailProfileForSegment(segmento);
+      async function loadTrailsForProfile(profileId) {
+        if (!profileId) return [];
+        if (state.trailsByProfile.has(profileId)) return state.trailsByProfile.get(profileId);
 
         let list = [];
         try {
-          const trails = await requestJson(`/trilhas/by-perfil?perfil=${encodeURIComponent(profile)}`);
+          const trails = await requestJson(`/trilhas/by-perfil?profile_id=${encodeURIComponent(profileId)}`);
           list = Array.isArray(trails) ? trails : [];
         } catch (error) {
           list = [];
@@ -457,7 +505,7 @@
           state.trilhaNameById.set(trail.id, `${trail.macrotema} - ${trail.trilha}`);
         });
 
-        state.trailsByProfile.set(segmento, list);
+        state.trailsByProfile.set(profileId, list);
         return list;
       }
 
@@ -480,6 +528,208 @@
         const progress = await requestJson(`/groups/${encodeURIComponent(groupId)}/video-progress`);
         state.progressByGroup.set(groupId, progress);
         return progress;
+      }
+
+      // Recomendação do motor de sequenciamento automático (baseada no histórico real
+      // de entregas, não no trilha_id ao vivo) — é o que o próximo tick de disparo
+      // automático faria por este grupo, sempre calculável mesmo sem trilha atribuída.
+      async function loadNextTrilha(groupId) {
+        if (state.nextTrilhaByGroup.has(groupId)) return state.nextTrilhaByGroup.get(groupId);
+
+        let next = null;
+        try {
+          next = await requestJson(`/groups/${encodeURIComponent(groupId)}/next-trilha`);
+        } catch (error) {
+          next = null;
+        }
+
+        state.nextTrilhaByGroup.set(groupId, next);
+        return next;
+      }
+
+      async function loadSequenceAndDesvios(profileId) {
+        if (state.sequenceByProfile.has(profileId)) {
+          return { sequence: state.sequenceByProfile.get(profileId), desvios: state.desviosByProfile.get(profileId) };
+        }
+
+        let sequence = [];
+        let desvios = [];
+        try {
+          [sequence, desvios] = await Promise.all([
+            requestJson(`/trilhas/sequence?profile_id=${encodeURIComponent(profileId)}`),
+            requestJson(`/trilhas/desvios?profile_id=${encodeURIComponent(profileId)}`),
+          ]);
+        } catch (error) {
+          sequence = [];
+          desvios = [];
+        }
+
+        state.sequenceByProfile.set(profileId, sequence);
+        state.desviosByProfile.set(profileId, desvios);
+        return { sequence, desvios };
+      }
+
+      function nextProfileInfo(profileId) {
+        const current = state.groupProfiles.find((p) => p.id === profileId);
+        if (!current || current.ordem === null || current.ordem === undefined) return null;
+
+        return (
+          state.groupProfiles.find((p) => Number(p.ordem) === Number(current.ordem) + 1) || null
+        );
+      }
+
+      function journeyReasonBadgeHtml(reason) {
+        if (!reason) return "";
+        const label = JOURNEY_REASON_LABEL[reason] || reason;
+        const cls = JOURNEY_REASON_BADGE_CLASS[reason] || "badge-neutral";
+        return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+      }
+
+      function formatTrilhaLabel(trilha) {
+        if (!trilha) return "";
+        return `${trilha.macrotema} · ${trilha.trilha}`;
+      }
+
+      // Monta o status de cada passo da sequencia do perfil para a linha do tempo
+      // "Ver jornada completa": cruza a sequencia (trilhas/sequence) com o historico
+      // real de entregas (history, que tem trilha_id) e com a recomendacao atual do
+      // motor (nextTrilha) para saber o que ja aconteceu, o que esta em andamento e
+      // o que ainda esta por vir - sem depender do trilha_id ao vivo do grupo, que
+      // pode ter sido trocado manualmente.
+      function buildTimelineSteps(sequence, history, group, nextTrilha) {
+        const historyByTrilhaId = new Map(history.map((h) => [h.trilha_id, h]));
+        const nextTrilhaId = nextTrilha ? nextTrilha.trilha_id : null;
+
+        return sequence.map((step) => {
+          const hist = historyByTrilhaId.get(step.trilha_id);
+          let status;
+
+          if (hist && hist.concluida) {
+            status = "concluida";
+          } else if (group.trilha_id === step.trilha_id) {
+            status = "atual";
+          } else if ((step.approved_count || 0) === 0) {
+            status = "pulada";
+          } else if (nextTrilhaId === step.trilha_id) {
+            status = "proxima";
+          } else {
+            status = "pendente";
+          }
+
+          return { ...step, status, history: hist || null };
+        });
+      }
+
+      const TIMELINE_STATUS_LABEL = {
+        concluida: "Concluída",
+        atual: "Atual",
+        proxima: "Próxima",
+        pendente: "Pendente",
+        pulada: "Pulada — sem vídeo aprovado",
+      };
+      const TIMELINE_STATUS_BADGE_CLASS = {
+        concluida: "badge-success",
+        atual: "badge-info",
+        proxima: "badge-warning",
+        pendente: "badge-neutral",
+        pulada: "badge-neutral",
+      };
+
+      function timelineStepHtml(step, index, desvios, group, history) {
+        const desviosHere = desvios.filter((d) => d.after_trilha_id === step.trilha_id);
+        const desviosHtml = desviosHere
+          .map((d) => {
+            const jaDisparado = history.some((h) => h.trilha_id === d.trilha_destino_id);
+            const destinoLabel = state.trilhaNameById.get(d.trilha_destino_id) || "trilha de destino";
+            return `
+              <div class="timeline-desvio-line">
+                ↳ Se setor for <strong>${escapeHtml((d.setores || []).join(", "))}</strong>: ${escapeHtml(destinoLabel)}
+                ${
+                  jaDisparado
+                    ? '<span class="badge badge-neutral" style="margin-left:6px;">Já disparado</span>'
+                    : '<span class="badge badge-info" style="margin-left:6px;">Ainda não disparado</span>'
+                }
+              </div>`;
+          })
+          .join("");
+
+        const assistidos = step.history ? step.history.enviados : 0;
+        const clickable = step.status !== "atual";
+        const clickAttrs = clickable
+          ? ` data-select-step-trilha="${escapeHtml(step.trilha_id)}" tabindex="0" role="button" aria-label="Selecionar a trilha ${escapeHtml(step.trilha)} para este grupo"`
+          : "";
+
+        return `
+          <div class="timeline-step is-${step.status}${clickable ? " timeline-step-clickable" : ""}"${clickAttrs}>
+            <span class="timeline-step-index">${step.status === "concluida" ? "✓" : index + 1}</span>
+            <div class="timeline-step-body">
+              <div class="timeline-step-title">${escapeHtml(step.macrotema)} · ${escapeHtml(step.trilha)}</div>
+              <div class="timeline-step-meta">
+                <span class="badge ${TIMELINE_STATUS_BADGE_CLASS[step.status]}">${TIMELINE_STATUS_LABEL[step.status]}</span>
+                <span style="margin-left:6px;">${assistidos}/${step.videos_count} vídeo(s) assistido(s)</span>
+              </div>
+              ${desviosHtml}
+            </div>
+          </div>`;
+      }
+
+      async function renderJourneyPanelHtml(group, history) {
+        if (!group.profile_id) {
+          return `<div class="callout callout-warning" style="margin-top:10px;">Este grupo não tem perfil definido — atribua um perfil em Grupos para habilitar a jornada automática.</div>`;
+        }
+
+        const [nextTrilha, { sequence, desvios }] = await Promise.all([
+          loadNextTrilha(group.id),
+          loadSequenceAndDesvios(group.profile_id),
+        ]);
+
+        sequence.forEach((step) => {
+          state.trilhaNameById.set(step.trilha_id, formatTrilhaLabel(step));
+        });
+        desvios.forEach((d) => {
+          if (!state.trilhaNameById.has(d.trilha_destino_id)) {
+            const target = sequence.find((step) => step.trilha_id === d.trilha_destino_id);
+            if (target) state.trilhaNameById.set(d.trilha_destino_id, formatTrilhaLabel(target));
+          }
+        });
+
+        const hasCurrentTrilha = Boolean(group.trilha_id || group.trilha_override);
+
+        let recommendHtml;
+        if (!hasCurrentTrilha) {
+          recommendHtml = nextTrilha
+            ? `
+              <span class="text-muted" style="font-size:12.5px;font-weight:600;">Trilha recomendada pela jornada automática</span>
+              <div class="journey-recommend-card">
+                ${journeyReasonBadgeHtml(nextTrilha.reason)}
+                <strong>${escapeHtml(formatTrilhaLabel(nextTrilha))}</strong>
+                <button class="btn btn-sm" id="useRecommendedTrilhaButton" type="button" style="margin-left:auto;">Usar esta trilha</button>
+              </div>`
+            : `<div class="callout callout-warning" style="margin-top:6px;">Este perfil não tem trilhas cadastradas na jornada automática — configure a ordem em Trilhas de conteúdo.</div>`;
+        } else {
+          recommendHtml = "";
+        }
+
+        const nextProfile = nextProfileInfo(group.profile_id);
+        const footerNoteHtml = nextProfile
+          ? `<div class="timeline-footer-note">Ao concluir esta jornada, o grupo avança automaticamente para o perfil <strong>${escapeHtml(nextProfile.nome)}</strong>.</div>`
+          : `<div class="timeline-footer-note">Este é o último perfil da jornada automática configurada.</div>`;
+
+        const timelineListHtml = sequence.length
+          ? buildTimelineSteps(sequence, history, group, nextTrilha)
+              .map((step, index) => timelineStepHtml(step, index, desvios, group, history))
+              .join("")
+          : `<p class="text-faint" style="font-size:12.5px;">Nenhuma trilha na sequência deste perfil.</p>`;
+
+        return `
+          <div class="journey-panel">
+            ${recommendHtml}
+            <details class="trail-history">
+              <summary class="trail-history-toggle">${icon("chevron")} Ver jornada completa</summary>
+              <div class="journey-timeline-list">${timelineListHtml}</div>
+              ${footerNoteHtml}
+            </details>
+          </div>`;
       }
 
       // Selo "T" da tabela da trilha selecionada. `transcrito` vem de
@@ -543,7 +793,7 @@
             const progress = state.progressByGroup.get(g.id) || null;
             const blockReason = dispatchBlockReason(g, progress);
             return `
-            <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}">
+            <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}" aria-label="Selecionar grupo ${escapeHtml(g.nome)}">
               <td class="strong group-name-cell">
                 <div class="ellipsis" title="${escapeHtml(g.nome)}">${escapeHtml(g.nome)}${blockReason ? `<span class="block-flag has-tip" data-tip="${escapeHtml(blockReason)}" data-tip-tone="danger">${icon("warning")}</span>` : ""}</div>
                 <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
@@ -555,14 +805,15 @@
           })
           .join("");
 
-        document.querySelectorAll("[data-select-group]").forEach((el) =>
-          el.addEventListener("click", () => {
+        document.querySelectorAll("[data-select-group]").forEach((el) => {
+          const activate = () => {
             selectedGroupId = el.dataset.selectGroup;
-            editingTrilhaGroupId = null;
             renderGroupList();
             renderDetail();
-          })
-        );
+          };
+          el.addEventListener("click", activate);
+          window.estimuloMakeKeyboardClickable(el, activate);
+        });
       }
 
       async function preloadProgressForEligibleGroups() {
@@ -578,6 +829,72 @@
         );
       }
 
+      // Avança em lote todo grupo cuja trilha atual já terminou (todos os vídeos
+      // aprovados enviados) para a próxima trilha recomendada pela jornada
+      // automática — substitui a confirmação manual grupo a grupo por uma única
+      // ação no topo da página.
+      async function updateFinishedTrilhas() {
+        const groups = eligibleGroups();
+        let updated = 0;
+        let skippedNoNext = 0;
+
+        for (const g of groups) {
+          const progress = state.progressByGroup.get(g.id);
+          if (!progress || !progress.current || !progress.current.concluida) continue;
+
+          const nextTrilha = await loadNextTrilha(g.id);
+          if (!nextTrilha) {
+            skippedNoNext += 1;
+            continue;
+          }
+
+          const payload = { trilha_id: nextTrilha.trilha_id };
+          if (nextTrilha.profile_id && nextTrilha.profile_id !== g.profile_id) {
+            payload.profile_id = nextTrilha.profile_id;
+          }
+
+          const updatedGroup = await requestJson(`/groups/${encodeURIComponent(g.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const index = state.groups.findIndex((item) => item.id === g.id);
+          if (index >= 0) state.groups[index] = updatedGroup;
+          state.progressByGroup.delete(g.id);
+          state.nextTrilhaByGroup.delete(g.id);
+          await loadProgressForGroup(g.id);
+          updated += 1;
+        }
+
+        return { updated, skippedNoNext };
+      }
+
+      document.getElementById("updateFinishedTrilhasButton").addEventListener("click", async () => {
+        const button = document.getElementById("updateFinishedTrilhasButton");
+        button.disabled = true;
+
+        try {
+          const { updated, skippedNoNext } = await updateFinishedTrilhas();
+          renderGroupList();
+          renderDetail();
+
+          if (updated === 0 && skippedNoNext === 0) {
+            window.estimuloAlert("Nenhuma trilha concluída para atualizar no momento.");
+          } else {
+            const parts = [`${updated} trilha(s) atualizada(s) para a próxima da jornada.`];
+            if (skippedNoNext > 0) {
+              parts.push(`${skippedNoNext} grupo(s) concluído(s) não tinham próxima trilha configurada e não foram alterados.`);
+            }
+            window.estimuloAlert(parts.join(" "));
+          }
+        } catch (error) {
+          window.estimuloAlert(`Falha ao atualizar trilhas finalizadas: ${error.message}`);
+        } finally {
+          button.disabled = false;
+        }
+      });
+
       async function renderDetail() {
         const detailCard = document.getElementById("detailCard");
         const group = state.groups.find((g) => g.id === selectedGroupId);
@@ -586,7 +903,7 @@
           return;
         }
 
-        detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Carregando progresso...</strong></div></div>`;
+        detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Carregando progresso…</strong></div></div>`;
 
         let progress;
         try {
@@ -600,55 +917,25 @@
 
         const history = progress.history || [];
         const status = progress.current || null;
-        const editingThis = editingTrilhaGroupId === group.id;
 
-        const historyHtml = history.length
-          ? `
-            <details class="trail-history">
-              <summary class="trail-history-toggle">${icon("chevron")} Histórico de trilhas executadas neste grupo (${history.length})</summary>
-              <div class="table-wrap table-flat" style="margin-top:8px;">
-                <table class="table-compact">
-                  <thead><tr><th>Trilha</th><th>Progresso</th><th>Status</th><th>Última atividade</th></tr></thead>
-                  <tbody>
-                    ${history
-                      .map(
-                        (h) => `
-                      <tr>
-                        <td class="strong">${escapeHtml(h.trilha)}</td>
-                        <td>${h.enviados}/${h.total} vídeos</td>
-                        <td>${h.concluida ? '<span class="badge has-tip badge-success" data-tip="Todos os vídeos aprovados desta trilha já foram enviados a este grupo." data-tip-tone="success">Concluída</span>' : '<span class="badge has-tip badge-warning" data-tip="Ainda há vídeos aprovados desta trilha que não foram enviados a este grupo." data-tip-tone="warning">Parcial</span>'}</td>
-                        <td class="mono">${escapeHtml(h.ultima_atividade || "—")}</td>
-                      </tr>`
-                      )
-                      .join("")}
-                  </tbody>
-                </table>
-              </div>
-            </details>`
-          : `<p class="text-faint" style="font-size:12.5px;">Nenhuma trilha executada anteriormente neste grupo.</p>`;
-
-        let trilhaOptions = [];
-        if (editingThis) {
-          trilhaOptions = await loadTrailsForProfile(group.segmento);
-        }
-
+        const trilhaOptions = group.profile_id ? await loadTrailsForProfile(group.profile_id) : [];
         const currentTrilhaLabel = resolveTrilhaLabel(group);
+        const journeyPanelHtml = await renderJourneyPanelHtml(group, history);
 
-        const trilhaSelectHtml = editingThis
-          ? `
-            <div class="trilha-select-row">
+        if (selectedGroupId !== group.id) return;
+
+        const manualOverrideHtml = `
+          <details class="trail-history">
+            <summary class="trail-history-toggle">${icon("chevron")} Substituir trilha manualmente</summary>
+            <div class="trilha-select-row" style="margin-top:8px;">
               <select id="trilhaChangeSelect" style="max-width:260px;">
                 <option value="">Selecionar trilha</option>
                 ${trilhaOptions.map((t) => `<option value="${escapeHtml(t.id)}"${t.id === group.trilha_id ? " selected" : ""}>${escapeHtml(t.macrotema)} - ${escapeHtml(t.trilha)}</option>`).join("")}
               </select>
-              <button class="btn btn-sm" id="confirmTrilhaChange" type="button">Confirmar</button>
-              <button class="btn btn-ghost btn-sm" id="cancelTrilhaChange" type="button">Cancelar</button>
-            </div>`
-          : `
-            <div class="trilha-select-row">
-              <strong style="font-size:14px;">${currentTrilhaLabel ? escapeHtml(currentTrilhaLabel) : "Nenhuma trilha selecionada"}</strong>
-              <button class="btn btn-secondary btn-sm" id="toggleTrilhaChange" type="button">${icon("refresh")} ${currentTrilhaLabel ? "Alterar trilha" : "Selecionar trilha"}</button>
-            </div>`;
+              <button class="btn btn-secondary btn-sm" id="confirmTrilhaChange" type="button">Confirmar</button>
+            </div>
+            <p class="text-faint" style="font-size:11px;margin-top:6px;">Uma troca manual não afeta o histórico de entregas — a jornada automática continua de onde realmente parou.</p>
+          </details>`;
 
         let progressHtml = "";
         let videosTableHtml = "";
@@ -707,10 +994,6 @@
                   </tbody>
                 </table>
               </div>`;
-
-            if (status.concluida) {
-              progressHtml += `<div class="callout callout-danger" style="margin-top:12px;">Esta trilha já foi concluída para este grupo. Escolha uma nova trilha para continuar os envios.</div>`;
-            }
           }
         }
 
@@ -720,54 +1003,93 @@
             <span class="badge badge-info">Envia vídeo ✓</span>
           </div>
           <div class="card-body">
-            ${historyHtml}
+            ${journeyPanelHtml}
             <div class="divider" style="margin:14px 0;"></div>
             <span class="text-muted" style="font-size:12.5px;font-weight:600;display:block;margin-bottom:8px;">Trilha selecionada</span>
-            ${trilhaSelectHtml}
+            <div class="trilha-select-row">
+              <strong style="font-size:14px;">${currentTrilhaLabel ? escapeHtml(currentTrilhaLabel) : "Nenhuma trilha selecionada"}</strong>
+            </div>
             ${progressHtml}
             ${videosTableHtml}
+            <div class="divider" style="margin:14px 0;"></div>
+            ${manualOverrideHtml}
           </div>`;
 
         document.querySelectorAll("[data-force-next-video]").forEach((button) =>
           button.addEventListener("click", () => forceNextVideo(button.dataset.forceNextGroup, button.dataset.forceNextVideo, button))
         );
 
-        if (editingThis) {
-          document.getElementById("confirmTrilhaChange").addEventListener("click", async () => {
+        async function applyTrilhaChange(novaTrilhaId, profileId) {
+          const payload = { trilha_id: novaTrilhaId };
+          if (profileId && profileId !== group.profile_id) {
+            payload.profile_id = profileId;
+          }
+
+          const updatedGroup = await requestJson(`/groups/${encodeURIComponent(group.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const index = state.groups.findIndex((item) => item.id === group.id);
+          if (index >= 0) state.groups[index] = updatedGroup;
+          state.progressByGroup.delete(group.id);
+          state.nextTrilhaByGroup.delete(group.id);
+
+          await loadProgressForGroup(group.id);
+          renderGroupList();
+          renderDetail();
+        }
+
+        const confirmTrilhaChangeButton = document.getElementById("confirmTrilhaChange");
+        if (confirmTrilhaChangeButton) {
+          confirmTrilhaChangeButton.addEventListener("click", async () => {
             const novaTrilhaId = document.getElementById("trilhaChangeSelect").value || null;
-            const confirmButton = document.getElementById("confirmTrilhaChange");
-            confirmButton.disabled = true;
+            confirmTrilhaChangeButton.disabled = true;
 
             try {
-              const updatedGroup = await requestJson(`/groups/${encodeURIComponent(group.id)}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ trilha_id: novaTrilhaId }),
-              });
-
-              const index = state.groups.findIndex((item) => item.id === group.id);
-              if (index >= 0) state.groups[index] = updatedGroup;
-              state.progressByGroup.delete(group.id);
-              editingTrilhaGroupId = null;
-
-              await loadProgressForGroup(group.id);
-              renderGroupList();
-              renderDetail();
+              await applyTrilhaChange(novaTrilhaId, group.profile_id);
             } catch (error) {
               window.estimuloAlert(error.message);
-              confirmButton.disabled = false;
+              confirmTrilhaChangeButton.disabled = false;
             }
           });
-          document.getElementById("cancelTrilhaChange").addEventListener("click", () => {
-            editingTrilhaGroupId = null;
-            renderDetail();
-          });
-        } else {
-          document.getElementById("toggleTrilhaChange").addEventListener("click", () => {
-            editingTrilhaGroupId = group.id;
-            renderDetail();
+        }
+
+        const useRecommendedTrilhaButton = document.getElementById("useRecommendedTrilhaButton");
+        if (useRecommendedTrilhaButton) {
+          useRecommendedTrilhaButton.addEventListener("click", async () => {
+            const recommended = state.nextTrilhaByGroup.get(group.id);
+            if (!recommended) return;
+            useRecommendedTrilhaButton.disabled = true;
+
+            try {
+              await applyTrilhaChange(recommended.trilha_id, recommended.profile_id);
+            } catch (error) {
+              window.estimuloAlert(error.message);
+              useRecommendedTrilhaButton.disabled = false;
+            }
           });
         }
+
+        // Clicar numa trilha da linha do tempo ("Ver jornada completa") a seleciona
+        // diretamente para o grupo, dispensando o seletor manual — o backend já
+        // escolhe sozinho o primeiro vídeo aprovado ainda não enviado dessa trilha.
+        document.querySelectorAll("[data-select-step-trilha]").forEach((el) => {
+          const activate = async () => {
+            if (el.dataset.selecting === "1") return;
+            el.dataset.selecting = "1";
+
+            try {
+              await applyTrilhaChange(el.dataset.selectStepTrilha, group.profile_id);
+            } catch (error) {
+              window.estimuloAlert(error.message);
+              el.dataset.selecting = "0";
+            }
+          };
+          el.addEventListener("click", activate);
+          window.estimuloMakeKeyboardClickable(el, activate);
+        });
       }
 
       async function forceNextVideo(groupId, videoId, button) {
@@ -868,8 +1190,8 @@
 
         try {
           const dataEnvio = document.getElementById("dispatchDate").value;
-          const delayMinMin = Number(document.getElementById("delayMin").value);
-          const delayMaxMin = Number(document.getElementById("delayMax").value);
+          const delayMinMs = readDelayMs("delayMin", "delayMinSec");
+          const delayMaxMs = readDelayMs("delayMax");
           const firstPeriod = periods[0] || {};
           const executionAt = new Date(`${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`);
 
@@ -883,8 +1205,8 @@
                 start: localDateTimeToUtcIso(dataEnvio, firstPeriod.inicio || "07:00"),
                 end: localDateTimeToUtcIso(dataEnvio, (periods[periods.length - 1] || firstPeriod).fim || "17:00"),
               },
-              jitter_delay_min_ms: delayMinMin * 60000,
-              jitter_delay_max_ms: delayMaxMin * 60000,
+              jitter_delay_min_ms: delayMinMs,
+              jitter_delay_max_ms: delayMaxMs,
               timezone: state.timezone || undefined,
             }),
           });
@@ -1045,7 +1367,7 @@
         if (!filtered.length) {
           document.getElementById("captionsBody").innerHTML = captionItems.length
             ? `<tr><td colspan="5"><div class="empty-state"><strong>Nenhum vídeo encontrado</strong><span>Ajuste os filtros ou a busca.</span></div></td></tr>`
-            : `<tr><td colspan="5"><div class="empty-state"><strong>Preparando os vídeos da campanha...</strong><span>As legendas estão sendo geradas, aguarde.</span></div></td></tr>`;
+            : `<tr><td colspan="5"><div class="empty-state"><strong>Preparando os vídeos da campanha…</strong><span>As legendas estão sendo geradas, aguarde.</span></div></td></tr>`;
           return;
         }
 
@@ -1063,8 +1385,8 @@
                       : ""
                   }`
                 : item.status === "pendente"
-                ? `<span class="text-faint" style="font-style:italic;">Na fila...</span>`
-                : `<span class="text-faint" style="font-style:italic;">Processando...</span>`;
+                ? `<span class="text-faint" style="font-style:italic;">Na fila…</span>`
+                : `<span class="text-faint" style="font-style:italic;">Processando…</span>`;
             return `
             <tr>
               <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size:11.5px;">${item.trilha}</span></td>
@@ -1081,10 +1403,10 @@
                 // linha saiu da fila e terminou: enquanto esta pendente ou
                 // processando, a geracao ainda vai sobrescrever a legenda.
                 item.status === "gerado" || item.status === "erro"
-                  ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda">${icon("pencil")}</button>
+                  ? `<button class="btn-icon btn-secondary" data-edit="${item.id}" title="Editar legenda" aria-label="Editar legenda">${icon("pencil")}</button>
                      ${
                        item.status === "erro"
-                         ? `<button class="btn-icon btn-secondary" data-regenerate="${item.id}" title="Tentar gerar legenda novamente">${icon("refresh")}</button>`
+                         ? `<button class="btn-icon btn-secondary" data-regenerate="${item.id}" title="Tentar gerar legenda novamente" aria-label="Tentar gerar legenda novamente">${icon("refresh")}</button>`
                          : ""
                      }`
                   : '<span class="text-faint">—</span>'
@@ -1109,6 +1431,7 @@
 
       let editingCaptionId = null;
       let editingCaptionCampaignId = null;
+      let captionModalReleaseTrap = null;
       function openCaptionModal(itemId) {
         const item = captionItems.find((i) => i.id === itemId);
         editingCaptionId = itemId;
@@ -1117,14 +1440,22 @@
         document.getElementById("captionModalMeta").textContent = `${item.groupNome} — ${item.video.arquivo}`;
         document.getElementById("captionModalText").value = item.legenda || "";
         document.getElementById("captionOverlay").hidden = false;
+        captionModalReleaseTrap = window.estimuloTrapFocus(document.getElementById("captionOverlay"));
       }
       function closeCaptionModal() {
         document.getElementById("captionOverlay").hidden = true;
         editingCaptionId = null;
         editingCaptionCampaignId = null;
+        if (captionModalReleaseTrap) {
+          captionModalReleaseTrap();
+          captionModalReleaseTrap = null;
+        }
       }
       document.getElementById("closeCaptionModal").addEventListener("click", closeCaptionModal);
       document.getElementById("cancelCaptionModal").addEventListener("click", closeCaptionModal);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !document.getElementById("captionOverlay").hidden) closeCaptionModal();
+      });
       document.getElementById("saveCaptionModal").addEventListener("click", async () => {
         const saveButton = document.getElementById("saveCaptionModal");
         const captionText = document.getElementById("captionModalText").value;
@@ -1206,8 +1537,8 @@
           const dataEnvio = document.getElementById("dispatchDate").value;
           const firstPeriod = periods[0] || {};
           const executionAt = new Date(`${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`);
-          const delayMinMin = Number(document.getElementById("delayMin").value);
-          const delayMaxMin = Number(document.getElementById("delayMax").value);
+          const delayMinMs = readDelayMs("delayMin", "delayMinSec");
+          const delayMaxMs = readDelayMs("delayMax");
 
           const confirmations = await Promise.all(
             state.currentCampaignIds.map((campaignId) =>
@@ -1220,8 +1551,8 @@
                     start: localDateTimeToUtcIso(dataEnvio, firstPeriod.inicio || "07:00"),
                     end: localDateTimeToUtcIso(dataEnvio, (periods[periods.length - 1] || firstPeriod).fim || "17:00"),
                   },
-                  jitter_delay_min_ms: delayMinMin * 60000,
-                  jitter_delay_max_ms: delayMaxMin * 60000,
+                  jitter_delay_min_ms: delayMinMs,
+                  jitter_delay_max_ms: delayMaxMs,
                   timezone: state.timezone || undefined,
                 }),
               })
@@ -1247,15 +1578,25 @@
         }
       }
 
+      let backToConfigReleaseTrap = null;
+
       document.getElementById("backToConfigButton").addEventListener("click", () => {
         document.getElementById("backToConfigOverlay").hidden = false;
+        backToConfigReleaseTrap = window.estimuloTrapFocus(document.getElementById("backToConfigOverlay"));
       });
 
       function closeBackToConfigModal() {
         document.getElementById("backToConfigOverlay").hidden = true;
+        if (backToConfigReleaseTrap) {
+          backToConfigReleaseTrap();
+          backToConfigReleaseTrap = null;
+        }
       }
       document.getElementById("closeBackToConfigModal").addEventListener("click", closeBackToConfigModal);
       document.getElementById("cancelBackToConfigModal").addEventListener("click", closeBackToConfigModal);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !document.getElementById("backToConfigOverlay").hidden) closeBackToConfigModal();
+      });
       document.getElementById("confirmBackToConfigModal").addEventListener("click", async () => {
         const confirmButton = document.getElementById("confirmBackToConfigModal");
         confirmButton.disabled = true;
@@ -1397,13 +1738,15 @@
         await restoreDispatchFlow();
 
         try {
-          const [groups, organizations] = await Promise.all([
+          const [groups, organizations, groupProfiles] = await Promise.all([
             requestJson("/groups/search"),
             requestJson("/organizations"),
+            requestJson("/group-profiles"),
             loadTrilhaNames(),
           ]);
           state.groups = Array.isArray(groups) ? groups : [];
           state.organizations = Array.isArray(organizations) ? organizations : [];
+          state.groupProfiles = Array.isArray(groupProfiles) ? groupProfiles : [];
 
           await preloadProgressForEligibleGroups();
 

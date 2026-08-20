@@ -59,7 +59,9 @@ function createGroupsController(dependencies = {}) {
           "Group id is required",
           "At least one operational setting is required",
           "Organization id must be a string or null",
+          "Profile id must be a string or null",
           "Segmento must be a string or null",
+          "Setor must be a string or null",
           "Trilha override must be a string or null",
           "Envia video must be boolean",
         ].includes(message)
@@ -67,7 +69,7 @@ function createGroupsController(dependencies = {}) {
         return res.status(400).json({ error: message });
       }
 
-      if (message === "Group not found") {
+      if (message === "Group not found" || message === "Profile not found") {
         return res.status(404).json({ error: message });
       }
 
@@ -88,7 +90,9 @@ function createGroupsController(dependencies = {}) {
           "Group id is required",
           "At least one operational setting is required",
           "Organization id must be a string or null",
+          "Profile id must be a string or null",
           "Segmento must be a string or null",
+          "Setor must be a string or null",
           "Trilha override must be a string or null",
           "Envia video must be boolean",
           "Group must have envia_video=true",
@@ -102,12 +106,32 @@ function createGroupsController(dependencies = {}) {
         return res.status(400).json({ error: message });
       }
 
-      if (message === "Group not found" || message === "Organization not found") {
+      if (message === "Group not found" || message === "Organization not found" || message === "Profile not found") {
         return res.status(404).json({ error: message });
       }
 
       if (error?.code === "GROUPS_MISSING_INSTANCE_COVERAGE") {
         return res.status(409).json({ error: message, group_ids: error.groupIds });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  async function previewNextTrilha(req, res) {
+    try {
+      const next = await groupService.previewNextTrilha(req.params.id);
+
+      return res.status(200).json(next);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Group id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Group not found") {
+        return res.status(404).json({ error: message });
       }
 
       return res.status(500).json({ error: "Internal server error" });
@@ -146,6 +170,7 @@ function createGroupsController(dependencies = {}) {
     dispatchTestVideo,
     forceNextVideo,
     listWithoutSegment,
+    previewNextTrilha,
     search,
     syncFromEvolution,
     updateOperationalSettings,

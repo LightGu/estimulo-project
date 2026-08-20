@@ -2,7 +2,7 @@ function getClient(client) {
   return client || require("../database/client");
 }
 
-const TERMINAL_LOG_STATUSES = ["enviado", "falhou"];
+const TERMINAL_LOG_STATUSES = ["enviado", "falhou", "cancelado"];
 
 async function listGroups(campaignId, client) {
   const { data, error } = await getClient(client)

@@ -253,6 +253,36 @@ function createGroupProfilesService(dependencies = {}) {
     return { restored, survivor: survivorAfter };
   }
 
+  // Ordem de progressao entre perfis (usada pelo checkpoint do motor de
+  // sequenciamento). Semantica de substituicao total: perfis presentes em
+  // orderedIds recebem ordem 1..N na ordem dada; qualquer perfil existente que NAO
+  // esteja na lista sai da jornada automatica (ordem volta a null).
+  async function reorder(orderedIds) {
+    const ids = Array.isArray(orderedIds)
+      ? [...new Set(orderedIds.map((id) => String(id || "").trim()).filter(Boolean))]
+      : [];
+
+    const existing = await repository.findAll();
+    const existingIds = new Set(existing.map((profile) => profile.id));
+    const invalid = ids.find((id) => !existingIds.has(id));
+
+    if (invalid) {
+      throw new Error("Profile not found");
+    }
+
+    const clearedIds = existing
+      .filter((profile) => !ids.includes(profile.id) && profile.ordem !== null && profile.ordem !== undefined)
+      .map((profile) => profile.id);
+
+    await repository.clearOrdem(clearedIds);
+
+    if (!ids.length) {
+      return [];
+    }
+
+    return repository.reorder(ids);
+  }
+
   return {
     create,
     delete: remove,
@@ -261,6 +291,7 @@ function createGroupProfilesService(dependencies = {}) {
     merge,
     remove,
     rename,
+    reorder,
     unmerge,
   };
 }

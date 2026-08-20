@@ -112,11 +112,7 @@ function createTrilhasService(dependencies = {}) {
     return buildOverview(trilhas);
   }
 
-  async function listByPerfil(perfil) {
-    const [normalizedPerfil] = normalizePerfis([perfil]);
-    const trilhas = await repository.listTrilhasByPerfil(normalizedPerfil);
-    const overview = await buildOverview(trilhas);
-
+  function toPerfilSummary(overview) {
     return overview.map((trilha) => ({
       id: trilha.id,
       macrotema: trilha.macrotema,
@@ -124,6 +120,178 @@ function createTrilhasService(dependencies = {}) {
       videos_count: trilha.videos.length,
       first_video: trilha.videos[0] || null,
     }));
+  }
+
+  async function listByPerfil(perfil) {
+    const [normalizedPerfil] = normalizePerfis([perfil]);
+    const trilhas = await repository.listTrilhasByPerfil(normalizedPerfil);
+    const overview = await buildOverview(trilhas);
+
+    return toPerfilSummary(overview);
+  }
+
+  // Equivalente a listByPerfil, mas resolvendo pelo profile_id (FK group_profiles)
+  // em vez do nome em texto - caminho canonico depois da Fase 0 (grupos passam a
+  // carregar profile_id, nao mais so o texto legado de segmento).
+  async function listByProfileId(profileId) {
+    const trimmed = String(profileId || "").trim();
+
+    if (!trimmed) {
+      throw new Error("Profile id is required");
+    }
+
+    const trilhas = await repository.listTrilhasByProfileId(trimmed);
+    const overview = await buildOverview(trilhas);
+
+    return toPerfilSummary(overview);
+  }
+
+  // Sequencia ordenada (trilha_perfis.ordem) das trilhas de um perfil, com dados de
+  // exibicao - usada pela aba "Ordem por perfil" e pela pre-visualizacao da
+  // proxima trilha na tela de envio automatizado.
+  async function listSequenceForProfile(profileId) {
+    const trimmed = String(profileId || "").trim();
+
+    if (!trimmed) {
+      throw new Error("Profile id is required");
+    }
+
+    const [sequenceRows, trilhas] = await Promise.all([
+      repository.listTrilhaPerfisByProfile(trimmed),
+      repository.listTrilhasByProfileId(trimmed),
+    ]);
+
+    return enrichSequenceRows(sequenceRows, trilhas);
+  }
+
+  // Compartilhado por listSequenceForProfile e reorderSequenceForProfile: junta
+  // as linhas de trilha_perfis (trilha_id+ordem) com os dados de exibicao da
+  // trilha (macrotema, trilha, contagem de videos) - sem isso a tela "Ordem por
+  // perfil" recebe so os campos crus e renderiza "undefined/undefined".
+  async function enrichSequenceRows(sequenceRows, trilhas) {
+    const overview = await buildOverview(trilhas);
+    const overviewById = new Map(overview.map((trilha) => [trilha.id, trilha]));
+
+    return sequenceRows
+      .map((row) => {
+        const trilha = overviewById.get(row.trilha_id);
+
+        if (!trilha) {
+          return null;
+        }
+
+        return {
+          trilha_id: trilha.id,
+          ordem: row.ordem,
+          macrotema: trilha.macrotema,
+          trilha: trilha.trilha,
+          videos_count: trilha.videos.length,
+          approved_count: trilha.videos.filter((video) => video.status === true).length,
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.ordem - right.ordem);
+  }
+
+  // afterTrilhaId (opcional): posiciona a trilha nova logo depois desta na
+  // sequencia, em vez de so anexar ao final - usado pelo botao "+ Adicionar
+  // trilha" de cada linha da aba "Ordem por perfil".
+  async function addTrilhaToSequence(profileId, trilhaId, afterTrilhaId) {
+    const trimmedProfileId = String(profileId || "").trim();
+
+    if (!trimmedProfileId) {
+      throw new Error("Profile id is required");
+    }
+
+    const trilha = await requireTrilha(trilhaId);
+
+    const profiles = await profilesService.list();
+    const profile = profiles.find((candidate) => candidate.id === trimmedProfileId);
+
+    if (!profile) {
+      throw new Error("Profile not found");
+    }
+
+    const existingSequence = await repository.listTrilhaPerfisByProfile(trimmedProfileId);
+
+    if (existingSequence.some((row) => row.trilha_id === trilha.id)) {
+      throw new Error("Trilha already in this profile's sequence");
+    }
+
+    const created = await repository.addTrilhaToProfileSequence(trilha.id, trimmedProfileId, profile.nome);
+
+    const trimmedAfterTrilhaId = String(afterTrilhaId || "").trim();
+    const afterIndex = trimmedAfterTrilhaId
+      ? existingSequence.sort((left, right) => left.ordem - right.ordem).findIndex((row) => row.trilha_id === trimmedAfterTrilhaId)
+      : -1;
+
+    if (afterIndex === -1) {
+      return created;
+    }
+
+    const reorderedIds = existingSequence.map((row) => row.trilha_id);
+    reorderedIds.splice(afterIndex + 1, 0, trilha.id);
+    await repository.reorderTrilhaPerfisForProfile(trimmedProfileId, reorderedIds);
+
+    return created;
+  }
+
+  async function reorderSequenceForProfile(profileId, orderedTrilhaIds) {
+    const trimmed = String(profileId || "").trim();
+
+    if (!trimmed) {
+      throw new Error("Profile id is required");
+    }
+
+    if (!Array.isArray(orderedTrilhaIds) || !orderedTrilhaIds.length) {
+      throw new Error("orderedTrilhaIds is required");
+    }
+
+    const existing = await repository.listTrilhaPerfisByProfile(trimmed);
+    const existingTrilhaIds = new Set(existing.map((row) => row.trilha_id));
+
+    if (orderedTrilhaIds.some((trilhaId) => !existingTrilhaIds.has(trilhaId))) {
+      throw new Error("Trilha is not part of this profile's sequence");
+    }
+
+    if (orderedTrilhaIds.length !== existing.length) {
+      throw new Error("orderedTrilhaIds must include every trilha currently in this profile's sequence");
+    }
+
+    const [reordered, trilhas] = await Promise.all([
+      repository.reorderTrilhaPerfisForProfile(trimmed, orderedTrilhaIds),
+      repository.listTrilhasByProfileId(trimmed),
+    ]);
+
+    return enrichSequenceRows(reordered, trilhas);
+  }
+
+  // Usada pelo botao "Remover" da aba "Ordem por perfil". Nao renumera as
+  // ordens restantes - ver removeTrilhaFromProfileSequence no repository.
+  async function removeTrilhaFromSequence(profileId, trilhaId) {
+    const trimmedProfileId = String(profileId || "").trim();
+    const trimmedTrilhaId = String(trilhaId || "").trim();
+
+    if (!trimmedProfileId) {
+      throw new Error("Profile id is required");
+    }
+
+    if (!trimmedTrilhaId) {
+      throw new Error("Trilha id is required");
+    }
+
+    const existing = await repository.listTrilhaPerfisByProfile(trimmedProfileId);
+
+    if (!existing.some((row) => row.trilha_id === trimmedTrilhaId)) {
+      throw new Error("Trilha is not part of this profile's sequence");
+    }
+
+    await repository.removeTrilhaFromProfileSequence(trimmedTrilhaId, trimmedProfileId);
+
+    const trilhas = await repository.listTrilhasByProfileId(trimmedProfileId);
+    const remaining = await repository.listTrilhaPerfisByProfile(trimmedProfileId);
+
+    return enrichSequenceRows(remaining, trilhas);
   }
 
   async function listSelectableVideos() {
@@ -343,7 +511,12 @@ function createTrilhasService(dependencies = {}) {
     listAll,
     listOverview,
     listByPerfil,
+    listByProfileId,
+    listSequenceForProfile,
+    addTrilhaToSequence,
     listSelectableVideos,
+    reorderSequenceForProfile,
+    removeTrilhaFromSequence,
     createTrilha,
     addVideoToTrilha,
     removeVideoFromTrilha,
