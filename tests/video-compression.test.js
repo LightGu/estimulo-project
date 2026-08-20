@@ -9,8 +9,11 @@ const {
   buildCompressionFfmpegArgs,
   compressVideoToFitBase64Budget,
   fitsBase64Budget,
+  isMp4Container,
   maxRawBytesForBase64Budget,
+  normalizeVideoContainerToMp4,
   parseFfmpegDurationSeconds,
+  remuxVideoToMp4,
   resolveCompressedFileName,
   resolveVideoBitrateKbps,
 } = require("../src/services/video-compression");
@@ -161,15 +164,109 @@ async function testCompressesRealVideoIntoBudget() {
   }
 }
 
+function testIsMp4Container() {
+  assert.equal(isMp4Container({ mime_type: "video/mp4" }), true);
+  assert.equal(isMp4Container({ mime_type: "video/quicktime" }), false);
+  assert.equal(isMp4Container({}), false);
+}
+
+async function testRemuxConvertsMovContainerToMp4WithoutRecoding() {
+  const { directory, videoPath } = await createSampleVideo();
+
+  try {
+    const bytes = await fs.readFile(videoPath);
+    const silentLogger = { info() {}, warn() {} };
+    const remuxed = await remuxVideoToMp4(
+      { video_id: "video-de-teste", bytes, name: "sample.mov", mime_type: "video/quicktime" },
+      { logger: silentLogger }
+    );
+
+    assert.ok(remuxed, "remux de um mp4 valido internamente (so container .mov) deve funcionar");
+    assert.equal(remuxed.mime_type, "video/mp4");
+    assert.equal(remuxed.name, "sample.mp4");
+    assert.equal(remuxed.remuxed, true);
+    assert.equal(remuxed.source_mime_type, "video/quicktime");
+    // -c copy nao recodifica: o tamanho fica proximo ao original (so muda o container).
+    assert.ok(
+      Math.abs(remuxed.bytes.length - bytes.length) < bytes.length * 0.05,
+      "remux nao deve alterar significativamente o tamanho do arquivo"
+    );
+    assert.equal(remuxed.bytes.subarray(4, 8).toString("latin1"), "ftyp");
+  } finally {
+    await fs.rm(directory, { force: true, recursive: true }).catch(() => {});
+  }
+}
+
+async function testRemuxReturnsNullOnInvalidInput() {
+  const silentLogger = { info() {}, warn() {} };
+  const result = await remuxVideoToMp4(
+    { video_id: "video-invalido", bytes: Buffer.from("nao e um video"), name: "broken.mov", mime_type: "video/quicktime" },
+    { logger: silentLogger }
+  );
+
+  assert.equal(result, null, "remux de bytes invalidos deve falhar sem lancar, para acionar o fallback");
+}
+
+async function testNormalizeContainerReturnsInputUnchangedWhenAlreadyMp4() {
+  const video = { bytes: Buffer.alloc(10), name: "video.mp4", mime_type: "video/mp4" };
+  const result = await normalizeVideoContainerToMp4(video);
+
+  assert.equal(result, video, "video ja em mp4 nao deve passar pelo remux/recompressao");
+}
+
+async function testNormalizeContainerPrefersRemuxOverRecompression() {
+  const { directory, videoPath } = await createSampleVideo();
+
+  try {
+    const bytes = await fs.readFile(videoPath);
+    const silentLogger = { info() {}, warn() {} };
+    const result = await normalizeVideoContainerToMp4(
+      { video_id: "video-de-teste", bytes, name: "sample.mov", mime_type: "video/quicktime" },
+      { logger: silentLogger }
+    );
+
+    // remuxed=true (nao compressed) confirma que o caminho rapido foi usado,
+    // sem passar pela recompressao completa.
+    assert.equal(result.remuxed, true);
+    assert.equal(result.compressed, undefined);
+    assert.equal(result.mime_type, "video/mp4");
+  } finally {
+    await fs.rm(directory, { force: true, recursive: true }).catch(() => {});
+  }
+}
+
+// Bytes invalidos nao sao um video valido nem para o remux nem para a
+// recompressao: o fallback deve tentar a recompressao (nao silenciar o
+// primeiro erro) e propagar o erro dela, em vez de mascarar a falha. O
+// buffer precisa estourar o orcamento de base64, senao a recompressao nem
+// chega a rodar o ffmpeg (o video "ja cabe" e volta como esta).
+async function testNormalizeContainerFallsBackToCompressionWhenRemuxFails() {
+  const silentLogger = { info() {}, warn() {} };
+  const invalidBytes = Buffer.alloc(2 * 1024, 0);
+
+  await assert.rejects(() =>
+    normalizeVideoContainerToMp4(
+      { video_id: "video-invalido", bytes: invalidBytes, name: "broken.mov", mime_type: "video/quicktime" },
+      { logger: silentLogger, maxBase64Bytes: 100 }
+    )
+  );
+}
+
 (async () => {
   testBase64MathMatchesNodeEncoder();
   testDurationParsing();
   testBitrateBudgetMath();
   testFfmpegArgsEscapeFilterComma();
   testCompressedFileNameKeepsBaseAndForcesMp4();
+  testIsMp4Container();
   await testSkipsFfmpegWhenAlreadyWithinBudget();
   await testRejectsInvalidBudget();
   await testCompressesRealVideoIntoBudget();
+  await testRemuxConvertsMovContainerToMp4WithoutRecoding();
+  await testRemuxReturnsNullOnInvalidInput();
+  await testNormalizeContainerReturnsInputUnchangedWhenAlreadyMp4();
+  await testNormalizeContainerPrefersRemuxOverRecompression();
+  await testNormalizeContainerFallsBackToCompressionWhenRemuxFails();
 
   console.log("video compression tests OK");
 })();
