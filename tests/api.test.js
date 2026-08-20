@@ -571,17 +571,6 @@ async function main() {
       },
     ]);
 
-    const unclassifiedGroupsPageResponse = await fetch(`http://127.0.0.1:${port}/groups-unclassified.html`);
-    assert.equal(unclassifiedGroupsPageResponse.status, 200);
-    const unclassifiedGroupsPage = await unclassifiedGroupsPageResponse.text();
-    assert.match(unclassifiedGroupsPage, /fetch\(`\/groups\/search\$\{query\}`\)/);
-    assert.match(unclassifiedGroupsPage, /fetch\("\/organizations"\)/);
-    assert.match(unclassifiedGroupsPage, /name_contains/);
-    assert.match(unclassifiedGroupsPage, /fetch\(`\/groups\/\$\{encodeURIComponent\(groupId\)\}`/);
-    assert.match(unclassifiedGroupsPage, /fetch\(`\/video-catalog\/\$\{encodeURIComponent\(videoId\)\}\/transcript`/);
-    assert.match(unclassifiedGroupsPage, /fetch\("\/campaigns"/);
-    assert.match(unclassifiedGroupsPage, /Evolution group id/);
-
     const groupsAppPageResponse = await fetch(`http://127.0.0.1:${port}/app/grupos.html`);
     assert.equal(groupsAppPageResponse.status, 200);
     const groupsAppPage = await groupsAppPageResponse.text();

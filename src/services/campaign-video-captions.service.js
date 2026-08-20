@@ -324,7 +324,10 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
       na_fila,
       pendente,
       pct,
-      items: rows,
+      // `items` usa allRows (nao o `rows` filtrado) porque o frontend precisa
+      // exibir a legenda mesmo apos o video ja ter sido entregue ao grupo;
+      // filterOutDeliveredRows so deve afetar os contadores de progresso.
+      items: allRows,
     };
   }
 
