@@ -239,6 +239,21 @@ function createMensagensDispatchProcessor(options = {}) {
   return async function mensagensDispatchWorker(job) {
     const startedAt = new Date().toISOString();
 
+    // Campanha pausada: o log continua pendente (para o resume conseguir
+    // retomar), entao so o claim atomico mais abaixo nao bastaria para impedir
+    // o envio - esta checagem antecipada e o que de fato para.
+    if (job.data.dispatch_log_id && typeof dispatchLogs.findById === "function") {
+      const pausedLog = await dispatchLogs.findById(job.data.dispatch_log_id).catch(() => null);
+      const pausedCampaign =
+        pausedLog && pausedLog.campaign_id
+          ? await campaignsRepository.findById(pausedLog.campaign_id).catch(() => null)
+          : null;
+
+      if (pausedCampaign && pausedCampaign.status === "pausado") {
+        return { status: "skipped_paused" };
+      }
+    }
+
     // Antes de qualquer coisa: mensagem pontual nao divide a sessao do WhatsApp
     // com campanha de video. A checagem e refeita aqui (e nao apenas no
     // agendamento) porque a campanha pode ter sido criada depois, ou ter
@@ -294,7 +309,32 @@ function createMensagensDispatchProcessor(options = {}) {
       started_at: startedAt,
     });
 
-    await updateDispatchLogStatus(job.data.dispatch_log_id, "processando");
+    // Reivindicacao atomica (so avanca se o log ainda estiver pendente): fecha
+    // a corrida entre um job antigo que sobreviveu a uma pausa e o job novo
+    // criado no resume para o mesmo log, e tambem cobre cancelamento (o log ja
+    // virou "cancelado" antes deste ponto, entao o claim falha e nao envia).
+    // Ja grava "processando" como parte do UPDATE condicional - substitui o
+    // updateDispatchLogStatus incondicional que existia aqui antes.
+    if (job.data.dispatch_log_id) {
+      if (typeof dispatchLogs.claimForSend === "function") {
+        const claimedLog = await dispatchLogs.claimForSend(job.data.dispatch_log_id);
+
+        if (!claimedLog) {
+          logger.warn &&
+            logger.warn(
+              JSON.stringify({
+                event: "mensagens_dispatch.claim_lost",
+                job_id: job.id,
+                dispatch_log_id: job.data.dispatch_log_id,
+              })
+            );
+
+          return { status: "skipped" };
+        }
+      } else {
+        await updateDispatchLogStatus(job.data.dispatch_log_id, "processando");
+      }
+    }
 
     try {
       logger.info &&

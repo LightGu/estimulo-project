@@ -6,7 +6,7 @@ const { sendToEvolution } = require("./evolution");
 const { assertDeliveryConfirmed, confirmProviderDelivery, extractProviderDelivery } = require("./delivery-confirmation");
 const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
 const { assertNoVideoCampaignInWindow, resolveAdHocDispatchBlock } = require("./dispatch-exclusivity");
-const { buildJitteredDispatchSchedule } = require("../queues/dispatch-jitter");
+const { buildJitteredDispatchSchedule, resolveInstanceForOrder } = require("../queues/dispatch-jitter");
 const { addMensagensDispatchJob } = require("../queues/mensagens-dispatch");
 const defaultSettingsService = require("./settings.service");
 const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
@@ -35,7 +35,7 @@ function normalizeContent(payload = {}) {
       }
     : undefined;
 
-  return { texto, content };
+  return { texto, content, tipoConteudo: link ? tipoConteudo : null };
 }
 
 function normalizeClassificacao(payload = {}) {
@@ -137,7 +137,93 @@ function createMensagensService(dependencies = {}) {
     }
   }
 
-  async function createAdHocCampaign({ payload, texto, link, status, dataEnvio, windowStart, windowEnd, jitterDelayMinMs, jitterDelayMaxMs }) {
+  // Usado por resumeCampaign: recria os jobs de mensagens-dispatch dos logs
+  // ainda pendentes de uma campanha pontual, quando o job original nao
+  // sobreviveu no Redis (ja tinha disparado-e-virado-no-op durante a pausa).
+  // O texto/link ja estao fixados na campanha - nao ha "proximo conteudo" para
+  // re-resolver, so reenviar o que ja estava decidido.
+  async function requeuePendingMessages(campaign, pendingLogs) {
+    if (!Array.isArray(pendingLogs) || pendingLogs.length === 0) {
+      return [];
+    }
+
+    const texto = campaign.texto_mensagem || undefined;
+    const content = campaign.link_conteudo
+      ? {
+          url: campaign.link_conteudo,
+          type:
+            campaign.link_conteudo_tipo === "documento"
+              ? "document"
+              : campaign.link_conteudo_tipo === "video"
+              ? "video"
+              : "image",
+        }
+      : undefined;
+    const instanceRotation = await resolveInstanceRotation();
+    const jobs = [];
+
+    for (const [index, log] of pendingLogs.entries()) {
+      try {
+        const group = await repository.findById(log.group_id);
+
+        if (!group || !group.evolution_group_id) {
+          continue;
+        }
+
+        const dispatchOrder = index + 1;
+        const job = await enqueue(
+          {
+            group_id: group.evolution_group_id,
+            internal_group_id: group.id,
+            group_nome: group.nome,
+            message: texto,
+            content,
+            scheduled_at: log.horario_envio_planejado,
+            dispatch_order: dispatchOrder,
+            dispatch_log_id: log.id,
+            whatsapp_instance_id: resolveInstanceForOrder(
+              dispatchOrder,
+              instanceRotation.whatsapp_instances,
+              instanceRotation.rotation_group_count
+            ),
+          },
+          { removeOnComplete: false, removeOnFail: false }
+        );
+
+        jobs.push(job);
+
+        if (typeof dispatchLogs.updateDispatchJobId === "function") {
+          await dispatchLogs.updateDispatchJobId(log.id, job.id).catch(() => undefined);
+        }
+      } catch (error) {
+        logger.error &&
+          logger.error(
+            JSON.stringify({
+              event: "mensagens.requeue_pending_message_failed",
+              campaign_id: campaign.id,
+              log_id: log.id,
+              error_message: error?.message,
+            })
+          );
+      }
+    }
+
+    return jobs;
+  }
+
+  async function createAdHocCampaign({
+    payload,
+    texto,
+    link,
+    linkConteudoTipo,
+    status,
+    dataEnvio,
+    windowStart,
+    windowEnd,
+    jitterDelayMinMs,
+    jitterDelayMaxMs,
+    triggerFiredAt,
+  }) {
     const scheduleSettings = await resolveScheduleSettings();
     const referenceDate = windowStart ? new Date(windowStart) : new Date();
 
@@ -150,11 +236,17 @@ function createMensagensService(dependencies = {}) {
       classificacao: normalizeClassificacao(payload),
       texto_mensagem: texto || null,
       link_conteudo: link || null,
+      link_conteudo_tipo: linkConteudoTipo || null,
       data_envio: dataEnvio || formatDateOnlyInTimezone(referenceDate, scheduleSettings.timezone),
       window_start: windowStart || null,
       window_end: windowEnd || null,
       jitter_delay_min_ms: Number.isFinite(jitterDelayMinMs) ? jitterDelayMinMs : null,
       jitter_delay_max_ms: Number.isFinite(jitterDelayMaxMs) ? jitterDelayMaxMs : null,
+      // Disparo pontual agendado cria todos os jobs de uma vez, aqui mesmo em
+      // scheduleAdHoc - nao ha fase separada de "trigger" como na campanha de
+      // video, entao ja nasce marcado para o resume saber que deve recriar/
+      // reagendar os jobs de mensagens-dispatch diretamente.
+      trigger_fired_at: triggerFiredAt || null,
     });
   }
 
@@ -195,7 +287,7 @@ function createMensagensService(dependencies = {}) {
       throw new Error("Selecione ao menos um grupo");
     }
 
-    const { texto, content } = normalizeContent(payload);
+    const { texto, content, tipoConteudo } = normalizeContent(payload);
 
     await assertNoVideoCampaignInFlight();
 
@@ -259,6 +351,7 @@ function createMensagensService(dependencies = {}) {
           payload,
           texto,
           link: content?.url,
+          linkConteudoTipo: tipoConteudo,
           status: "concluido",
         });
 
@@ -303,7 +396,7 @@ function createMensagensService(dependencies = {}) {
       throw new Error("Selecione ao menos um grupo");
     }
 
-    const { texto, content } = normalizeContent(payload);
+    const { texto, content, tipoConteudo } = normalizeContent(payload);
 
     if (!payload.window_start || !payload.window_end) {
       throw new Error("window_start e window_end sao obrigatorios para agendar com intervalo");
@@ -399,11 +492,13 @@ function createMensagensService(dependencies = {}) {
           payload,
           texto,
           link: content?.url,
+          linkConteudoTipo: tipoConteudo,
           status: "programado",
           windowStart: payload.window_start,
           windowEnd: payload.window_end,
           jitterDelayMinMs,
           jitterDelayMaxMs,
+          triggerFiredAt: new Date().toISOString(),
         });
 
         await Promise.all(
@@ -469,6 +564,13 @@ function createMensagensService(dependencies = {}) {
         { removeOnComplete: false, removeOnFail: false }
       );
 
+      // Grava o id do job no log para o resume conseguir localiza-lo direto
+      // (queue.getJob(id)) em vez de escanear a fila - best-effort, perder isso
+      // so degrada o resume para o caminho de recriar o job do zero.
+      if (dispatchLogId && typeof dispatchLogs.updateDispatchJobId === "function") {
+        await dispatchLogs.updateDispatchJobId(dispatchLogId, job.id).catch(() => undefined);
+      }
+
       scheduled.push({
         group_id: group.id,
         group_nome: group.nome,
@@ -480,7 +582,7 @@ function createMensagensService(dependencies = {}) {
     return { scheduled: scheduled.length, jobs: scheduled };
   }
 
-  return { dispatchAdHoc, scheduleAdHoc };
+  return { dispatchAdHoc, scheduleAdHoc, requeuePendingMessages };
 }
 
 module.exports = createMensagensService();

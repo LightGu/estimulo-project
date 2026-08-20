@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -31,6 +36,7 @@
     </style>
   </head>
   <body data-page="mensagens">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -45,7 +51,7 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <section class="page-section">
             <div class="two-col">
               <div class="card">
@@ -69,12 +75,13 @@
 
                   <div class="field">
                     <label for="msgTexto">Texto da mensagem</label>
-                    <textarea id="msgTexto" rows="3" placeholder="Escreva o texto que acompanhará o envio..."></textarea>
+                    <textarea id="msgTexto" rows="3" placeholder="Escreva o texto que acompanhará o envio…"></textarea>
                   </div>
 
                   <div class="field">
                     <label>Grupos destinatários</label>
-                    <input id="groupSearchInput" type="search" placeholder="Buscar grupo por nome..." style="margin-bottom:6px;">
+                    <input id="groupSearchInput" type="search" placeholder="Buscar grupo por nome…" style="margin-bottom:6px;">
+                    <label style="margin-bottom:6px;"><input type="checkbox" id="selectAllGroups"> <strong>Selecionar todos os grupos</strong></label>
                     <div class="checkbox-list" id="groupCheckboxes"></div>
                   </div>
 
@@ -92,17 +99,21 @@
                       <input id="msgFim" type="time" value="13:30">
                     </div>
                   </div>
-                  <div class="field-row" style="grid-template-columns:1fr 1fr;">
+                  <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;">
                     <div class="field">
-                      <label for="msgDelayMin">Delay randômico mín. (min)</label>
-                      <input id="msgDelayMin" type="number" min="0" value="2">
+                      <label for="msgDelayMinMin">Delay mín. (min)</label>
+                      <input id="msgDelayMinMin" type="number" min="0" value="2">
                     </div>
                     <div class="field">
-                      <label for="msgDelayMax">Delay randômico máx. (min)</label>
-                      <input id="msgDelayMax" type="number" min="0" value="8">
+                      <label for="msgDelayMinSec">Delay mín. (seg)</label>
+                      <input id="msgDelayMinSec" type="number" min="0" max="59" value="0">
+                    </div>
+                    <div class="field">
+                      <label for="msgDelayMaxMin">Delay máx. (min)</label>
+                      <input id="msgDelayMaxMin" type="number" min="0" value="8">
                     </div>
                   </div>
-                  <p class="text-faint" style="font-size:11px;margin:-8px 0 4px;">Os envios são espalhados aleatoriamente dentro da janela acima — mesmo mecanismo do Envio automatizado — pra não disparar tudo no mesmo instante. Data e horário de início precisam ser posteriores ao momento atual. Os valores de delay já vêm preenchidos com o padrão definido em Configurações, mas podem ser ajustados aqui.</p>
+                  <p class="text-faint" style="font-size:11px;margin:-8px 0 4px;">Os envios são espalhados aleatoriamente dentro da janela acima — mesmo mecanismo do Envio automatizado — pra não disparar tudo no mesmo instante. Data e horário de início precisam ser posteriores ao momento atual. Os valores de delay já vêm preenchidos com o padrão definido em Configurações, mas podem ser ajustados aqui. Delays abaixo de ~15s podem não ser respeitados com precisão: o envio anterior ainda pode estar aguardando confirmação de entrega do grupo.</p>
 
                   <div class="field-row" style="grid-template-columns:1fr 1fr;">
                     <div class="field">
@@ -209,8 +220,33 @@
               )
               .join("")
           : '<span class="text-faint">Nenhum grupo encontrado para essa busca.</span>';
-        document.querySelectorAll(".group-check").forEach((cb) => cb.addEventListener("change", updatePreview));
+        document.querySelectorAll(".group-check").forEach((cb) => cb.addEventListener("change", () => {
+          updateSelectAllState();
+          updatePreview();
+        }));
+        updateSelectAllState();
       }
+
+      function updateSelectAllState() {
+        const selectAll = document.getElementById("selectAllGroups");
+        const checkboxes = Array.from(document.querySelectorAll(".group-check"));
+
+        if (!checkboxes.length) {
+          selectAll.checked = false;
+          selectAll.disabled = true;
+          return;
+        }
+
+        selectAll.disabled = false;
+        selectAll.checked = checkboxes.every((cb) => cb.checked);
+      }
+
+      document.getElementById("selectAllGroups").addEventListener("change", (event) => {
+        document.querySelectorAll(".group-check").forEach((cb) => {
+          cb.checked = event.target.checked;
+        });
+        updatePreview();
+      });
 
       function populateTestGroupSelect() {
         document.getElementById("testGroup").innerHTML = state.groups
@@ -354,8 +390,11 @@
         button.textContent = "Programando…";
 
         try {
-          const delayMin = Number(document.getElementById("msgDelayMin").value) * 60000;
-          const delayMax = Number(document.getElementById("msgDelayMax").value) * 60000;
+          const delayMin =
+            Number(document.getElementById("msgDelayMinMin").value) * 60000 +
+            Number(document.getElementById("msgDelayMinSec").value) * 1000;
+          const delayMax =
+            Number(document.getElementById("msgDelayMaxMin").value) * 60000;
           const result = await requestJson("/mensagens/dispatch/schedule", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -420,10 +459,10 @@
         try {
           const settings = await requestJson("/settings/schedule");
           if (Number.isInteger(settings.min_interval_min)) {
-            document.getElementById("msgDelayMin").value = settings.min_interval_min;
+            document.getElementById("msgDelayMinMin").value = settings.min_interval_min;
           }
           if (Number.isInteger(settings.max_interval_min)) {
-            document.getElementById("msgDelayMax").value = settings.max_interval_min;
+            document.getElementById("msgDelayMaxMin").value = settings.max_interval_min;
           }
         } catch (error) {
           // mantém os defaults do HTML se as configurações não puderem ser carregadas

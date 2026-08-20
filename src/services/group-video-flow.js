@@ -1,4 +1,6 @@
 const defaultInAppNotificationsService = require("./in-app-notifications.service");
+const defaultGroupsRepository = require("../repositories/groups.repository");
+const defaultTrilhaSequenceService = require("./trilha-sequence.service");
 
 const APPROVED_VIDEO_STATUS = true;
 const END_OF_QUEUE_PAUSE_REASON = "end_of_queue";
@@ -180,6 +182,98 @@ function resolveNotifyOnTrailFinished(params = {}) {
   return true;
 }
 
+function resolveAutoAdvanceTrilha(params = {}) {
+  const dispatchRules = params.dispatchRules || params.dispatch_rules;
+
+  if (dispatchRules && typeof dispatchRules.auto_advance_trilha === "boolean") {
+    return dispatchRules.auto_advance_trilha;
+  }
+
+  return false;
+}
+
+function resolveNotifyOnTrailAdvanced(params = {}) {
+  const dispatchRules = params.dispatchRules || params.dispatch_rules;
+
+  if (dispatchRules && typeof dispatchRules.notify_on_trail_advanced === "boolean") {
+    return dispatchRules.notify_on_trail_advanced;
+  }
+
+  return true;
+}
+
+// Avanca group.trilha_id (e profile_id, em checkpoints de perfil) seguindo a ordem
+// pre-definida do perfil, pulando trilhas sem video aprovado disponivel, ate achar
+// um video para enviar ou esgotar os passos alcancaveis. Nao lanca erro em corrida
+// perdida (compare-and-swap sem linhas afetadas) - so para de tentar avancar nesta
+// rodada, porque o cursor do proximo tick e derivado do historico real de
+// entregas (ver trilha-sequence.service.js), nunca do trilha_id ao vivo.
+async function advanceGroupTrilhaUntilVideoFound(params = {}) {
+  const {
+    group,
+    trilhaSequenceService: trilhaSequenceServiceDependency = defaultTrilhaSequenceService,
+    groupsRepository: groupsRepositoryDependency = defaultGroupsRepository,
+    inAppNotificationsService: notificationsService = defaultInAppNotificationsService,
+  } = params;
+
+  let currentGroup = group;
+  const excludeTrilhaIds = new Set();
+  const maxIterations = await trilhaSequenceServiceDependency.countReachableSteps(currentGroup);
+  let iterations = 0;
+  let video;
+
+  while (iterations < maxIterations) {
+    iterations += 1;
+
+    const next = await trilhaSequenceServiceDependency.resolveNextTrilhaForGroup(currentGroup, { excludeTrilhaIds });
+
+    if (!next) {
+      break;
+    }
+
+    const expectedTrilhaId = resolveGroupTrailId(currentGroup) || null;
+    const updatePayload = { trilha_id: next.trilha_id };
+
+    if (next.profile_id && next.profile_id !== currentGroup.profile_id) {
+      updatePayload.profile_id = next.profile_id;
+    }
+
+    const updated = await groupsRepositoryDependency.updateTrilhaIfCurrent(
+      resolveGroupId(currentGroup),
+      expectedTrilhaId,
+      updatePayload
+    );
+
+    if (!updated) {
+      break;
+    }
+
+    currentGroup = { ...currentGroup, ...updated };
+
+    if (
+      notificationsService &&
+      typeof notificationsService.notifyTrailAdvanced === "function" &&
+      resolveNotifyOnTrailAdvanced(params)
+    ) {
+      await notificationsService.notifyTrailAdvanced({
+        groupId: resolveGroupId(currentGroup),
+        groupName: currentGroup.nome || currentGroup.name,
+        reason: next.reason,
+      });
+    }
+
+    video = await findNextApprovedUnsentVideo({ ...params, group: currentGroup });
+
+    if (video) {
+      break;
+    }
+
+    excludeTrilhaIds.add(next.trilha_id);
+  }
+
+  return { group: currentGroup, video };
+}
+
 async function pauseGroupForEndOfQueue(params = {}) {
   const {
     group,
@@ -265,33 +359,40 @@ async function resolveGroupVideoFlow(params = {}) {
     };
   }
 
-  const video = await findNextApprovedUnsentVideo(params);
+  let currentGroup = group;
+  let video = await findNextApprovedUnsentVideo(params);
+
+  if (!video && resolveAutoAdvanceTrilha(params)) {
+    const advanced = await advanceGroupTrilhaUntilVideoFound({ ...params, group: currentGroup });
+    currentGroup = advanced.group;
+    video = advanced.video;
+  }
 
   if (!video) {
-    await pauseGroupForEndOfQueue(params);
+    await pauseGroupForEndOfQueue({ ...params, group: currentGroup });
 
     return {
       status: "paused",
       reason: END_OF_QUEUE_PAUSE_REASON,
-      group,
+      group: currentGroup,
     };
   }
 
-  await resumeGroupVideoFlow(params);
+  await resumeGroupVideoFlow({ ...params, group: currentGroup });
 
   const dispatchRules = params.dispatchRules || params.dispatch_rules || {};
 
   return {
     status: "eligible",
-    group,
-    progress_group_id: resolveGroupId(group),
-    group_id: resolveDispatchGroupId(group),
+    group: currentGroup,
+    progress_group_id: resolveGroupId(currentGroup),
+    group_id: resolveDispatchGroupId(currentGroup),
     video_catalog: video,
     video_id: resolveVideoId(video),
-    trilha_id: resolveGroupTrailId(group),
+    trilha_id: resolveGroupTrailId(currentGroup),
     drive_file_id: video.drive_file_id || video.driveFileId,
     legenda: params.legenda || video.legenda || video.caption,
-    forced_next_video_id: resolveForcedNextVideoId(group) || undefined,
+    forced_next_video_id: resolveForcedNextVideoId(currentGroup) || undefined,
     never_repeat_video: dispatchRules.never_repeat_video,
     auto_generate_caption: dispatchRules.auto_generate_caption,
   };
@@ -319,6 +420,7 @@ async function resolveGroupsVideoFlow(params = {}) {
 module.exports = {
   APPROVED_VIDEO_STATUS,
   END_OF_QUEUE_PAUSE_REASON,
+  advanceGroupTrilhaUntilVideoFound,
   buildEndOfQueueLogPayload,
   canEvaluateGroupVideoFlow,
   isGroupPausedByEndOfQueue,

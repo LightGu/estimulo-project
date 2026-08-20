@@ -59,6 +59,38 @@ async function remove(id, client) {
   return data || null;
 }
 
+// Mesmo padrao de reorderVideosWithinTrilha/reorderTrilhaPerfisForProfile: uma
+// escrita por linha, sem constraint de unicidade em ordem (ver migration
+// 202607310005) para trocar duas posicoes nao passar por um estado intermediario
+// invalido.
+async function reorder(orderedIds, client) {
+  const resolvedClient = getClient(client);
+  const updates = orderedIds.map((id, index) =>
+    resolvedClient.from("group_profiles").update({ ordem: index + 1 }).eq("id", id).select("*").single()
+  );
+
+  const results = await Promise.all(updates);
+  const failed = results.find((result) => result.error);
+
+  if (failed) {
+    throw failed.error;
+  }
+
+  return results.map((result) => result.data);
+}
+
+async function clearOrdem(ids, client) {
+  if (!ids.length) {
+    return;
+  }
+
+  const { error } = await getClient(client).from("group_profiles").update({ ordem: null }).in("id", ids);
+
+  if (error) {
+    throw error;
+  }
+}
+
 async function countTrilhaPerfisUsage(profileId, client) {
   const { count, error } = await getClient(client)
     .from("trilha_perfis")
@@ -271,6 +303,7 @@ async function removeMergeRecord(id, client) {
 }
 
 module.exports = {
+  clearOrdem,
   countGroupsUsage,
   countTrilhaPerfisUsage,
   create,
@@ -289,5 +322,6 @@ module.exports = {
   reassignTrilhaPerfisByTrilhaIds,
   remove,
   removeMergeRecord,
+  reorder,
   update,
 };

@@ -149,6 +149,194 @@ async function testFindByTrilhaNameReturnsFirstMatch() {
   assert.equal(result.id, "trilha-1");
 }
 
+async function testListTrilhasByProfileIdReturnsDedupedOrderedTrilhas() {
+  const trilhasResult = [
+    { id: "trilha-1", macrotema: "GESTÃO FINANCEIRA", trilha: "2.1 Fundamentos" },
+    { id: "trilha-2", macrotema: "VENDAS", trilha: "3.1 Fundamentos" },
+  ];
+
+  const client = {
+    from(tableName) {
+      if (tableName === "trilha_perfis") {
+        return {
+          select() {
+            return this;
+          },
+          eq(column, value) {
+            assert.equal(column, "profile_id");
+            assert.equal(value, "profile-1");
+            // trilha-2 repetida de proposito: a funcao deve deduplicar por trilha_id.
+            return Promise.resolve({
+              data: [{ trilha_id: "trilha-2" }, { trilha_id: "trilha-1" }, { trilha_id: "trilha-2" }],
+              error: null,
+            });
+          },
+        };
+      }
+
+      if (tableName === "trilhas") {
+        return {
+          select() {
+            return this;
+          },
+          in(column, ids) {
+            assert.equal(column, "id");
+            assert.deepEqual([...ids].sort(), ["trilha-1", "trilha-2"]);
+            return this;
+          },
+          order() {
+            return this;
+          },
+          then(resolve) {
+            resolve({ data: trilhasResult, error: null });
+          },
+        };
+      }
+
+      throw new Error(`Tabela inesperada no mock: ${tableName}`);
+    },
+  };
+
+  const result = await trilhasRepository.listTrilhasByProfileId("profile-1", client);
+
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map((trilha) => trilha.id), ["trilha-1", "trilha-2"]);
+}
+
+async function testListTrilhasByProfileIdReturnsEmptyWhenNoLinks() {
+  const client = {
+    from(tableName) {
+      assert.equal(tableName, "trilha_perfis");
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return Promise.resolve({ data: [], error: null });
+        },
+      };
+    },
+  };
+
+  const result = await trilhasRepository.listTrilhasByProfileId("profile-sem-trilhas", client);
+
+  assert.deepEqual(result, []);
+}
+
+async function testListTrilhaPerfisByProfileOrdersByOrdem() {
+  const rows = [
+    { trilha_id: "trilha-2", profile_id: "profile-1", ordem: 2 },
+    { trilha_id: "trilha-1", profile_id: "profile-1", ordem: 1 },
+  ];
+
+  const client = {
+    from(tableName) {
+      assert.equal(tableName, "trilha_perfis");
+      return {
+        select() {
+          return this;
+        },
+        eq(column, value) {
+          assert.equal(column, "profile_id");
+          assert.equal(value, "profile-1");
+          return this;
+        },
+        order(column, options) {
+          assert.equal(column, "ordem");
+          assert.deepEqual(options, { ascending: true });
+          const sorted = [...rows].sort((left, right) => left.ordem - right.ordem);
+          return Promise.resolve({ data: sorted, error: null });
+        },
+      };
+    },
+  };
+
+  const result = await trilhasRepository.listTrilhaPerfisByProfile("profile-1", client);
+
+  assert.deepEqual(result.map((row) => row.trilha_id), ["trilha-1", "trilha-2"]);
+}
+
+async function testReorderTrilhaPerfisForProfileWritesSequentialOrdem() {
+  const updates = [];
+
+  const client = {
+    from(tableName) {
+      assert.equal(tableName, "trilha_perfis");
+      return {
+        update(payload) {
+          return {
+            eq(column, value) {
+              updates.push({ column, value, payload });
+              return this;
+            },
+            select() {
+              return this;
+            },
+            single() {
+              return Promise.resolve({ data: { ...payload }, error: null });
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const result = await trilhasRepository.reorderTrilhaPerfisForProfile(
+    "profile-1",
+    ["trilha-2", "trilha-1"],
+    client
+  );
+
+  assert.equal(result.length, 2);
+  // Duas chamadas .eq() por update (profile_id, depois trilha_id) - a segunda
+  // carrega o ordem correto no payload.
+  const trilhaIdCalls = updates.filter((call) => call.column === "trilha_id");
+  assert.deepEqual(trilhaIdCalls.map((call) => [call.value, call.payload.ordem]), [
+    ["trilha-2", 1],
+    ["trilha-1", 2],
+  ]);
+}
+
+async function testAddTrilhaToProfileSequenceComputesNextOrdem() {
+  const existingRows = [
+    { trilha_id: "trilha-1", profile_id: "profile-1", ordem: 1 },
+    { trilha_id: "trilha-2", profile_id: "profile-1", ordem: 2 },
+  ];
+  let insertedPayload = null;
+
+  const client = {
+    from(tableName) {
+      assert.equal(tableName, "trilha_perfis");
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        order() {
+          return Promise.resolve({ data: existingRows, error: null });
+        },
+        insert(payload) {
+          insertedPayload = payload;
+          return this;
+        },
+        single() {
+          return Promise.resolve({ data: { id: "tp-3", ...insertedPayload }, error: null });
+        },
+      };
+    },
+  };
+
+  const result = await trilhasRepository.addTrilhaToProfileSequence("trilha-3", "profile-1", "Infância", client);
+
+  assert.equal(insertedPayload.ordem, 3);
+  assert.equal(insertedPayload.trilha_id, "trilha-3");
+  assert.equal(insertedPayload.profile_id, "profile-1");
+  assert.equal(insertedPayload.perfil, "Infância");
+  assert.equal(result.id, "tp-3");
+}
+
 async function main() {
   await testReturnsNullWhenProfileNotEnabledForTrilha();
   await testReturnsNullWhenTrilhaHasNoApprovedVideos();
@@ -156,6 +344,11 @@ async function main() {
   await testMatchesProfileIgnoringCaseAndAccents();
   await testSkipsUnapprovedVideoAndReturnsApprovedOne();
   await testFindByTrilhaNameReturnsFirstMatch();
+  await testListTrilhasByProfileIdReturnsDedupedOrderedTrilhas();
+  await testListTrilhasByProfileIdReturnsEmptyWhenNoLinks();
+  await testListTrilhaPerfisByProfileOrdersByOrdem();
+  await testReorderTrilhaPerfisForProfileWritesSequentialOrdem();
+  await testAddTrilhaToProfileSequenceComputesNextOrdem();
 
   console.log("trilhas-repository tests OK");
 }

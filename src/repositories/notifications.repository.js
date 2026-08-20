@@ -73,9 +73,23 @@ async function markRead(id, readAt, client) {
   return data || null;
 }
 
+async function deleteRead(client) {
+  const { error } = await getClient(client)
+    .from(NOTIFICATIONS_TABLE)
+    .delete()
+    .not("read_at", "is", null);
+
+  if (error) {
+    throw error;
+  }
+
+  return true;
+}
+
 module.exports = {
   countUnread,
   create,
+  deleteRead,
   listRecent,
   markAllRead,
   markRead,

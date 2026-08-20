@@ -145,6 +145,94 @@ async function markRetrying(id, retryCount, client) {
   return data;
 }
 
+// Usado por cancelCampaign: marca de uma vez todos os logs ainda pendentes
+// como cancelado, para que nenhum deles seja disparado depois. Deliberadamente
+// nao inclui "processando": esse envio pode ja estar nas maos da Evolution, e
+// forcar o status por cima esconderia um "enviado"/"falhou" real. Logs
+// enviado/falhou/erro ficam intactos - preservam o historico do que ja
+// aconteceu antes do cancelamento.
+async function cancelPendingByCampaign(campaignId, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .update({ status: "cancelado" })
+    .eq("campaign_id", campaignId)
+    .eq("status", "pendente")
+    .select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function listPendingByCampaign(campaignId, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .eq("status", "pendente");
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function findById(id, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+// Reivindicacao atomica do envio: so passa de pendente para processando se a
+// linha ainda estiver pendente nesse instante. Substitui um updateStatus
+// incondicional que deixava dois jobs em voo para o mesmo log (ex.: um job
+// antigo que sobreviveu no Redis durante uma pausa e o job novo criado no
+// resume) mandarem os dois - so quem vence o UPDATE segue para o envio, o
+// outro recebe null e vira no-op.
+async function claimForSend(id, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .update({ status: "processando" })
+    .eq("id", id)
+    .eq("status", "pendente")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+// Grava o id do job do BullMQ responsavel por este envio, para o resume
+// conseguir localiza-lo direto (queue.getJob(id)) em vez de escanear a fila.
+async function updateDispatchJobId(id, dispatchJobId, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .update({ dispatch_job_id: dispatchJobId })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 async function listByCampaign(campaignId, client) {
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
@@ -256,13 +344,18 @@ async function listFailedForRetry(options = {}, client) {
 module.exports = {
   DEFAULT_FAILED_RETRY_BATCH_SIZE,
   DEFAULT_MAX_RETRY_COUNT,
+  cancelPendingByCampaign,
+  claimForSend,
   createLog,
+  findById,
   listByCampaign,
   listByGroup,
   listFailedForRetry,
+  listPendingByCampaign,
   listRecent,
   listWithFilters,
   markRetrying,
+  updateDispatchJobId,
   updatePlannedSchedule,
   updateProviderDelivery,
   updateStatus,

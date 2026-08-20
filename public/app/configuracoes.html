@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -37,9 +42,17 @@
       #whatsappInstancesBody tr.drag-over { border-top: 2px solid var(--brand, #6366f1); }
       .period-add-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
       .period-add-row input[type="time"] { width: 92px; }
+      .chip .chip-arrow { cursor:pointer; color: var(--text-faint); font-weight:700; }
+      .chip .chip-arrow:hover { color: var(--text); }
+      .chip .chip-arrow.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+      .chip .chip-order-badge { font-size:10.5px; font-weight:700; color: var(--text-faint); background: var(--surface); border-radius:999px; padding:1px 6px; }
+      .chip .chip-journey-toggle { cursor:pointer; color: var(--text-faint); font-size:11px; white-space:nowrap; }
+      .chip .chip-journey-toggle:hover { color: var(--accent, #5b6cff); }
+      .profiles-subhead { font-size:12px; color: var(--text-muted); margin-bottom:6px; }
     </style>
   </head>
   <body data-page="configuracoes">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -54,7 +67,7 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <section class="page-section">
             <div class="card">
               <div class="card-header"><h3><span class="section-num">1.</span>Perfil do usuário</h3></div>
@@ -213,7 +226,7 @@
                   <div class="field">
                     <label for="notifyTarget">Grupo de notificações</label>
                     <select id="notifyTarget">
-                      <option value="">Selecione um grupo...</option>
+                      <option value="">Selecione um grupo…</option>
                     </select>
                   </div>
                 </div>
@@ -280,7 +293,10 @@
               <div class="card-header"><h3>Perfis de grupo</h3></div>
               <div class="card-body">
                 <p class="text-muted" style="margin-bottom:12px;">Perfis disponíveis para classificação de grupos e trilhas. Clique no lápis para renomear, ou selecione 2 perfis para fundi-los em um só. Perfis que vieram de uma fusão mostram o ícone <span aria-hidden="true">&#8624;</span> para desfundir e voltar aos dois perfis originais.</p>
-                <div class="chip-list" id="segmentChips" style="margin-bottom:14px;"></div>
+                <p class="profiles-subhead">Ordem da jornada automática — grupos avançam de um perfil para o próximo nesta ordem quando a trilha atual termina.</p>
+                <div class="chip-list" id="orderedProfileChips" style="margin-bottom:14px;"></div>
+                <p class="profiles-subhead">Fora da jornada automática — não recebem avanço automático de perfil.</p>
+                <div class="chip-list" id="unorderedProfileChips" style="margin-bottom:14px;"></div>
                 <div style="display:flex; gap:8px; max-width:360px; margin-bottom:8px;">
                   <input id="newProfileInput" type="text" placeholder="Nome do novo perfil" style="flex:1;">
                   <button class="btn btn-secondary" id="addProfileButton" type="button">Adicionar</button>
@@ -295,9 +311,9 @@
     </div>
 
     <div class="overlay" id="qrOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="qrOverlayTitle">
         <div class="modal-header">
-          <h3>Conectar novo número</h3>
+          <h3 id="qrOverlayTitle">Conectar novo número</h3>
           <button class="icon-btn-close" id="qrCloseModal" type="button" aria-label="Fechar">&times;</button>
         </div>
         <div class="modal-body" style="text-align:center;">
@@ -482,6 +498,7 @@
       let whatsappInstances = [];
       let qrPollTimer = null;
       let qrCountdownTimer = null;
+      let qrReleaseTrap = null;
 
       function setEvoStatus(text, color) {
         document.getElementById("evoActionStatus").style.color = color || "var(--text-muted)";
@@ -499,7 +516,11 @@
           .map(
             (instance, index) => `
           <tr draggable="true" data-instance-row="${escapeHtml(instance.id)}">
-            <td><span class="drag-handle" title="Arraste para reordenar">&#8942;&#8942;</span></td>
+            <td>
+              <span class="drag-handle" aria-hidden="true" title="Arraste para reordenar">&#8942;&#8942;</span>
+              <button class="btn-icon btn-secondary sr-only" type="button" data-move-instance-up="${escapeHtml(instance.id)}" aria-label="Mover ${escapeHtml(instance.phone_number || instance.instance_name)} para cima"${index === 0 ? " disabled" : ""}>&#8593;</button>
+              <button class="btn-icon btn-secondary sr-only" type="button" data-move-instance-down="${escapeHtml(instance.id)}" aria-label="Mover ${escapeHtml(instance.phone_number || instance.instance_name)} para baixo"${index === whatsappInstances.length - 1 ? " disabled" : ""}>&#8595;</button>
+            </td>
             <td>${index + 1}</td>
             <td class="strong">${escapeHtml(instance.phone_number || "-")}</td>
             <td class="mono">${escapeHtml(instance.instance_name)}</td>
@@ -517,6 +538,12 @@
         );
         document.querySelectorAll("[data-connect-instance]").forEach((button) =>
           button.addEventListener("click", () => startQrFlow(button.dataset.connectInstance))
+        );
+        document.querySelectorAll("[data-move-instance-up]").forEach((button) =>
+          button.addEventListener("click", () => moveInstance(button.dataset.moveInstanceUp, -1))
+        );
+        document.querySelectorAll("[data-move-instance-down]").forEach((button) =>
+          button.addEventListener("click", () => moveInstance(button.dataset.moveInstanceDown, 1))
         );
 
         let draggedId = null;
@@ -549,6 +576,18 @@
         const fromIndex = whatsappInstances.findIndex((instance) => instance.id === draggedId);
         const toIndex = whatsappInstances.findIndex((instance) => instance.id === targetId);
         if (fromIndex < 0 || toIndex < 0) return;
+
+        const reordered = [...whatsappInstances];
+        const [moved] = reordered.splice(fromIndex, 1);
+        reordered.splice(toIndex, 0, moved);
+
+        persistInstanceOrder(reordered);
+      }
+
+      function moveInstance(id, delta) {
+        const fromIndex = whatsappInstances.findIndex((instance) => instance.id === id);
+        const toIndex = fromIndex + delta;
+        if (fromIndex < 0 || toIndex < 0 || toIndex >= whatsappInstances.length) return;
 
         const reordered = [...whatsappInstances];
         const [moved] = reordered.splice(fromIndex, 1);
@@ -674,11 +713,18 @@
       function closeQrModal() {
         stopQrPolling();
         document.getElementById("qrOverlay").hidden = true;
+        if (qrReleaseTrap) {
+          qrReleaseTrap();
+          qrReleaseTrap = null;
+        }
       }
 
       document.getElementById("qrCloseModal").addEventListener("click", closeQrModal);
       document.getElementById("qrOverlay").addEventListener("click", (event) => {
         if (event.target.id === "qrOverlay") closeQrModal();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !document.getElementById("qrOverlay").hidden) closeQrModal();
       });
 
       async function startQrFlow(instanceId) {
@@ -686,6 +732,7 @@
         const qrCountdown = document.getElementById("qrCountdown");
 
         document.getElementById("qrOverlay").hidden = false;
+        qrReleaseTrap = window.estimuloTrapFocus(document.getElementById("qrOverlay"));
         qrStatus.textContent = "Gerando QR Code…";
         qrStatus.className = "status-line";
         qrCountdown.textContent = "";
@@ -1081,6 +1128,8 @@
 
       // ---------- 6. Regras de envio ----------
       const DISPATCH_RULES = [
+        { id: "auto_advance_trilha", label: "Avançar automaticamente para a próxima trilha", hint: "Quando a trilha atual de um grupo terminar, escolhe a próxima automaticamente segundo a ordem definida para o perfil (com desvios por setor e troca de perfil quando a jornada avança). Se desativado, o grupo fica pausado até alguém escolher a trilha manualmente.", checked: true },
+        { id: "notify_on_trail_advanced", label: "Notificar quando o avanço automático trocar a trilha de um grupo", hint: "Envia uma notificação quando o motor de sequenciamento reatribui a trilha de um grupo sozinho.", checked: true },
         { id: "never_repeat_video", label: "Nunca repetir vídeo", hint: "Impede que o mesmo vídeo seja enviado duas vezes ao mesmo grupo. Quando desativado, você pode forçar o reenvio de um vídeo específico na tela de Envio automatizado.", checked: true },
         { id: "notify_on_trail_finished", label: "Notificar quando uma trilha em um grupo terminar", hint: "Envia uma notificação (conforme configurado na seção Notificações) quando não houver mais vídeos aprovados pendentes na trilha do grupo.", checked: true },
         { id: "auto_generate_caption", label: "Gerar legenda automaticamente", hint: "Toda pílula importada recebe uma legenda gerada por IA. Se desativado, só é usada legenda já pronta no banco; caso contrário fica vazia para edição manual.", checked: true },
@@ -1241,7 +1290,7 @@
           const groups = await groupsResponse.json();
 
           notifyTargetSelect.innerHTML =
-            '<option value="">Selecione um grupo...</option>' +
+            '<option value="">Selecione um grupo…</option>' +
             (Array.isArray(groups) ? groups : [])
               .map((group) => `<option value="${escapeHtmlNotify(group.id)}">${escapeHtmlNotify(group.nome)}</option>`)
               .join("");
@@ -1348,22 +1397,55 @@
           if (!profiles.some((profile) => profile.id === id)) selectedProfileIds.delete(id);
         });
 
-        document.getElementById("segmentChips").innerHTML = profiles
-          .map((profile) => {
-            const restoredNome = unmergeableProfiles.get(profile.id);
-            const unmergeIcon = restoredNome
-              ? `<span class="chip-unmerge" data-unmerge-profile="${escapeHtml(profile.id)}" title="Desfundir — separar &quot;${escapeHtml(restoredNome)}&quot; novamente">&#8624;</span>`
-              : "";
+        const orderedProfiles = profiles
+          .filter((profile) => profile.ordem !== null && profile.ordem !== undefined)
+          .sort((left, right) => Number(left.ordem) - Number(right.ordem));
+        const unorderedProfiles = profiles.filter(
+          (profile) => profile.ordem === null || profile.ordem === undefined
+        );
 
-            return `
+        function chipCommonHtml(profile) {
+          const restoredNome = unmergeableProfiles.get(profile.id);
+          const unmergeIcon = restoredNome
+            ? `<span class="chip-unmerge" data-unmerge-profile="${escapeHtml(profile.id)}" title="Desfundir — separar &quot;${escapeHtml(restoredNome)}&quot; novamente">&#8624;</span>`
+            : "";
+
+          return `
+            ${escapeHtml(profile.nome)}
+            <span class="chip-edit" data-edit-profile="${escapeHtml(profile.id)}" data-edit-nome="${escapeHtml(profile.nome)}" title="Renomear perfil">&#9998;</span>
+            ${unmergeIcon}
+            <span class="chip-remove" data-remove-profile="${escapeHtml(profile.id)}" title="Remover perfil">&times;</span>`;
+        }
+
+        document.getElementById("orderedProfileChips").innerHTML = orderedProfiles.length
+          ? orderedProfiles
+              .map((profile, index) => {
+                const upDisabled = index === 0 ? " disabled" : "";
+                const downDisabled = index === orderedProfiles.length - 1 ? " disabled" : "";
+
+                return `
             <span class="chip selectable${selectedProfileIds.has(profile.id) ? " selected" : ""}" data-select-profile="${escapeHtml(profile.id)}">
-              ${escapeHtml(profile.nome)}
-              <span class="chip-edit" data-edit-profile="${escapeHtml(profile.id)}" data-edit-nome="${escapeHtml(profile.nome)}" title="Renomear perfil">&#9998;</span>
-              ${unmergeIcon}
-              <span class="chip-remove" data-remove-profile="${escapeHtml(profile.id)}" title="Remover perfil">&times;</span>
+              <span class="chip-order-badge">${index + 1}</span>
+              ${chipCommonHtml(profile)}
+              <button type="button" class="chip-arrow${upDisabled ? " disabled" : ""}" data-move-profile-up="${escapeHtml(profile.id)}"${upDisabled} title="Mover para cima na jornada">&#8593;</button>
+              <button type="button" class="chip-arrow${downDisabled ? " disabled" : ""}" data-move-profile-down="${escapeHtml(profile.id)}"${downDisabled} title="Mover para baixo na jornada">&#8595;</button>
+              <span class="chip-journey-toggle" data-remove-from-journey="${escapeHtml(profile.id)}" title="Remover da jornada automática">Retirar da jornada</span>
             </span>`;
-          })
-          .join("");
+              })
+              .join("")
+          : '<span class="text-faint" style="font-size:12.5px;">Nenhum perfil na jornada automática.</span>';
+
+        document.getElementById("unorderedProfileChips").innerHTML = unorderedProfiles.length
+          ? unorderedProfiles
+              .map(
+                (profile) => `
+            <span class="chip selectable${selectedProfileIds.has(profile.id) ? " selected" : ""}" data-select-profile="${escapeHtml(profile.id)}">
+              ${chipCommonHtml(profile)}
+              <span class="chip-journey-toggle" data-add-to-journey="${escapeHtml(profile.id)}" title="Incluir no fim da jornada automática">+ Incluir na jornada</span>
+            </span>`
+              )
+              .join("")
+          : '<span class="text-faint" style="font-size:12.5px;">Nenhum perfil fora da jornada.</span>';
 
         document.querySelectorAll("[data-unmerge-profile]").forEach((el) =>
           el.addEventListener("click", (event) => {
@@ -1390,7 +1472,67 @@
           el.addEventListener("click", () => toggleProfileSelection(el.dataset.selectProfile, profiles))
         );
 
+        document.querySelectorAll("[data-move-profile-up]").forEach((el) =>
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            moveProfileInJourney(orderedProfiles, el.dataset.moveProfileUp, -1);
+          })
+        );
+
+        document.querySelectorAll("[data-move-profile-down]").forEach((el) =>
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            moveProfileInJourney(orderedProfiles, el.dataset.moveProfileDown, 1);
+          })
+        );
+
+        document.querySelectorAll("[data-remove-from-journey]").forEach((el) =>
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const orderedIds = orderedProfiles
+              .map((profile) => profile.id)
+              .filter((id) => id !== el.dataset.removeFromJourney);
+            persistProfileOrder(orderedIds);
+          })
+        );
+
+        document.querySelectorAll("[data-add-to-journey]").forEach((el) =>
+          el.addEventListener("click", (event) => {
+            event.stopPropagation();
+            const orderedIds = [...orderedProfiles.map((profile) => profile.id), el.dataset.addToJourney];
+            persistProfileOrder(orderedIds);
+          })
+        );
+
         updateMergeButtonState();
+      }
+
+      function moveProfileInJourney(orderedProfiles, profileId, delta) {
+        const orderedIds = orderedProfiles.map((profile) => profile.id);
+        const fromIndex = orderedIds.indexOf(profileId);
+        const toIndex = fromIndex + delta;
+        if (fromIndex === -1 || toIndex < 0 || toIndex >= orderedIds.length) return;
+
+        orderedIds.splice(toIndex, 0, orderedIds.splice(fromIndex, 1)[0]);
+        persistProfileOrder(orderedIds);
+      }
+
+      async function persistProfileOrder(orderedIds) {
+        setProfilesStatus("Salvando ordem…");
+        try {
+          const response = await fetch("/group-profiles/reorder", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ordered_ids: orderedIds }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao salvar ordem dos perfis");
+          setProfilesStatus("Ordem da jornada atualizada.", "var(--success)");
+          await loadProfiles();
+        } catch (error) {
+          setProfilesStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setProfilesStatus(""), 3000);
       }
 
       function toggleProfileSelection(id, profiles) {

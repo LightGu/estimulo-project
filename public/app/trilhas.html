@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -46,9 +51,14 @@
       .perfil-checkboxes label { display:flex; align-items:center; gap:6px; font-size:12.5px; }
       .perfis-panel { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0 16px; flex-wrap:wrap; }
       .already-in-trilha { margin-left:auto; font-size:11px; white-space:nowrap; }
+      tr.sequence-row { cursor: grab; }
+      tr.sequence-row.dragging { opacity: 0.4; }
+      tr.sequence-row.drag-over { box-shadow: inset 0 2px 0 var(--brand-blue); }
+      [data-desvio-select] { font-size:12.5px; padding:4px 8px; min-width:220px; }
     </style>
   </head>
   <body data-page="trilhas">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -64,57 +74,98 @@
           </div>
         </header>
 
-        <main class="page">
-          <section class="page-section">
-            <div class="section-head">
-              <h2>Macrotemas por perfil de jornada</h2>
-              <div class="segmented" id="perfilTabs">
-                <button class="active" data-perfil="todos">Todos</button>
+        <main class="page" id="main-content">
+          <div class="segmented" id="viewToggle" style="margin-bottom:16px;">
+            <button class="active" data-view="catalogo">Catálogo</button>
+            <button data-view="sequencia">Ordem por perfil</button>
+          </div>
+
+          <div id="catalogView">
+            <section class="page-section">
+              <div class="section-head">
+                <h2>Macrotemas por perfil de jornada</h2>
+                <div class="segmented" id="perfilTabs">
+                  <button class="active" data-perfil="todos">Todos</button>
+                </div>
               </div>
-            </div>
-            <div class="grid grid-cols-3" id="macrotemaGrid"></div>
-          </section>
+              <div class="grid grid-cols-3" id="macrotemaGrid"></div>
+            </section>
 
-          <section class="page-section" id="trailDetailSection" style="display:none;">
-            <div class="section-head">
-              <h2 id="macrotemaDetailTitle">Trilhas do macrotema</h2>
-              <span class="text-faint" id="trailDetailMeta"></span>
-            </div>
-
-            <div class="trilha-tabs" id="trilhaTabs"></div>
-            <p class="macrotema-path" id="macrotemaPath"></p>
-
-            <div class="perfis-panel">
-              <div class="perfil-checkboxes" id="trailPerfisCheckboxes"></div>
-              <div class="settings-row">
-                <button class="btn btn-secondary btn-sm" id="saveTrailPerfisButton" type="button">Salvar perfis</button>
-                <button class="btn btn-sm" id="newVideoButton" type="button">+ Adicionar vídeo</button>
+            <section class="page-section" id="trailDetailSection" style="display:none;">
+              <div class="section-head">
+                <h2 id="macrotemaDetailTitle">Trilhas do macrotema</h2>
+                <span class="text-faint" id="trailDetailMeta"></span>
               </div>
-            </div>
-            <div id="trailPerfisStatus" class="status-line"></div>
 
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Ordem</th>
-                    <th>Arquivo</th>
-                    <th>Status</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody id="videosBody"></tbody>
-              </table>
-            </div>
-          </section>
+              <div class="trilha-tabs" id="trilhaTabs"></div>
+              <p class="macrotema-path" id="macrotemaPath"></p>
+
+              <div class="perfis-panel">
+                <div class="perfil-checkboxes" id="trailPerfisCheckboxes"></div>
+                <div class="settings-row">
+                  <button class="btn btn-secondary btn-sm" id="saveTrailPerfisButton" type="button">Salvar perfis</button>
+                  <button class="btn btn-sm" id="newVideoButton" type="button">+ Adicionar vídeo</button>
+                </div>
+              </div>
+              <div id="trailPerfisStatus" class="status-line"></div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ordem</th>
+                      <th>Arquivo</th>
+                      <th>Status</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="videosBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+
+          <div id="sequenceView" style="display:none;">
+            <section class="page-section">
+              <div class="section-head">
+                <h2>Ordem por perfil</h2>
+                <div class="segmented" id="sequenceProfileTabs"></div>
+              </div>
+              <p class="text-muted" id="sequenceProfileHint" style="margin-bottom:14px;"></p>
+
+              <div class="settings-row" style="margin-bottom:14px;justify-content:space-between;">
+                <div class="settings-row" style="gap:8px;">
+                  <label for="sequenceSetorFilter" style="font-size:12.5px;font-weight:600;color:var(--text-muted);">Setor:</label>
+                  <select id="sequenceSetorFilter" style="min-width:220px;">
+                    <option value="">Todos os setores</option>
+                  </select>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="addSequenceTrilhaButton" type="button">+ Adicionar trilha</button>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ordem</th>
+                      <th>Macrotema · Trilha</th>
+                      <th>Vídeos</th>
+                      <th>Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sequenceBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </div>
         </main>
       </div>
     </div>
 
     <div class="overlay" id="newTrailOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newTrailOverlayTitle">
         <div class="modal-header">
-          <h3>Nova trilha</h3>
+          <h3 id="newTrailOverlayTitle">Nova trilha</h3>
           <button class="icon-btn-close" data-close-new type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
@@ -148,9 +199,9 @@
     </div>
 
     <div class="overlay" id="newVideoOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="newVideoOverlayTitle">
         <div class="modal-header">
-          <h3>Adicionar vídeo à trilha</h3>
+          <h3 id="newVideoOverlayTitle">Adicionar vídeo à trilha</h3>
           <button class="icon-btn-close" data-close-new-video type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
@@ -173,9 +224,9 @@
     </div>
 
     <div class="overlay" id="moveOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="moveOverlayTitle">
         <div class="modal-header">
-          <h3>Adicionar vídeo a outra trilha</h3>
+          <h3 id="moveOverlayTitle">Adicionar vídeo a outra trilha</h3>
           <button class="icon-btn-close" data-close-move type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
@@ -201,8 +252,29 @@
       </div>
     </div>
 
+    <div class="overlay" id="addSequenceTrilhaOverlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="addSequenceTrilhaOverlayTitle">
+        <div class="modal-header">
+          <h3 id="addSequenceTrilhaOverlayTitle">Adicionar trilha à sequência</h3>
+          <button class="icon-btn-close" data-close-add-sequence-trilha type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted" id="addSequenceTrilhaAnchorLabel"></p>
+          <div class="field">
+            <label for="addSequenceTrilhaSelect">Trilha</label>
+            <select id="addSequenceTrilhaSelect"></select>
+          </div>
+          <div id="addSequenceTrilhaStatus" class="status-line"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-close-add-sequence-trilha type="button">Cancelar</button>
+          <button class="btn" id="confirmAddSequenceTrilhaButton" type="button">Adicionar trilha</button>
+        </div>
+      </div>
+    </div>
+
     <div class="overlay" id="renameOverlay" hidden>
-      <div class="modal">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="renameModalTitle">
         <div class="modal-header">
           <h3 id="renameModalTitle">Editar nome</h3>
           <button class="icon-btn-close" data-close-rename type="button" aria-label="Fechar">✕</button>
@@ -228,15 +300,30 @@
         trails: [],
         selectableVideos: [],
         profiles: [],
+        groupProfiles: [],
+        sequence: [],
+        desvios: [],
+        setores: [],
       };
       const NEW_MACROTEMA_OPTION = "__new_macrotema__";
       let activePerfil = "todos";
+      let activeView = "catalogo";
       let selectedMacrotemaKey = null;
       let selectedTrilhaKey = null;
       let movingVideo = null;
       let newVideoTrail = null;
       let draggingVideoId = null;
+      let draggingTrilhaId = null;
       let renameContext = null;
+      let sequenceProfileId = null;
+      let sequenceSetorFilter = "";
+      let addSequenceTrilhaAnchorId = null;
+      let addSequenceTrilhaSetorMode = null;
+      let newTrailReleaseTrap = null;
+      let newVideoReleaseTrap = null;
+      let moveReleaseTrap = null;
+      let renameReleaseTrap = null;
+      let addSequenceTrilhaReleaseTrap = null;
 
       function escapeHtml(value) {
         return String(value === null || value === undefined ? "" : value)
@@ -316,7 +403,7 @@
             const perfis = Array.from(new Set(m.trails.flatMap((t) => t.perfis || [])));
 
             return `
-            <div class="card card-pad trail-card${key === selectedMacrotemaKey ? " selected" : ""}" data-macrotema="${escapeHtml(key)}">
+            <div class="card card-pad trail-card${key === selectedMacrotemaKey ? " selected" : ""}" data-macrotema="${escapeHtml(key)}" aria-label="Ver trilhas de ${escapeHtml(m.macrotema)}">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
                 <strong>${escapeHtml(m.macrotema)}</strong>
                 <div style="display:flex;align-items:center;gap:6px;">
@@ -338,13 +425,15 @@
         });
 
         document.querySelectorAll("[data-macrotema]").forEach((card) => {
-          card.addEventListener("click", () => {
+          const activate = () => {
             selectedMacrotemaKey = card.dataset.macrotema;
             const macrotema = macrotemas.find((m) => macrotemaKey(m) === selectedMacrotemaKey);
             selectedTrilhaKey = macrotema && macrotema.trails.length ? trilhaKey(macrotema.trails[0]) : null;
             renderMacrotemaGrid();
             renderTrailDetail();
-          });
+          };
+          card.addEventListener("click", activate);
+          window.estimuloMakeKeyboardClickable(card, activate);
         });
       }
 
@@ -436,7 +525,11 @@
           .map(
             (v, index) => `
             <tr class="video-row" draggable="true" data-video-id="${escapeHtml(v.id)}">
-              <td><span class="drag-handle">⠿</span>${index + 1}</td>
+              <td>
+                <span class="drag-handle" aria-hidden="true">⠿</span>${index + 1}
+                <button class="btn-icon btn-secondary sr-only" type="button" data-reorder-video-up="${escapeHtml(v.id)}" aria-label="Mover ${escapeHtml(v.nome_do_arquivo)} para cima"${index === 0 ? " disabled" : ""}>&#8593;</button>
+                <button class="btn-icon btn-secondary sr-only" type="button" data-reorder-video-down="${escapeHtml(v.id)}" aria-label="Mover ${escapeHtml(v.nome_do_arquivo)} para baixo"${index === sortedVideos.length - 1 ? " disabled" : ""}>&#8595;</button>
+              </td>
               <td class="mono">${escapeHtml(v.nome_do_arquivo)}</td>
               <td>${v.status === true ? '<span class="badge has-tip badge-success" data-tip="Vídeo aprovado — pode ser selecionado automaticamente em campanhas." data-tip-tone="success">Aprovado</span>' : '<span class="badge has-tip badge-warning" data-tip="Aguardando aprovação — ainda não pode ser usado em campanhas automáticas." data-tip-tone="warning">Pendente</span>'}</td>
               <td style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -450,6 +543,8 @@
 
         document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(trail, btn.dataset.move)));
         document.querySelectorAll("[data-remove]").forEach((btn) => btn.addEventListener("click", () => removeVideoFromCurrentTrail(trail, btn.dataset.remove)));
+        document.querySelectorAll("[data-reorder-video-up]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoUp, -1)));
+        document.querySelectorAll("[data-reorder-video-down]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoDown, 1)));
         attachDragAndDrop(trail);
       }
 
@@ -500,7 +595,7 @@
           }
 
           button.disabled = true;
-          status.textContent = "Salvando perfis...";
+          status.textContent = "Salvando perfis…";
           status.className = "status-line";
 
           try {
@@ -518,6 +613,36 @@
             button.disabled = false;
           }
         };
+      }
+
+      async function persistVideoOrder(trail, orderedIds) {
+        try {
+          const updatedLinks = await requestJson(`/trilhas/${encodeURIComponent(trail.id)}/reorder`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ordered_video_ids: orderedIds }),
+          });
+
+          updatedLinks.forEach((updated) => {
+            const video = trail.videos.find((v) => v.id === updated.video_id);
+            if (video) video.ordem = updated.ordem;
+          });
+
+          renderTrailDetail();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+        }
+      }
+
+      function reorderVideoByStep(trail, videoId, delta) {
+        const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? 0) - (right.ordem ?? 0));
+        const orderedIds = sortedVideos.map((v) => v.id);
+        const fromIndex = orderedIds.indexOf(videoId);
+        const toIndex = fromIndex + delta;
+        if (fromIndex === -1 || toIndex < 0 || toIndex >= orderedIds.length) return;
+
+        orderedIds.splice(toIndex, 0, orderedIds.splice(fromIndex, 1)[0]);
+        persistVideoOrder(trail, orderedIds);
       }
 
       function attachDragAndDrop(trail) {
@@ -557,23 +682,7 @@
             if (fromIndex === -1 || toIndex === -1) return;
 
             orderedIds.splice(toIndex, 0, orderedIds.splice(fromIndex, 1)[0]);
-
-            try {
-              const updatedLinks = await requestJson(`/trilhas/${encodeURIComponent(trail.id)}/reorder`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ordered_video_ids: orderedIds }),
-              });
-
-              updatedLinks.forEach((updated) => {
-                const video = trail.videos.find((v) => v.id === updated.video_id);
-                if (video) video.ordem = updated.ordem;
-              });
-
-              renderTrailDetail();
-            } catch (error) {
-              window.estimuloAlert(error.message);
-            }
+            await persistVideoOrder(trail, orderedIds);
 
             draggingVideoId = null;
           });
@@ -589,6 +698,744 @@
         renderPerfilTabs();
         renderMacrotemaGrid();
         renderTrailDetail();
+      });
+
+      document.getElementById("viewToggle").addEventListener("click", (e) => {
+        const btn = e.target.closest("button[data-view]");
+        if (!btn) return;
+        setActiveView(btn.dataset.view);
+      });
+
+      function setActiveView(view) {
+        activeView = view;
+        document.querySelectorAll("#viewToggle button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
+        document.getElementById("catalogView").style.display = view === "catalogo" ? "" : "none";
+        document.getElementById("sequenceView").style.display = view === "sequencia" ? "" : "none";
+
+        if (view === "sequencia") {
+          loadSequenceView();
+        }
+      }
+
+      function orderedGroupProfiles() {
+        return [...state.groupProfiles].sort((left, right) => {
+          const leftOrdem = left.ordem === null || left.ordem === undefined ? Infinity : Number(left.ordem);
+          const rightOrdem = right.ordem === null || right.ordem === undefined ? Infinity : Number(right.ordem);
+          return leftOrdem - rightOrdem;
+        });
+      }
+
+      async function loadSequenceView() {
+        if (!state.groupProfiles.length) {
+          try {
+            state.groupProfiles = await requestJson("/group-profiles");
+          } catch (error) {
+            state.groupProfiles = [];
+          }
+        }
+
+        const ordered = orderedGroupProfiles();
+
+        if (!sequenceProfileId && ordered.length) {
+          sequenceProfileId = ordered[0].id;
+        }
+
+        renderSequenceProfileTabs(ordered);
+        await loadSequenceForProfile();
+      }
+
+      function renderSequenceProfileTabs(ordered) {
+        const tabs = document.getElementById("sequenceProfileTabs");
+
+        if (!ordered.length) {
+          tabs.innerHTML = "";
+          return;
+        }
+
+        tabs.innerHTML = ordered
+          .map((p) => {
+            const label = p.ordem === null || p.ordem === undefined ? `${escapeHtml(p.nome)} (fora da jornada)` : escapeHtml(p.nome);
+            return `<button class="${p.id === sequenceProfileId ? "active" : ""}" data-sequence-profile="${escapeHtml(p.id)}">${label}</button>`;
+          })
+          .join("");
+
+        tabs.querySelectorAll("[data-sequence-profile]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            sequenceProfileId = btn.dataset.sequenceProfile;
+            renderSequenceProfileTabs(ordered);
+            loadSequenceForProfile();
+          });
+        });
+      }
+
+      function renderSequenceProfileHint() {
+        const hint = document.getElementById("sequenceProfileHint");
+        const profile = state.groupProfiles.find((p) => p.id === sequenceProfileId);
+
+        if (profile && (profile.ordem === null || profile.ordem === undefined)) {
+          hint.textContent =
+            "Este perfil está fora da jornada automática — inclua-o em Configurações → Perfis de grupo para que ele participe do avanço automático.";
+        } else if (sequenceSetorFilter) {
+          hint.textContent =
+            "Caminho deste setor dentro do perfil, com os desvios já aplicados. A 1ª trilha é sempre a mesma para todos os setores; a partir da 2ª você pode adicionar, remover e reordenar livremente só para este setor.";
+        } else {
+          hint.textContent = "Arraste para reordenar. Esta é a ordem que o motor de disparo automático segue para grupos deste perfil.";
+        }
+      }
+
+      async function loadSequenceForProfile() {
+        const body = document.getElementById("sequenceBody");
+        const hint = document.getElementById("sequenceProfileHint");
+
+        if (!sequenceProfileId) {
+          hint.textContent = "Nenhum perfil cadastrado.";
+          body.innerHTML = "";
+          return;
+        }
+
+        renderSequenceProfileHint();
+        body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Carregando…</strong></div></td></tr>`;
+
+        try {
+          const [sequence, desvios] = await Promise.all([
+            requestJson(`/trilhas/sequence?profile_id=${encodeURIComponent(sequenceProfileId)}`),
+            requestJson(`/trilhas/desvios?profile_id=${encodeURIComponent(sequenceProfileId)}`),
+          ]);
+          state.sequence = Array.isArray(sequence) ? sequence : [];
+          state.desvios = Array.isArray(desvios) ? desvios : [];
+          await ensureSetoresLoaded();
+          renderSequenceSetorFilter();
+          renderSequenceBody();
+        } catch (error) {
+          body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar sequência</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+        }
+      }
+
+      function trilhaLabelById(trilhaId) {
+        const trail = state.trails.find((t) => t.id === trilhaId);
+        return trail ? `${trail.macrotema} · ${trail.trilha}` : trilhaId;
+      }
+
+      // Acha o desvio configurado para (afterTrilhaId, setor) - mesmo criterio de
+      // matchingDesvio em trilha-sequence.service.js (desempate pelo mais antigo),
+      // usado aqui so para simular visualmente o caminho, sem tocar em progresso
+      // real de grupo.
+      function matchingDesvioForSetor(afterTrilhaId, setor) {
+        const normalizedSetor = normalizeSetorKey(setor);
+        if (!normalizedSetor) return null;
+
+        const candidates = state.desvios
+          .filter((desvio) => desvio.after_trilha_id === afterTrilhaId)
+          .filter((desvio) => (desvio.setores || []).some((s) => normalizeSetorKey(s) === normalizedSetor))
+          .sort((left, right) => new Date(left.created_at) - new Date(right.created_at));
+
+        return candidates[0] || null;
+      }
+
+      // Simula o caminho que um grupo do setor informado percorreria: comeca na
+      // primeira trilha da sequencia e, a cada passo, segue o desvio configurado
+      // para aquele setor (se houver) em vez da proxima trilha da lista. Para ao
+      // reencontrar uma trilha ja visitada (ciclo) ou ao esgotar a sequencia -
+      // ver resolveNextTrilhaForGroup em trilha-sequence.service.js para o
+      // equivalente com estado real de entrega usado no motor de disparo.
+      function buildSequencePathForSetor(setor) {
+        const byId = new Map(state.sequence.map((item) => [item.trilha_id, item]));
+        const visited = new Set();
+        const path = [];
+
+        let current = state.sequence[0];
+
+        while (current && !visited.has(current.trilha_id)) {
+          path.push(current);
+          visited.add(current.trilha_id);
+
+          const desvio = matchingDesvioForSetor(current.trilha_id, setor);
+          if (desvio && byId.has(desvio.trilha_destino_id)) {
+            current = byId.get(desvio.trilha_destino_id);
+            continue;
+          }
+
+          const currentIndex = state.sequence.indexOf(current);
+          current = state.sequence[currentIndex + 1] || null;
+        }
+
+        return path;
+      }
+
+      // Remove o setor informado de um desvio existente (apagando a linha e
+      // recriando so com os setores restantes, ja que a API nao tem PATCH pra
+      // desvios) - preserva o comportamento de outros setores que compartilhavam
+      // o mesmo desvio.
+      async function detachSetorFromDesvio(desvio, setor) {
+        await requestJson(`/trilhas/desvios/${encodeURIComponent(desvio.id)}`, { method: "DELETE" });
+
+        const remaining = (desvio.setores || []).filter((s) => normalizeSetorKey(s) !== normalizeSetorKey(setor));
+        if (!remaining.length) return;
+
+        await requestJson("/trilhas/desvios", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            profile_id: sequenceProfileId,
+            after_trilha_id: desvio.after_trilha_id,
+            trilha_destino_id: desvio.trilha_destino_id,
+            setores: remaining,
+          }),
+        });
+      }
+
+      // Reconcilia os desvios deste setor para que buildSequencePathForSetor
+      // volte a produzir newPath: para cada par consecutivo (ancora, proximo) do
+      // caminho desejado, cria/ajusta um desvio so quando o proximo desejado
+      // difere do proximo natural da sequencia base - do contrario, remove o
+      // setor de qualquer desvio que estivesse la (deixa cair no fallthrough
+      // padrao). A posicao 0 nunca e ancora de remocao/insercao por si so, mas
+      // pode ter um desvio de saida normalmente.
+      async function applySetorPathEdit(setor, newPath) {
+        for (let index = 0; index < newPath.length - 1; index += 1) {
+          const anchor = newPath[index];
+          const desiredNext = newPath[index + 1];
+
+          const anchorBaseIndex = state.sequence.findIndex((item) => item.trilha_id === anchor.trilha_id);
+          const naturalNext = state.sequence[anchorBaseIndex + 1] || null;
+          const existingDesvio = matchingDesvioForSetor(anchor.trilha_id, setor);
+
+          const needsDesvio = !naturalNext || naturalNext.trilha_id !== desiredNext.trilha_id;
+
+          if (needsDesvio) {
+            if (existingDesvio && existingDesvio.trilha_destino_id === desiredNext.trilha_id) {
+              continue;
+            }
+
+            if (existingDesvio) {
+              await detachSetorFromDesvio(existingDesvio, setor);
+            }
+
+            await requestJson("/trilhas/desvios", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                profile_id: sequenceProfileId,
+                after_trilha_id: anchor.trilha_id,
+                trilha_destino_id: desiredNext.trilha_id,
+                setores: [setor],
+              }),
+            });
+          } else if (existingDesvio) {
+            await detachSetorFromDesvio(existingDesvio, setor);
+          }
+        }
+      }
+
+      async function removeTrilhaFromSetorPath(setor, trilhaId) {
+        const path = buildSequencePathForSetor(setor);
+        const index = path.findIndex((item) => item.trilha_id === trilhaId);
+        if (index <= 0) return;
+
+        const confirmed = await window.estimuloConfirm(
+          `Remover "${trilhaLabelById(trilhaId)}" do caminho deste setor?`,
+          { title: "Remover trilha do caminho do setor", confirmLabel: "Remover" }
+        );
+        if (!confirmed) return;
+
+        const newPath = path.filter((_, i) => i !== index);
+
+        try {
+          await applySetorPathEdit(setor, newPath);
+          await loadSequenceForProfile();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          await loadSequenceForProfile();
+        }
+      }
+
+      async function reorderSetorPathByStep(setor, trilhaId, delta) {
+        const path = buildSequencePathForSetor(setor);
+        const fromIndex = path.findIndex((item) => item.trilha_id === trilhaId);
+        const toIndex = fromIndex + delta;
+        if (fromIndex <= 0 || toIndex <= 0 || toIndex >= path.length) return;
+
+        const newPath = [...path];
+        newPath.splice(toIndex, 0, newPath.splice(fromIndex, 1)[0]);
+
+        try {
+          await applySetorPathEdit(setor, newPath);
+          await loadSequenceForProfile();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          await loadSequenceForProfile();
+        }
+      }
+
+      async function addTrilhaToSetorPath(setor, trilhaId) {
+        const alreadyInBase = state.sequence.some((item) => item.trilha_id === trilhaId);
+
+        if (!alreadyInBase) {
+          await requestJson("/trilhas/sequence", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profile_id: sequenceProfileId, trilha_id: trilhaId }),
+          });
+
+          const refreshed = await requestJson(`/trilhas/sequence?profile_id=${encodeURIComponent(sequenceProfileId)}`);
+          state.sequence = Array.isArray(refreshed) ? refreshed : state.sequence;
+        }
+
+        const newItem = state.sequence.find((item) => item.trilha_id === trilhaId);
+        if (!newItem) {
+          throw new Error("Trilha não encontrada na sequência do perfil.");
+        }
+
+        const currentPath = buildSequencePathForSetor(setor);
+        const newPath = [...currentPath, newItem];
+
+        await applySetorPathEdit(setor, newPath);
+      }
+
+      function attachSetorPathDragAndDrop(setor, path) {
+        const rows = document.querySelectorAll("#sequenceBody tr.sequence-row[data-setor-path-index]");
+
+        rows.forEach((row) => {
+          if (Number(row.dataset.setorPathIndex) === 0) return;
+
+          row.addEventListener("dragstart", () => {
+            draggingTrilhaId = row.dataset.trilhaRowId;
+            row.classList.add("dragging");
+          });
+
+          row.addEventListener("dragend", () => {
+            row.classList.remove("dragging");
+            document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+          });
+
+          row.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            row.classList.add("drag-over");
+          });
+
+          row.addEventListener("dragleave", () => {
+            row.classList.remove("drag-over");
+          });
+
+          row.addEventListener("drop", async (event) => {
+            event.preventDefault();
+            row.classList.remove("drag-over");
+
+            const targetId = row.dataset.trilhaRowId;
+            if (!draggingTrilhaId || draggingTrilhaId === targetId) return;
+
+            const fromIndex = path.findIndex((item) => item.trilha_id === draggingTrilhaId);
+            const toIndex = path.findIndex((item) => item.trilha_id === targetId);
+            draggingTrilhaId = null;
+            if (fromIndex <= 0 || toIndex <= 0) return;
+
+            const newPath = [...path];
+            newPath.splice(toIndex, 0, newPath.splice(fromIndex, 1)[0]);
+
+            try {
+              await applySetorPathEdit(setor, newPath);
+              await loadSequenceForProfile();
+            } catch (error) {
+              window.estimuloAlert(error.message);
+              await loadSequenceForProfile();
+            }
+          });
+        });
+      }
+
+      function renderSequenceBody() {
+        const body = document.getElementById("sequenceBody");
+
+        if (!state.sequence.length) {
+          body.innerHTML = `
+            <tr><td colspan="4">
+              <div class="empty-state">
+                <strong>Nenhuma trilha na sequência deste perfil</strong>
+                <span>Vincule este perfil a trilhas existentes na aba Catálogo.</span>
+              </div>
+            </td></tr>`;
+          return;
+        }
+
+        const activeSetor = sequenceSetorFilter;
+
+        if (activeSetor) {
+          const path = buildSequencePathForSetor(activeSetor);
+
+          body.innerHTML = path
+            .map((item, index) => {
+              const locked = index === 0;
+
+              return `
+              <tr class="sequence-row"${locked ? "" : ' draggable="true"'} data-trilha-row-id="${escapeHtml(item.trilha_id)}" data-setor-path-index="${index}">
+                <td>
+                  ${locked ? "" : '<span class="drag-handle" aria-hidden="true">⠿</span>'}${index + 1}
+                  ${locked ? "" : `<button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-up="${escapeHtml(item.trilha_id)}" aria-label="Mover para cima"${index === 1 ? " disabled" : ""}>&#8593;</button>`}
+                  ${locked ? "" : `<button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-down="${escapeHtml(item.trilha_id)}" aria-label="Mover para baixo"${index === path.length - 1 ? " disabled" : ""}>&#8595;</button>`}
+                </td>
+                <td>${escapeHtml(item.macrotema)} · ${escapeHtml(item.trilha)}</td>
+                <td><span class="badge badge-success">${item.approved_count}/${item.videos_count} aprovado(s)</span></td>
+                <td>${locked ? "" : `<button class="btn btn-secondary btn-sm" data-remove-trilha-from-setor-path="${escapeHtml(item.trilha_id)}" type="button">Remover</button>`}</td>
+              </tr>`;
+            })
+            .join("");
+
+          body.querySelectorAll("[data-reorder-setor-path-up]").forEach((btn) =>
+            btn.addEventListener("click", () => reorderSetorPathByStep(activeSetor, btn.dataset.reorderSetorPathUp, -1))
+          );
+          body.querySelectorAll("[data-reorder-setor-path-down]").forEach((btn) =>
+            btn.addEventListener("click", () => reorderSetorPathByStep(activeSetor, btn.dataset.reorderSetorPathDown, 1))
+          );
+          body.querySelectorAll("[data-remove-trilha-from-setor-path]").forEach((btn) =>
+            btn.addEventListener("click", () => removeTrilhaFromSetorPath(activeSetor, btn.dataset.removeTrilhaFromSetorPath))
+          );
+          attachSetorPathDragAndDrop(activeSetor, path);
+          return;
+        }
+
+        body.innerHTML = state.sequence
+          .map(
+            (item, index) => `
+            <tr class="sequence-row" draggable="true" data-trilha-row-id="${escapeHtml(item.trilha_id)}">
+              <td>
+                <span class="drag-handle" aria-hidden="true">⠿</span>${index + 1}
+                <button class="btn-icon btn-secondary sr-only" type="button" data-reorder-trilha-up="${escapeHtml(item.trilha_id)}" aria-label="Mover para cima"${index === 0 ? " disabled" : ""}>&#8593;</button>
+                <button class="btn-icon btn-secondary sr-only" type="button" data-reorder-trilha-down="${escapeHtml(item.trilha_id)}" aria-label="Mover para baixo"${index === state.sequence.length - 1 ? " disabled" : ""}>&#8595;</button>
+              </td>
+              <td>${escapeHtml(item.macrotema)} · ${escapeHtml(item.trilha)}</td>
+              <td><span class="badge badge-success">${item.approved_count}/${item.videos_count} aprovado(s)</span></td>
+              <td><button class="btn btn-secondary btn-sm" data-remove-trilha-from-sequence="${escapeHtml(item.trilha_id)}" type="button">Remover</button></td>
+            </tr>`
+          )
+          .join("");
+
+        body.querySelectorAll("[data-reorder-trilha-up]").forEach((btn) =>
+          btn.addEventListener("click", () => reorderTrilhaSequenceByStep(btn.dataset.reorderTrilhaUp, -1))
+        );
+        body.querySelectorAll("[data-reorder-trilha-down]").forEach((btn) =>
+          btn.addEventListener("click", () => reorderTrilhaSequenceByStep(btn.dataset.reorderTrilhaDown, 1))
+        );
+        body.querySelectorAll("[data-remove-trilha-from-sequence]").forEach((btn) =>
+          btn.addEventListener("click", () => removeTrilhaFromSequence(btn.dataset.removeTrilhaFromSequence))
+        );
+        attachSequenceDragAndDrop();
+      }
+
+      async function removeTrilhaFromSequence(trilhaId) {
+        const confirmed = await window.estimuloConfirm(
+          `Remover "${trilhaLabelById(trilhaId)}" da sequência deste perfil?`,
+          { title: "Remover trilha da sequência", confirmLabel: "Remover" }
+        );
+        if (!confirmed) return;
+
+        try {
+          const updated = await requestJson(
+            `/trilhas/sequence/${encodeURIComponent(trilhaId)}?profile_id=${encodeURIComponent(sequenceProfileId)}`,
+            { method: "DELETE" }
+          );
+
+          state.sequence = Array.isArray(updated) ? updated : state.sequence;
+          renderSequenceBody();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+        }
+      }
+
+      async function handleDesvioSelectChange(afterTrilhaId, existingDesvioId, trilhaDestinoId) {
+        if (!existingDesvioId && !trilhaDestinoId) {
+          return;
+        }
+
+        if (!trilhaDestinoId) {
+          await removeDesvio(existingDesvioId);
+          return;
+        }
+
+        if (existingDesvioId) {
+          await updateDesvioDestino(existingDesvioId, trilhaDestinoId);
+        } else {
+          await createDesvioInline(afterTrilhaId, sequenceSetorFilter, trilhaDestinoId);
+        }
+      }
+
+      async function persistSequenceOrder(orderedTrilhaIds) {
+        try {
+          const updated = await requestJson("/trilhas/sequence/reorder", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ profile_id: sequenceProfileId, ordered_trilha_ids: orderedTrilhaIds }),
+          });
+
+          state.sequence = Array.isArray(updated) ? updated : state.sequence;
+          renderSequenceBody();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+        }
+      }
+
+      function reorderTrilhaSequenceByStep(trilhaId, delta) {
+        const orderedIds = state.sequence.map((item) => item.trilha_id);
+        const fromIndex = orderedIds.indexOf(trilhaId);
+        const toIndex = fromIndex + delta;
+        if (fromIndex === -1 || toIndex < 0 || toIndex >= orderedIds.length) return;
+
+        orderedIds.splice(toIndex, 0, orderedIds.splice(fromIndex, 1)[0]);
+        persistSequenceOrder(orderedIds);
+      }
+
+      function attachSequenceDragAndDrop() {
+        const rows = document.querySelectorAll("#sequenceBody tr.sequence-row");
+
+        rows.forEach((row) => {
+          row.addEventListener("dragstart", () => {
+            draggingTrilhaId = row.dataset.trilhaRowId;
+            row.classList.add("dragging");
+          });
+
+          row.addEventListener("dragend", () => {
+            row.classList.remove("dragging");
+            document.querySelectorAll(".drag-over").forEach((el) => el.classList.remove("drag-over"));
+          });
+
+          row.addEventListener("dragover", (event) => {
+            event.preventDefault();
+            row.classList.add("drag-over");
+          });
+
+          row.addEventListener("dragleave", () => {
+            row.classList.remove("drag-over");
+          });
+
+          row.addEventListener("drop", async (event) => {
+            event.preventDefault();
+            row.classList.remove("drag-over");
+
+            const targetId = row.dataset.trilhaRowId;
+            if (!draggingTrilhaId || draggingTrilhaId === targetId) return;
+
+            const orderedIds = state.sequence.map((item) => item.trilha_id);
+            const fromIndex = orderedIds.indexOf(draggingTrilhaId);
+            const toIndex = orderedIds.indexOf(targetId);
+            if (fromIndex === -1 || toIndex === -1) return;
+
+            orderedIds.splice(toIndex, 0, orderedIds.splice(fromIndex, 1)[0]);
+            await persistSequenceOrder(orderedIds);
+
+            draggingTrilhaId = null;
+          });
+        });
+      }
+
+      function allTrilhasSortedForDesvio() {
+        return [...state.trails].sort((left, right) => `${left.macrotema} ${left.trilha}`.localeCompare(`${right.macrotema} ${right.trilha}`));
+      }
+
+      async function ensureSetoresLoaded() {
+        if (state.setores.length) return;
+
+        try {
+          const groups = await requestJson("/groups/search");
+          const seen = new Map();
+
+          (Array.isArray(groups) ? groups : []).forEach((group) => {
+            const value = String(group.setor || "").trim();
+            if (!value) return;
+            const key = value
+              .normalize("NFD")
+              .replace(/[̀-ͯ]/g, "")
+              .toLowerCase();
+            if (!seen.has(key)) seen.set(key, value);
+          });
+
+          state.setores = Array.from(seen.values()).sort((left, right) => left.localeCompare(right));
+        } catch (error) {
+          state.setores = [];
+        }
+      }
+
+      function renderSequenceSetorFilter() {
+        const select = document.getElementById("sequenceSetorFilter");
+        const previousValue = sequenceSetorFilter;
+
+        select.innerHTML = [
+          `<option value="">Todos os setores</option>`,
+          ...state.setores.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`),
+        ].join("");
+
+        if (state.setores.some((s) => normalizeSetorKey(s) === normalizeSetorKey(previousValue))) {
+          select.value = previousValue;
+        } else {
+          sequenceSetorFilter = "";
+          select.value = "";
+        }
+      }
+
+      document.getElementById("sequenceSetorFilter").addEventListener("change", (event) => {
+        sequenceSetorFilter = event.target.value;
+        renderSequenceProfileHint();
+        renderSequenceBody();
+      });
+
+      function normalizeSetorKey(value) {
+        return String(value || "")
+          .normalize("NFD")
+          .replace(/[̀-ͯ]/g, "")
+          .trim()
+          .toLowerCase();
+      }
+
+      async function createDesvioInline(afterTrilhaId, setor, trilhaDestinoId) {
+        try {
+          await requestJson("/trilhas/desvios", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              profile_id: sequenceProfileId,
+              after_trilha_id: afterTrilhaId,
+              trilha_destino_id: trilhaDestinoId,
+              setores: [setor],
+            }),
+          });
+
+          await loadSequenceForProfile();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          await loadSequenceForProfile();
+        }
+      }
+
+      async function updateDesvioDestino(desvioId, trilhaDestinoId) {
+        const desvio = state.desvios.find((d) => d.id === desvioId);
+        if (!desvio) return;
+
+        if (!trilhaDestinoId) {
+          await removeDesvio(desvioId);
+          return;
+        }
+
+        try {
+          await requestJson(`/trilhas/desvios/${encodeURIComponent(desvioId)}`, { method: "DELETE" });
+          await requestJson("/trilhas/desvios", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              profile_id: sequenceProfileId,
+              after_trilha_id: desvio.after_trilha_id,
+              trilha_destino_id: trilhaDestinoId,
+              setores: desvio.setores,
+            }),
+          });
+
+          await loadSequenceForProfile();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+          await loadSequenceForProfile();
+        }
+      }
+
+      async function removeDesvio(id) {
+        const confirmed = await window.estimuloConfirm("Remover este desvio?", {
+          title: "Remover desvio",
+          confirmLabel: "Remover",
+        });
+        if (!confirmed) return;
+
+        try {
+          await requestJson(`/trilhas/desvios/${encodeURIComponent(id)}`, { method: "DELETE" });
+          await loadSequenceForProfile();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+        }
+      }
+
+      // Adicionar trilha existente a sequencia de um perfil, logo apos a linha
+      // clicada (POST /trilhas/sequence com after_trilha_id).
+      const addSequenceTrilhaOverlay = document.getElementById("addSequenceTrilhaOverlay");
+
+      function openAddSequenceTrilhaModal(afterTrilhaId, setorMode) {
+        addSequenceTrilhaAnchorId = afterTrilhaId || null;
+        addSequenceTrilhaSetorMode = setorMode || null;
+
+        document.getElementById("addSequenceTrilhaAnchorLabel").textContent = setorMode
+          ? `A trilha será adicionada ao final do caminho do setor "${setorMode}". Você pode reordenar depois, só para este setor.`
+          : afterTrilhaId
+            ? `Inserir logo após: ${trilhaLabelById(afterTrilhaId)}`
+            : "A trilha será adicionada ao final da sequência. Você pode reordenar depois.";
+        document.getElementById("addSequenceTrilhaStatus").textContent = "";
+        document.getElementById("addSequenceTrilhaStatus").className = "status-line";
+
+        const idsJaNoCaminho = new Set(
+          (setorMode ? buildSequencePathForSetor(setorMode) : state.sequence).map((item) => item.trilha_id)
+        );
+        const disponiveis = allTrilhasSortedForDesvio().filter((t) => !idsJaNoCaminho.has(t.id));
+
+        document.getElementById("addSequenceTrilhaSelect").innerHTML = disponiveis.length
+          ? disponiveis.map((t) => `<option value="${escapeHtml(t.id)}">${escapeHtml(t.macrotema)} · ${escapeHtml(t.trilha)}</option>`).join("")
+          : `<option value="">Nenhuma trilha disponível</option>`;
+
+        addSequenceTrilhaOverlay.hidden = false;
+        addSequenceTrilhaReleaseTrap = window.estimuloTrapFocus(addSequenceTrilhaOverlay);
+      }
+
+      function closeAddSequenceTrilhaModal() {
+        addSequenceTrilhaOverlay.hidden = true;
+        addSequenceTrilhaAnchorId = null;
+        addSequenceTrilhaSetorMode = null;
+        if (addSequenceTrilhaReleaseTrap) {
+          addSequenceTrilhaReleaseTrap();
+          addSequenceTrilhaReleaseTrap = null;
+        }
+      }
+
+      document.getElementById("addSequenceTrilhaButton").addEventListener("click", () =>
+        openAddSequenceTrilhaModal(null, sequenceSetorFilter || null)
+      );
+
+      document.querySelectorAll("[data-close-add-sequence-trilha]").forEach((el) =>
+        el.addEventListener("click", closeAddSequenceTrilhaModal)
+      );
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !addSequenceTrilhaOverlay.hidden) closeAddSequenceTrilhaModal();
+      });
+
+      document.getElementById("confirmAddSequenceTrilhaButton").addEventListener("click", async () => {
+        const button = document.getElementById("confirmAddSequenceTrilhaButton");
+        const status = document.getElementById("addSequenceTrilhaStatus");
+        const trilhaId = document.getElementById("addSequenceTrilhaSelect").value;
+
+        if (!trilhaId) {
+          status.textContent = "Selecione uma trilha.";
+          status.className = "status-line error";
+          return;
+        }
+
+        button.disabled = true;
+        status.textContent = "Adicionando trilha…";
+        status.className = "status-line";
+
+        try {
+          if (addSequenceTrilhaSetorMode) {
+            await addTrilhaToSetorPath(addSequenceTrilhaSetorMode, trilhaId);
+          } else {
+            await requestJson("/trilhas/sequence", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                profile_id: sequenceProfileId,
+                trilha_id: trilhaId,
+                after_trilha_id: addSequenceTrilhaAnchorId,
+              }),
+            });
+          }
+
+          closeAddSequenceTrilhaModal();
+          await loadSequenceForProfile();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          button.disabled = false;
+        }
       });
 
       // Nova trilha
@@ -671,6 +1518,7 @@
         document.getElementById("newTrailStatus").className = "status-line";
         renderNewTrailVideosList();
         newTrailOverlay.hidden = false;
+        newTrailReleaseTrap = window.estimuloTrapFocus(newTrailOverlay);
 
         try {
           state.selectableVideos = await requestJson("/trilhas/selectable-videos");
@@ -680,8 +1528,18 @@
 
         renderNewTrailVideosList();
       });
-      document.querySelectorAll("[data-close-new]").forEach((el) => el.addEventListener("click", () => (newTrailOverlay.hidden = true)));
+      function closeNewTrailOverlay() {
+        newTrailOverlay.hidden = true;
+        if (newTrailReleaseTrap) {
+          newTrailReleaseTrap();
+          newTrailReleaseTrap = null;
+        }
+      }
+      document.querySelectorAll("[data-close-new]").forEach((el) => el.addEventListener("click", closeNewTrailOverlay));
       document.getElementById("newTrailMacrotema").addEventListener("change", toggleNewMacrotemaField);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !newTrailOverlay.hidden) closeNewTrailOverlay();
+      });
 
       document.getElementById("createTrailButton").addEventListener("click", async () => {
         const button = document.getElementById("createTrailButton");
@@ -706,7 +1564,7 @@
         }
 
         button.disabled = true;
-        status.textContent = "Cadastrando trilha...";
+        status.textContent = "Cadastrando trilha…";
         status.className = "status-line";
 
         try {
@@ -716,7 +1574,7 @@
             body: JSON.stringify({ perfis, macrotema, trilha, video_ids }),
           });
 
-          newTrailOverlay.hidden = true;
+          closeNewTrailOverlay();
           await initialize();
         } catch (error) {
           status.textContent = error.message;
@@ -746,7 +1604,7 @@
           .filter((v) => !search || String(v.nome_do_arquivo || "").toLowerCase().includes(search));
 
         if (!state.selectableVideos.length) {
-          list.innerHTML = '<div class="unclassified-item text-faint">Carregando vídeos...</div>';
+          list.innerHTML = '<div class="unclassified-item text-faint">Carregando vídeos…</div>';
           return;
         }
 
@@ -793,8 +1651,9 @@
         document.getElementById("newVideoStatusLine").textContent = "";
         document.getElementById("newVideoStatusLine").className = "status-line";
         document.getElementById("newVideoList").innerHTML =
-          '<div class="unclassified-item text-faint">Carregando vídeos...</div>';
+          '<div class="unclassified-item text-faint">Carregando vídeos…</div>';
         newVideoOverlay.hidden = false;
+        newVideoReleaseTrap = window.estimuloTrapFocus(newVideoOverlay);
 
         try {
           state.selectableVideos = await requestJson("/trilhas/selectable-videos");
@@ -809,12 +1668,21 @@
 
       document.getElementById("newVideoSearch").addEventListener("input", renderNewVideoList);
 
+      function closeNewVideoOverlay() {
+        newVideoOverlay.hidden = true;
+        newVideoTrail = null;
+        if (newVideoReleaseTrap) {
+          newVideoReleaseTrap();
+          newVideoReleaseTrap = null;
+        }
+      }
+
       document.querySelectorAll("[data-close-new-video]").forEach((el) =>
-        el.addEventListener("click", () => {
-          newVideoOverlay.hidden = true;
-          newVideoTrail = null;
-        })
+        el.addEventListener("click", closeNewVideoOverlay)
       );
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !newVideoOverlay.hidden) closeNewVideoOverlay();
+      });
 
       document.getElementById("createVideoButton").addEventListener("click", async () => {
         if (!newVideoTrail) return;
@@ -832,7 +1700,7 @@
         }
 
         button.disabled = true;
-        status.textContent = videoIds.length > 1 ? "Adicionando vídeos..." : "Adicionando vídeo...";
+        status.textContent = videoIds.length > 1 ? "Adicionando vídeos…" : "Adicionando vídeo…";
         status.className = "status-line";
 
         try {
@@ -845,8 +1713,7 @@
           }
 
           selectedTrilhaKey = newVideoTrail.id;
-          newVideoOverlay.hidden = true;
-          newVideoTrail = null;
+          closeNewVideoOverlay();
           await initialize();
         } catch (error) {
           status.textContent = error.message;
@@ -898,10 +1765,21 @@
         document.getElementById("moveStatus").textContent = "";
         document.getElementById("moveStatus").className = "status-line";
         moveOverlay.hidden = false;
+        moveReleaseTrap = window.estimuloTrapFocus(moveOverlay);
       }
-      document.querySelectorAll("[data-close-move]").forEach((el) => el.addEventListener("click", () => (moveOverlay.hidden = true)));
+      function closeMoveOverlay() {
+        moveOverlay.hidden = true;
+        if (moveReleaseTrap) {
+          moveReleaseTrap();
+          moveReleaseTrap = null;
+        }
+      }
+      document.querySelectorAll("[data-close-move]").forEach((el) => el.addEventListener("click", closeMoveOverlay));
       document.getElementById("moveTargetPerfil").addEventListener("change", () => renderMoveMacrotemaSelect());
       document.getElementById("moveTargetMacrotema").addEventListener("change", () => renderMoveTrilhaSelect());
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !moveOverlay.hidden) closeMoveOverlay();
+      });
 
       document.getElementById("confirmMoveButton").addEventListener("click", async () => {
         const button = document.getElementById("confirmMoveButton");
@@ -915,7 +1793,7 @@
         }
 
         button.disabled = true;
-        status.textContent = "Adicionando vídeo...";
+        status.textContent = "Adicionando vídeo…";
         status.className = "status-line";
 
         try {
@@ -925,7 +1803,7 @@
             body: JSON.stringify({ to_trilha_id: toTrilhaId }),
           });
 
-          moveOverlay.hidden = true;
+          closeMoveOverlay();
           await initialize();
         } catch (error) {
           status.textContent = error.message;
@@ -950,6 +1828,7 @@
         document.getElementById("renameStatus").textContent = "";
         document.getElementById("renameStatus").className = "status-line";
         renameOverlay.hidden = false;
+        renameReleaseTrap = window.estimuloTrapFocus(renameOverlay);
       }
 
       function openRenameTrilha(trilhaId) {
@@ -962,14 +1841,24 @@
         document.getElementById("renameStatus").textContent = "";
         document.getElementById("renameStatus").className = "status-line";
         renameOverlay.hidden = false;
+        renameReleaseTrap = window.estimuloTrapFocus(renameOverlay);
+      }
+
+      function closeRenameOverlay() {
+        renameOverlay.hidden = true;
+        renameContext = null;
+        if (renameReleaseTrap) {
+          renameReleaseTrap();
+          renameReleaseTrap = null;
+        }
       }
 
       document.querySelectorAll("[data-close-rename]").forEach((el) =>
-        el.addEventListener("click", () => {
-          renameOverlay.hidden = true;
-          renameContext = null;
-        })
+        el.addEventListener("click", closeRenameOverlay)
       );
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !renameOverlay.hidden) closeRenameOverlay();
+      });
 
       document.getElementById("confirmRenameButton").addEventListener("click", async () => {
         if (!renameContext) return;
@@ -985,7 +1874,7 @@
         }
 
         button.disabled = true;
-        status.textContent = "Salvando...";
+        status.textContent = "Salvando…";
         status.className = "status-line";
 
         try {
@@ -1011,8 +1900,7 @@
             selectedTrilhaKey = renameContext.trilhaId;
           }
 
-          renameOverlay.hidden = true;
-          renameContext = null;
+          closeRenameOverlay();
           await initialize();
         } catch (error) {
           status.textContent = error.message;
@@ -1025,8 +1913,10 @@
       async function initialize() {
         try {
           const profiles = await requestJson("/group-profiles");
-          state.profiles = Array.isArray(profiles) ? profiles.map((p) => p.nome) : [];
+          state.groupProfiles = Array.isArray(profiles) ? profiles : [];
+          state.profiles = state.groupProfiles.map((p) => p.nome);
         } catch (error) {
+          state.groupProfiles = [];
           state.profiles = [];
         }
 
@@ -1043,6 +1933,10 @@
           renderPerfilTabs();
           renderMacrotemaGrid();
           renderTrailDetail();
+
+          if (activeView === "sequencia") {
+            await loadSequenceView();
+          }
         } catch (error) {
           renderLoadError(error);
         }

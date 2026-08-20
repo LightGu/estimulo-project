@@ -196,12 +196,24 @@ function createDispatchConsistencyService(dependencies = {}) {
       group_id: groupId,
       video_id: videoId,
     });
-    await ensureDispatchEntities(campaignId, groupId, videoId);
+    const { campaign } = await ensureDispatchEntities(campaignId, groupId, videoId);
     writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.completed", {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
     });
+
+    // Pausa nao muda o status do log (fica pendente para o resume conseguir
+    // retomar), entao so o claim atomico la na frente nao bastaria para
+    // impedir o envio - esta checagem e o que de fato para.
+    if (campaign && campaign.status === "pausado") {
+      return {
+        idempotent: true,
+        status: "pausado",
+        skippedSend: true,
+        logId: null,
+      };
+    }
 
     writeStageLog(logger, "info", "dispatch_consistency.find_completed_log.started", {
       campaign_id: campaignId,
@@ -258,7 +270,28 @@ function createDispatchConsistencyService(dependencies = {}) {
       video_id: videoId,
       log_id: log.id,
     });
-    await dispatchLogsRepositoryDependency.updateStatus(log.id, "processando");
+    // Reivindicacao atomica (so avanca se o log ainda estiver pendente): fecha
+    // a corrida entre um job antigo que sobreviveu a uma pausa e o job novo
+    // criado no resume para o mesmo log, e tambem cobre cancelamento (o log ja
+    // virou "cancelado" antes deste ponto, entao o claim falha e nao envia).
+    const claimedLog = await dispatchLogsRepositoryDependency.claimForSend(log.id);
+
+    if (!claimedLog) {
+      writeStageLog(logger, "info", "dispatch_consistency.claim_lost", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+      });
+
+      return {
+        idempotent: true,
+        status: "skipped",
+        skippedSend: true,
+        logId: log.id,
+      };
+    }
+
     writeStageLog(logger, "info", "dispatch_consistency.mark_processing.completed", {
       campaign_id: campaignId,
       group_id: groupId,

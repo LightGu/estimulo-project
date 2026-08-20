@@ -3,10 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5fa">
     <script>
       (function () {
         try {
-          if (localStorage.getItem("estimulo-theme") === "dark") document.documentElement.setAttribute("data-theme", "dark");
+          if (localStorage.getItem("estimulo-theme") === "dark") {
+            document.documentElement.setAttribute("data-theme", "dark");
+            document.querySelector('meta[name="theme-color"]').setAttribute("content", "#0d0e1a");
+          }
         } catch (e) {}
       })();
     </script>
@@ -14,6 +18,7 @@
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/tokens.css">
     <link rel="stylesheet" href="assets/css/base.css">
@@ -21,6 +26,7 @@
     <link rel="stylesheet" href="assets/css/components.css">
   </head>
   <body data-page="relatorios">
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
     <div class="shell">
       <aside class="sidebar" id="sidebar-root"></aside>
 
@@ -35,7 +41,7 @@
           </div>
         </header>
 
-        <main class="page">
+        <main class="page" id="main-content">
           <section class="page-section">
             <div class="toolbar">
               <div class="field">
@@ -63,6 +69,7 @@
                   <option value="enviado">Enviado</option>
                   <option value="erro">Erro</option>
                   <option value="falhou">Falhou</option>
+                  <option value="cancelado">Cancelado</option>
                 </select>
               </div>
               <div class="toolbar-spacer"></div>
@@ -72,7 +79,7 @@
           </section>
 
           <section class="page-section">
-            <div class="grid grid-cols-4" id="summaryCards"></div>
+            <div class="grid grid-cols-5" id="summaryCards"></div>
           </section>
 
           <section class="page-section">
@@ -96,7 +103,12 @@
                 <tbody id="reportBody"></tbody>
               </table>
             </div>
-            <div class="actions-bar-end">
+            <div class="actions-bar-end" style="justify-content:space-between;">
+              <div class="pager" id="pagerControls" style="display:flex;align-items:center;gap:10px;">
+                <button class="btn btn-secondary" id="prevPageButton" type="button">Anterior</button>
+                <span class="text-muted" id="pageLabel"></span>
+                <button class="btn btn-secondary" id="nextPageButton" type="button">Próxima</button>
+              </div>
               <button class="btn" id="exportCsvButton" type="button">Exportar CSV</button>
             </div>
           </section>
@@ -113,6 +125,7 @@
         enviado: "Enviado",
         erro: "Erro",
         falhou: "Falhou",
+        cancelado: "Cancelado",
       };
       const STATUS_BADGE = {
         pendente: "badge-neutral",
@@ -120,6 +133,7 @@
         enviado: "badge-success",
         erro: "badge-danger",
         falhou: "badge-danger",
+        cancelado: "badge-neutral",
       };
 
       function dispatchStatusPresentation(row) {
@@ -130,12 +144,14 @@
       }
 
       const todayIso = new Date().toISOString().slice(0, 10);
+      const PAGE_SIZE = 100;
 
       const state = {
         organizations: [],
         groups: [],
         logs: [],
         timezone: null,
+        currentPage: 1,
       };
 
       function escapeHtml(value) {
@@ -170,6 +186,7 @@
         pendente: "Ainda não foi processado — aguardando o horário programado de disparo.",
         processando: "Envio em andamento — o vídeo está sendo enviado agora pela Evolution API.",
         enviado: "A Evolution aceitou o envio e postou a mensagem no grupo.",
+        cancelado: "Este envio foi cancelado e não será disparado.",
       };
 
       function dispatchStatusTip(row) {
@@ -212,6 +229,34 @@
           state.groups.map((g) => `<option value="${g.id}">${escapeHtml(g.nome)}</option>`).join("");
       }
 
+      function readFiltersFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        document.getElementById("dataInicio").value = params.get("start_date") || "";
+        document.getElementById("dataFim").value = params.get("end_date") || "";
+        document.getElementById("orgFilter").value = params.get("organization_id") || "todas";
+        document.getElementById("groupFilter").value = params.get("group_id") || "todos";
+        document.getElementById("statusFilter").value = params.get("status") || "todos";
+      }
+
+      function writeFiltersToUrl() {
+        const dataInicio = document.getElementById("dataInicio").value;
+        const dataFim = document.getElementById("dataFim").value;
+        const org = document.getElementById("orgFilter").value;
+        const group = document.getElementById("groupFilter").value;
+        const status = document.getElementById("statusFilter").value;
+
+        const params = new URLSearchParams();
+        if (dataInicio) params.set("start_date", dataInicio);
+        if (dataFim) params.set("end_date", dataFim);
+        if (org !== "todas") params.set("organization_id", org);
+        if (group !== "todos") params.set("group_id", group);
+        if (status !== "todos") params.set("status", status);
+
+        const query = params.toString();
+        const newUrl = query ? `${window.location.pathname}?${query}` : window.location.pathname;
+        history.replaceState(null, "", newUrl);
+      }
+
       function clampToToday(inputEl) {
         if (inputEl.value && inputEl.value > todayIso) {
           inputEl.value = todayIso;
@@ -236,7 +281,7 @@
       }
 
       function renderSummary(rows) {
-        const counts = { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0 };
+        const counts = { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0, cancelado: 0 };
         rows.forEach((r) => {
           if (counts[r.status] !== undefined) counts[r.status]++;
         });
@@ -245,6 +290,7 @@
           { label: "Enviados", value: counts.enviado, bar: "var(--success)" },
           { label: "Aguardando envio", value: counts.pendente + counts.processando, bar: "var(--warning)" },
           { label: "Erros", value: counts.erro + counts.falhou, bar: "var(--danger)" },
+          { label: "Cancelados", value: counts.cancelado, bar: "var(--text-muted)" },
         ];
         document.getElementById("summaryCards").innerHTML = cards
           .map(
@@ -257,13 +303,29 @@
           .join("");
       }
 
+      function totalPages(rows) {
+        return Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      }
+
+      function renderPager(rows) {
+        const pages = totalPages(rows);
+        if (state.currentPage > pages) state.currentPage = pages;
+        document.getElementById("pageLabel").textContent = `Página ${state.currentPage} de ${pages}`;
+        document.getElementById("prevPageButton").disabled = state.currentPage <= 1;
+        document.getElementById("nextPageButton").disabled = state.currentPage >= pages;
+        document.getElementById("pagerControls").style.display = rows.length > PAGE_SIZE ? "flex" : "none";
+      }
+
       function renderTable(rows) {
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
+        renderPager(rows);
         if (!rows.length) {
           document.getElementById("reportBody").innerHTML = `<tr><td colspan="7"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
-        document.getElementById("reportBody").innerHTML = rows
+        const start = (state.currentPage - 1) * PAGE_SIZE;
+        const pageRows = rows.slice(start, start + PAGE_SIZE);
+        document.getElementById("reportBody").innerHTML = pageRows
           .map((r) => {
             const organizacao = r.groups?.organizations?.nome || "—";
             const grupo = r.groups?.nome || "—";
@@ -284,7 +346,9 @@
           .join("");
       }
 
-      async function renderAll() {
+      async function renderAll({ resetPage = false } = {}) {
+        if (resetPage) state.currentPage = 1;
+        writeFiltersToUrl();
         try {
           await fetchLogs();
           renderSummary(state.logs);
@@ -300,7 +364,7 @@
         })
       );
 
-      document.getElementById("applyFiltersButton").addEventListener("click", renderAll);
+      document.getElementById("applyFiltersButton").addEventListener("click", () => renderAll({ resetPage: true }));
 
       document.getElementById("clearFiltersButton").addEventListener("click", () => {
         document.getElementById("dataInicio").value = "";
@@ -308,7 +372,21 @@
         document.getElementById("orgFilter").value = "todas";
         document.getElementById("groupFilter").value = "todos";
         document.getElementById("statusFilter").value = "todos";
-        renderAll();
+        renderAll({ resetPage: true });
+      });
+
+      document.getElementById("prevPageButton").addEventListener("click", () => {
+        if (state.currentPage > 1) {
+          state.currentPage--;
+          renderTable(state.logs);
+        }
+      });
+
+      document.getElementById("nextPageButton").addEventListener("click", () => {
+        if (state.currentPage < totalPages(state.logs)) {
+          state.currentPage++;
+          renderTable(state.logs);
+        }
       });
 
       function toCsvValue(value) {
@@ -377,6 +455,7 @@
           state.timezone = (scheduleSettings && scheduleSettings.timezone) || null;
           updateTimezoneLabel();
           populateFilters();
+          readFiltersFromUrl();
           await renderAll();
         } catch (error) {
           renderLoadError(error);

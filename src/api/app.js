@@ -29,6 +29,7 @@ const inAppNotificationsService = require("../services/in-app-notifications.serv
 const organizationsService = require("../services/organizations.service");
 const settingsService = require("../services/settings.service");
 const trilhasService = require("../services/trilhas.service");
+const trilhaSequenceService = require("../services/trilha-sequence.service");
 const videoCatalogService = require("../services/video-catalog.service");
 const whatsappInstancesService = require("../services/whatsapp-instances.service");
 
@@ -98,6 +99,7 @@ function createApp(dependencies = {}) {
   const dispatchLogsServiceDependency = dependencies.dispatchLogsService || dispatchLogsService;
   const settingsServiceDependency = dependencies.settingsService || settingsService;
   const trilhasServiceDependency = dependencies.trilhasService || trilhasService;
+  const trilhaSequenceServiceDependency = dependencies.trilhaSequenceService || trilhaSequenceService;
   const videoService = dependencies.videoCatalogService || videoCatalogService;
   const whatsappInstancesServiceDependency = dependencies.whatsappInstancesService || whatsappInstancesService;
   const campaignsController = createCampaignsController({ campaignService });
@@ -120,7 +122,10 @@ function createApp(dependencies = {}) {
     dispatchLogsService: dispatchLogsServiceDependency,
   });
   const settingsController = createSettingsController({ settingsService: settingsServiceDependency });
-  const trilhasController = createTrilhasController({ trilhasService: trilhasServiceDependency });
+  const trilhasController = createTrilhasController({
+    trilhasService: trilhasServiceDependency,
+    trilhaSequenceService: trilhaSequenceServiceDependency,
+  });
   const videoCatalogController = createVideoCatalogController({ videoCatalogService: videoService });
   const whatsappInstancesController = createWhatsappInstancesController({
     whatsappInstancesService: whatsappInstancesServiceDependency,
@@ -134,6 +139,9 @@ function createApp(dependencies = {}) {
   app.patch("/campaigns/:id/captions/:captionRowId", campaignVideoCaptionsController.updateCaption);
   app.post("/campaigns/:id/captions/:captionRowId/regenerate", campaignVideoCaptionsController.regenerateCaption);
   app.post("/campaigns/:id/dispatch/confirm", campaignsController.confirmDispatch);
+  app.post("/campaigns/:id/pause", campaignsController.pause);
+  app.post("/campaigns/:id/resume", campaignsController.resume);
+  app.post("/campaigns/:id/cancel", campaignsController.cancel);
   app.get("/campaigns/:id", campaignsController.getById);
   app.delete("/campaigns/:id", campaignsController.remove);
   app.post("/mensagens/dispatch", mensagensController.dispatch);
@@ -141,6 +149,7 @@ function createApp(dependencies = {}) {
   app.get("/notifications", notificationsController.list);
   app.post("/notifications/read-all", notificationsController.markAllRead);
   app.post("/notifications/:id/read", notificationsController.markRead);
+  app.delete("/notifications/read", notificationsController.clearRead);
   app.get("/organizations", organizationsController.list);
   app.post("/organizations", organizationsController.create);
   app.patch("/organizations/:id", organizationsController.update);
@@ -149,6 +158,13 @@ function createApp(dependencies = {}) {
   app.get("/trilhas", trilhasController.listAll);
   app.get("/trilhas/overview", trilhasController.listOverview);
   app.get("/trilhas/by-perfil", trilhasController.listByPerfil);
+  app.get("/trilhas/sequence", trilhasController.listSequence);
+  app.post("/trilhas/sequence", trilhasController.addTrilhaToSequence);
+  app.patch("/trilhas/sequence/reorder", trilhasController.reorderSequence);
+  app.delete("/trilhas/sequence/:trilhaId", trilhasController.removeFromSequence);
+  app.get("/trilhas/desvios", trilhasController.listDesvios);
+  app.post("/trilhas/desvios", trilhasController.createDesvio);
+  app.delete("/trilhas/desvios/:id", trilhasController.removeDesvio);
   app.get("/trilhas/selectable-videos", trilhasController.listSelectableVideos);
   app.post("/trilhas", trilhasController.createTrilha);
   app.patch("/trilhas/:id", trilhasController.renameTrilha);
@@ -164,6 +180,7 @@ function createApp(dependencies = {}) {
   app.get("/groups/unclassified", groupsController.listWithoutSegment);
   app.post("/groups/sync", groupsController.syncFromEvolution);
   app.get("/groups/:id/video-progress", groupVideoProgressController.getGroupProgress);
+  app.get("/groups/:id/next-trilha", groupsController.previewNextTrilha);
   app.patch("/groups/:id", groupsController.updateOperationalSettings);
   app.patch("/groups/:id/operational-settings", groupsController.updateOperationalSettings);
   app.post("/groups/:id/test-dispatch", groupsController.dispatchTestVideo);
@@ -199,6 +216,7 @@ function createApp(dependencies = {}) {
   app.post("/group-profiles", groupProfilesController.create);
   app.get("/group-profiles/merges", groupProfilesController.listMerges);
   app.post("/group-profiles/merge", groupProfilesController.merge);
+  app.post("/group-profiles/reorder", groupProfilesController.reorder);
   app.post("/group-profiles/:id/unmerge", groupProfilesController.unmerge);
   app.patch("/group-profiles/:id", groupProfilesController.update);
   app.delete("/group-profiles/:id", groupProfilesController.remove);
