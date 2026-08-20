@@ -116,7 +116,9 @@ function createApp(dependencies = {}) {
     notificationsService: inAppNotificationsServiceDependency,
   });
   const organizationsController = createOrganizationsController({ organizationService });
-  const reportController = createReportController({ dispatchLogsService: dispatchLogsServiceDependency });
+  const reportController = createReportController({
+    dispatchLogsService: dispatchLogsServiceDependency,
+  });
   const settingsController = createSettingsController({ settingsService: settingsServiceDependency });
   const trilhasController = createTrilhasController({ trilhasService: trilhasServiceDependency });
   const videoCatalogController = createVideoCatalogController({ videoCatalogService: videoService });

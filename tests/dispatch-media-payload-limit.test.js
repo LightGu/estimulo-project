@@ -30,7 +30,7 @@ function testBudgetLeavesRoomForJsonEnvelope() {
 
 async function testKeepsVideoThatAlreadyFits() {
   const config = { maxMediaPayloadBytes: 1024 * 1024 };
-  const video = buildVideo(1024);
+  const video = { video_id: "video-1", bytes: Buffer.alloc(1024, 1), name: "video.mp4", mime_type: "video/mp4" };
   let called = false;
   const result = await fitDownloadedVideoToEvolutionLimit(video, {
     config,
@@ -41,13 +41,49 @@ async function testKeepsVideoThatAlreadyFits() {
   });
 
   assert.equal(result, video);
-  assert.equal(called, false, "video dentro do limite nao deve passar pelo ffmpeg");
+  assert.equal(called, false, "video mp4 dentro do limite nao deve passar pelo ffmpeg");
   assert.ok(Buffer.isBuffer(video.bytes), "os bytes do video original devem continuar disponiveis");
+}
+
+async function testNormalizesNonMp4ContainerRegardlessOfSize() {
+  const config = { maxMediaPayloadBytes: 1024 * 1024 };
+  const video = buildVideo(1024);
+  const normalizedBytes = Buffer.alloc(900, 3);
+  let receivedVideo = null;
+
+  const result = await fitDownloadedVideoToEvolutionLimit(video, {
+    config,
+    logger: silentLogger,
+    normalizeContainer(downloadedVideo) {
+      receivedVideo = downloadedVideo;
+
+      return { ...downloadedVideo, bytes: normalizedBytes, mime_type: "video/mp4", remuxed: true };
+    },
+    compressVideo() {
+      throw new Error("nao deveria recomprimir um video que ja cabe apos o remux");
+    },
+  });
+
+  assert.equal(receivedVideo, video, "o video .mov original deve ser oferecido a normalizacao de container");
+  assert.equal(result.bytes, normalizedBytes);
+  assert.equal(result.mime_type, "video/mp4");
+  assert.equal(video.bytes, undefined, "os bytes originais devem ser liberados apos o remux");
+}
+
+// Fixture ja em mp4 para exercitar so o corte por tamanho, sem envolver o
+// passo de normalizacao de container (coberto em testNormalizesNonMp4ContainerRegardlessOfSize).
+function buildMp4Video(byteLength) {
+  return {
+    video_id: "video-1",
+    bytes: Buffer.alloc(byteLength, 1),
+    name: "video.mp4",
+    mime_type: "video/mp4",
+  };
 }
 
 async function testCompressesVideoAboveBudgetAndFreesOriginalBytes() {
   const config = { maxMediaPayloadBytes: 1024 * 1024 };
-  const video = buildVideo(900 * 1024);
+  const video = buildMp4Video(900 * 1024);
   const originalByteLength = video.bytes.length;
 
   assert.ok(
@@ -75,7 +111,7 @@ async function testCompressesVideoAboveBudgetAndFreesOriginalBytes() {
 
 async function testCompressionCanBeDisabledByEnv() {
   const config = { maxMediaPayloadBytes: 1024 * 1024 };
-  const video = buildVideo(900 * 1024);
+  const video = buildMp4Video(900 * 1024);
   let called = false;
 
   process.env.EVOLUTION_MEDIA_COMPRESSION_ENABLED = "false";
@@ -85,6 +121,29 @@ async function testCompressionCanBeDisabledByEnv() {
       config,
       logger: silentLogger,
       compressVideo() {
+        called = true;
+      },
+    });
+
+    assert.equal(result, video);
+    assert.equal(called, false);
+  } finally {
+    delete process.env.EVOLUTION_MEDIA_COMPRESSION_ENABLED;
+  }
+}
+
+async function testNonMp4ContainerNormalizationCanBeDisabledByEnv() {
+  const config = { maxMediaPayloadBytes: 1024 * 1024 };
+  const video = buildVideo(1024);
+  let called = false;
+
+  process.env.EVOLUTION_MEDIA_COMPRESSION_ENABLED = "false";
+
+  try {
+    const result = await fitDownloadedVideoToEvolutionLimit(video, {
+      config,
+      logger: silentLogger,
+      normalizeContainer() {
         called = true;
       },
     });
@@ -116,8 +175,10 @@ function testPermanentFailureDetection() {
 (async () => {
   testBudgetLeavesRoomForJsonEnvelope();
   await testKeepsVideoThatAlreadyFits();
+  await testNormalizesNonMp4ContainerRegardlessOfSize();
   await testCompressesVideoAboveBudgetAndFreesOriginalBytes();
   await testCompressionCanBeDisabledByEnv();
+  await testNonMp4ContainerNormalizationCanBeDisabledByEnv();
   testPermanentFailureDetection();
 
   console.log("dispatch media payload limit tests OK");
