@@ -36,11 +36,11 @@ function parseCookies(req) {
   return cookies;
 }
 
-function buildSetCookie(name, value, { maxAgeSeconds, secure, clear } = {}) {
+function buildSetCookie(name, value, { maxAgeSeconds, secure, sameSite = "Lax", clear } = {}) {
   const segments = [`${name}=${clear ? "" : encodeURIComponent(value)}`];
   segments.push("Path=/");
   segments.push("HttpOnly");
-  segments.push("SameSite=Lax");
+  segments.push(`SameSite=${sameSite}`);
   if (secure) segments.push("Secure");
   segments.push(clear ? "Max-Age=0" : `Max-Age=${maxAgeSeconds}`);
 
@@ -63,6 +63,7 @@ function createAuthGate(options = {}) {
   const cookieName = options.cookieName || COOKIE_NAME;
   const secureCookie =
     options.secureCookie === undefined ? process.env.NODE_ENV === "production" : Boolean(options.secureCookie);
+  const sameSite = String(process.env.ESTIMULO_COOKIE_SAME_SITE || "Lax").trim();
   const sessionStore = options.sessionStore || createSessionStore(options.sessionStoreOptions || {});
   const rateLimiter = options.rateLimiter || createLoginRateLimiter(options.rateLimiterOptions || {});
 
@@ -182,7 +183,11 @@ function createAuthGate(options = {}) {
     const { token, expiresAt } = sessionStore.create(user, ttlMs);
     res.set(
       "Set-Cookie",
-      buildSetCookie(cookieName, token, { maxAgeSeconds: Math.floor(ttlMs / 1000), secure: secureCookie })
+      buildSetCookie(cookieName, token, {
+        maxAgeSeconds: Math.floor(ttlMs / 1000),
+        secure: secureCookie,
+        sameSite,
+      })
     );
     res.json({
       authorized: true,
@@ -201,7 +206,7 @@ function createAuthGate(options = {}) {
       if (token) sessionStore.destroy(token);
     }
 
-    res.set("Set-Cookie", buildSetCookie(cookieName, "", { clear: true, secure: secureCookie }));
+    res.set("Set-Cookie", buildSetCookie(cookieName, "", { clear: true, secure: secureCookie, sameSite }));
     res.json({ authorized: false });
   }
 
