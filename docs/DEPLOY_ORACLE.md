@@ -4,8 +4,8 @@ Este guia sobe somente o backend deste repositorio na VM. O banco da aplicacao e
 
 ## Antes de comecar
 
-- A VM tem apenas 1 GB de RAM. API + Redis atendem o basico; API + sete workers + Evolution + PostgreSQL podem exceder essa capacidade sob carga. Para todos os disparos, prefira hospedar a Evolution em outro host ou aumente a VM antes de ativar o perfil `evolution`.
-- Para login por frontend Vercel em dominio diferente, a API precisa de HTTPS e de um dominio proprio. Cookies `SameSite=None` nao funcionam em HTTP. Sem dominio/TLS, limite-se a testes diretos por IP.
+- Confirme a RAM da sua VM antes de ativar o perfil `workers`/`evolution` (`free -h` na VM). Em shapes pequenos (ex.: 1 GB), API + sete workers + Evolution + PostgreSQL podem exceder a capacidade sob carga - prefira hospedar a Evolution em outro host ou aumente a VM antes de ativar o perfil `evolution`.
+- Para login por frontend Vercel em dominio diferente, a API precisa de HTTPS e de um dominio proprio. Cookies `SameSite=None` e o cookie `Secure` (obrigatorio quando `NODE_ENV=production`) nao funcionam em HTTP. Para testar login direto por IP em HTTP antes de configurar dominio/TLS, defina `ESTIMULO_COOKIE_SECURE=false` no `.env` - volte a remover essa variavel (ou defina `true`) assim que houver HTTPS.
 - O compose nao publica Redis (6379), PostgreSQL da Evolution (5432) nem Evolution (8080).
 
 ## 1. Instalar Docker

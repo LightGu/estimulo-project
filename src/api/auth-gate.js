@@ -61,8 +61,16 @@ function createAuthGate(options = {}) {
       ? parseTtlMs(process.env.ESTIMULO_SESSION_TTL_HOURS, DEFAULT_SESSION_TTL_HOURS)
       : options.ttlMs;
   const cookieName = options.cookieName || COOKIE_NAME;
+  // Cookie Secure exige HTTPS - sem isso o navegador nunca guarda o cookie.
+  // ESTIMULO_COOKIE_SECURE deixa forcar o valor (ex.: "false" para testar por
+  // IP puro em HTTP antes de configurar dominio/TLS); sem essa variavel, cai
+  // no padrao de sempre marcar Secure em producao.
   const secureCookie =
-    options.secureCookie === undefined ? process.env.NODE_ENV === "production" : Boolean(options.secureCookie);
+    options.secureCookie === undefined
+      ? process.env.ESTIMULO_COOKIE_SECURE !== undefined
+        ? process.env.ESTIMULO_COOKIE_SECURE === "true"
+        : process.env.NODE_ENV === "production"
+      : Boolean(options.secureCookie);
   const sameSite = String(process.env.ESTIMULO_COOKIE_SAME_SITE || "Lax").trim();
   const sessionStore = options.sessionStore || createSessionStore(options.sessionStoreOptions || {});
   const rateLimiter = options.rateLimiter || createLoginRateLimiter(options.rateLimiterOptions || {});
@@ -102,7 +110,8 @@ function createAuthGate(options = {}) {
 
     return (
       req.method === "GET" &&
-      (requestPath === "/app" ||
+      (requestPath === "/" ||
+        requestPath === "/app" ||
         requestPath === "/app/" ||
         (requestPath.startsWith("/app/") && (requestPath.endsWith(".html") || !path.extname(requestPath))))
     );
@@ -226,7 +235,11 @@ function createAuthGate(options = {}) {
     res.set("Cache-Control", "no-store");
 
     if (isAppPageRequest(req)) {
-      const nextPath = req.originalUrl || "/app/index.html";
+      const requestedPath = req.originalUrl || "/app/index.html";
+      // "/" nao existe como arquivo estatico (so /app/*) - manda direto para
+      // a home do painel em vez de guardar "/" como next e cair num 404 apos
+      // o login.
+      const nextPath = requestedPath === "/" ? "/app/index.html" : requestedPath;
       res.redirect(302, `/app/access.html?next=${encodeURIComponent(nextPath)}`);
       return;
     }

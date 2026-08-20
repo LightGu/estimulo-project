@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("node:path");
 const { createAuthGate } = require("./auth-gate");
+const createAppUsersController = require("./controllers/app-users.controller");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createCampaignVideoCaptionsController = require("./controllers/campaign-video-captions.controller");
 const createGroupProfilesController = require("./controllers/group-profiles.controller");
@@ -16,6 +17,7 @@ const createSettingsController = require("./controllers/settings.controller");
 const createTrilhasController = require("./controllers/trilhas.controller");
 const createVideoCatalogController = require("./controllers/video-catalog.controller");
 const createWhatsappInstancesController = require("./controllers/whatsapp-instances.controller");
+const authService = require("../services/auth.service");
 const campaignsService = require("../services/campaigns.service");
 const campaignVideoCaptionsService = require("../services/campaign-video-captions.service");
 const dispatchLogsService = require("../services/dispatch-logs.service");
@@ -66,11 +68,22 @@ function createApp(dependencies = {}) {
 
   const publicRoot = path.join(__dirname, "../../public");
   const authGate = createAuthGate(dependencies.authGate || {});
+  const authServiceDependency = dependencies.authService || authService;
+  const appUsersController = createAppUsersController({ authService: authServiceDependency });
 
   app.get("/access/status", authGate.statusHandler);
   app.post("/access/login", authGate.loginHandler);
   app.post("/access/logout", authGate.logoutHandler);
+  // Publica de proposito: qualquer pessoa que souber a senha mestra
+  // (ESTIMULO_ADMIN_MASTER_PASSWORD) consegue criar seu proprio login sem
+  // precisar de uma sessao previa - resolve o problema de "ninguem loga para
+  // criar o primeiro usuario" e permite autoatendimento para novas pessoas.
+  app.post("/access/register", appUsersController.create);
   app.use(authGate.middleware);
+  // Nao existe public/index.html (so public/app/*) - sem isso, "/" com
+  // sessao valida caia em "Cannot GET /" porque o static nao acha arquivo
+  // nenhum para servir na raiz.
+  app.get("/", (req, res) => res.redirect("/app/index.html"));
   app.use(express.static(publicRoot));
 
   const campaignService = dependencies.campaignService || campaignsService;
@@ -178,6 +191,8 @@ function createApp(dependencies = {}) {
   app.post("/settings/whatsapp/instances/reorder", whatsappInstancesController.reorder);
   app.get("/settings/whatsapp/rotation", whatsappInstancesController.getRotation);
   app.patch("/settings/whatsapp/rotation", whatsappInstancesController.updateRotation);
+  app.get("/settings/app-users", appUsersController.list);
+  app.patch("/settings/app-users/:id", appUsersController.setActive);
   app.get("/group-profiles", groupProfilesController.list);
   app.post("/group-profiles", groupProfilesController.create);
   app.get("/group-profiles/merges", groupProfilesController.listMerges);
