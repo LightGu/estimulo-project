@@ -179,7 +179,7 @@
         document.getElementById("summaryCards").innerHTML = "";
         document.getElementById("resultCount").textContent = "";
         document.getElementById("reportBody").innerHTML = `
-          <tr><td colspan="8"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
+          <tr><td colspan="7"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
       }
 
       const DISPATCH_STATUS_TIP = {
@@ -320,7 +320,7 @@
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
         renderPager(rows);
         if (!rows.length) {
-          document.getElementById("reportBody").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
+          document.getElementById("reportBody").innerHTML = `<tr><td colspan="7"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
         const start = (state.currentPage - 1) * PAGE_SIZE;
@@ -403,6 +403,7 @@
           "Campanha",
           "Conteúdo",
           "Status",
+          "ID da mensagem no provedor",
         ];
         const lines = [headers.join(";")].concat(
           state.logs.map((r) =>
@@ -414,6 +415,7 @@
               campaignLabel(r.campaigns),
               r.video_catalog?.nome_do_arquivo || "",
               dispatchStatusPresentation(r).label,
+              r.provider_message_id || "",
             ]
               .map(toCsvValue)
               .join(";")

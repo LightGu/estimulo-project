@@ -255,6 +255,41 @@
 
           <section class="page-section">
             <div class="card">
+              <div class="card-header"><h3><span class="section-num">9.</span>Usuários do painel</h3></div>
+              <div class="card-body">
+                <p class="text-muted" style="margin-bottom:14px;">Cada pessoa loga com seu próprio usuário e senha. Criar ou desativar um login exige a senha mestra (definida no servidor).</p>
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>Usuário</th><th>Status</th><th>Criado em</th><th>Último login</th><th>Ações</th></tr></thead>
+                    <tbody id="appUsersBody"></tbody>
+                  </table>
+                </div>
+                <div class="divider" style="margin:16px 0;"></div>
+                <p class="text-muted" style="margin-bottom:10px;">Novo login</p>
+                <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;">
+                  <div class="field">
+                    <label for="newAppUsername">Usuário</label>
+                    <input id="newAppUsername" type="text" autocomplete="off">
+                  </div>
+                  <div class="field">
+                    <label for="newAppPassword">Senha (mín. 8 caracteres)</label>
+                    <input id="newAppPassword" type="password" autocomplete="new-password">
+                  </div>
+                  <div class="field">
+                    <label for="newAppMasterPassword">Senha mestra</label>
+                    <input id="newAppMasterPassword" type="password" autocomplete="off">
+                  </div>
+                </div>
+              </div>
+              <div class="modal-footer">
+                <span class="text-muted" id="appUsersStatus" style="margin-right:auto;"></span>
+                <button class="btn" id="addAppUserButton" type="button">Criar login</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section">
+            <div class="card">
               <div class="card-header"><h3>Perfis de grupo</h3></div>
               <div class="card-body">
                 <p class="text-muted" style="margin-bottom:12px;">Perfis disponíveis para classificação de grupos e trilhas. Clique no lápis para renomear, ou selecione 2 perfis para fundi-los em um só. Perfis que vieram de uma fusão mostram o ícone <span aria-hidden="true">&#8624;</span> para desfundir e voltar aos dois perfis originais.</p>
@@ -1652,6 +1687,112 @@
       });
 
       loadProfiles();
+
+      // ---------- 9. Usuários do painel ----------
+      const appUsersStatus = document.getElementById("appUsersStatus");
+
+      function setAppUsersStatus(text, color) {
+        appUsersStatus.style.color = color || "var(--text-muted)";
+        appUsersStatus.textContent = text;
+      }
+
+      function formatAppUserDate(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("pt-BR");
+      }
+
+      function renderAppUsers(users) {
+        document.getElementById("appUsersBody").innerHTML = users
+          .map(
+            (user) => `
+          <tr>
+            <td class="strong">${escapeHtml(user.username)}</td>
+            <td><span class="badge ${user.active ? "badge-success" : "badge-danger"}">${user.active ? "Ativo" : "Desativado"}</span></td>
+            <td>${escapeHtml(formatAppUserDate(user.created_at))}</td>
+            <td>${escapeHtml(formatAppUserDate(user.last_login_at))}</td>
+            <td><button class="btn btn-secondary btn-sm" data-toggle-app-user="${escapeHtml(user.id)}" data-active="${user.active ? "1" : "0"}">${user.active ? "Desativar" : "Ativar"}</button></td>
+          </tr>`
+          )
+          .join("");
+      }
+
+      async function loadAppUsers() {
+        try {
+          const response = await fetch("/settings/app-users");
+          const users = await response.json();
+          if (!response.ok) throw new Error(users.error || "Falha ao carregar usuários");
+          renderAppUsers(users);
+        } catch (error) {
+          setAppUsersStatus(error.message, "var(--danger)");
+        }
+      }
+
+      document.getElementById("appUsersBody").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-toggle-app-user]");
+        if (!button) return;
+
+        const userId = button.getAttribute("data-toggle-app-user");
+        const nextActive = button.getAttribute("data-active") !== "1";
+        const actionLabel = nextActive ? "ativar" : "desativar";
+
+        const masterPassword = await window.estimuloPrompt(`Senha mestra para ${actionLabel} este login:`, {
+          title: nextActive ? "Ativar login" : "Desativar login",
+        });
+        if (masterPassword === null || masterPassword === "") return;
+
+        setAppUsersStatus(`${nextActive ? "Ativando" : "Desativando"}…`);
+        try {
+          const response = await fetch(`/settings/app-users/${encodeURIComponent(userId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ active: nextActive, master_password: masterPassword }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao atualizar login");
+          setAppUsersStatus("Login atualizado.", "var(--success)");
+          await loadAppUsers();
+        } catch (error) {
+          setAppUsersStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setAppUsersStatus(""), 3000);
+      });
+
+      document.getElementById("addAppUserButton").addEventListener("click", async () => {
+        const usernameInput = document.getElementById("newAppUsername");
+        const passwordInput = document.getElementById("newAppPassword");
+        const masterPasswordInput = document.getElementById("newAppMasterPassword");
+
+        const username = usernameInput.value.trim();
+        const password = passwordInput.value;
+        const masterPassword = masterPasswordInput.value;
+
+        if (!username || !password) {
+          setAppUsersStatus("Informe usuário e senha.", "var(--danger)");
+          return;
+        }
+
+        setAppUsersStatus("Criando login…");
+        try {
+          const response = await fetch("/access/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password, master_password: masterPassword }),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao criar login");
+          usernameInput.value = "";
+          passwordInput.value = "";
+          masterPasswordInput.value = "";
+          setAppUsersStatus("Login criado.", "var(--success)");
+          await loadAppUsers();
+        } catch (error) {
+          setAppUsersStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setAppUsersStatus(""), 3000);
+      });
+
+      loadAppUsers();
     </script>
   </body>
 </html>

@@ -5,7 +5,12 @@ const { resolveInstanceSender } = require("../services/evolution-instance-sender
 const { assertDeliveryConfirmed, confirmProviderDelivery } = require("../services/delivery-confirmation");
 const { evolutionConfig } = require("../config/evolution");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
-const { base64Length, compressVideoToFitBase64Budget } = require("../services/video-compression");
+const {
+  base64Length,
+  compressVideoToFitBase64Budget,
+  isMp4Container,
+  normalizeVideoContainerToMp4,
+} = require("../services/video-compression");
 const defaultCaptionReviewService = require("../services/caption-review.service");
 const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
 const defaultVideoCaptionsService = require("../services/video-captions.service");
@@ -385,22 +390,17 @@ function resolveDispatchMediaBase64Budget(config = evolutionConfig) {
   return limitBytes - DISPATCH_PAYLOAD_ENVELOPE_RESERVE_BYTES;
 }
 
-// A Evolution API recusa com HTTP 413 qualquer corpo acima do limite do
-// body-parser dela (136 MB, fixo no bundle). Como a midia viaja em base64
-// (+33% sobre o arquivo), video a partir de ~102 MB nunca era entregue: o job
-// baixava o arquivo do Drive, montava o payload e tomava 413. Aqui o video e
-// reduzido para caber antes do envio.
-async function fitDownloadedVideoToEvolutionLimit(downloadedVideo, options = {}) {
-  const { compressVideo = compressVideoToFitBase64Budget, config = evolutionConfig, jobData = {}, logger = console } =
+// O WhatsApp so exibe video de container mp4 de forma confiavel; .mov, .mkv,
+// .avi etc sao aceitos pela Evolution API (HTTP 200) mas o destinatario nao
+// recebe nada visivel, sem erro do nosso lado — descoberto apos um disparo em
+// campanha onde grupos que receberiam .mov simplesmente nao viram o video,
+// enquanto o mesmo arquivo enviado individualmente funcionou. Normaliza para
+// mp4 (remux rapido, com fallback para recompressao) antes do envio.
+async function normalizeDownloadedVideoContainer(downloadedVideo, options = {}) {
+  const { config = evolutionConfig, jobData = {}, logger = console, normalizeContainer = normalizeVideoContainerToMp4 } =
     options;
 
-  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes)) {
-    return downloadedVideo;
-  }
-
-  const maxBase64Bytes = resolveDispatchMediaBase64Budget(config);
-
-  if (!maxBase64Bytes || base64Length(downloadedVideo.bytes.length) <= maxBase64Bytes) {
+  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes) || isMp4Container(downloadedVideo)) {
     return downloadedVideo;
   }
 
@@ -408,12 +408,11 @@ async function fitDownloadedVideoToEvolutionLimit(downloadedVideo, options = {})
     logger.warn &&
       logger.warn(
         JSON.stringify({
-          event: "dispatch.video_compression.skipped",
+          event: "dispatch.video_container_normalization.skipped",
           campaign_id: jobData.campaign_id,
           group_id: jobData.group_id,
           video_id: jobData.video_id,
-          bytes: downloadedVideo.bytes.length,
-          max_base64_bytes: maxBase64Bytes,
+          source_mime_type: downloadedVideo.mime_type,
           reason: "EVOLUTION_MEDIA_COMPRESSION_ENABLED=false",
         })
       );
@@ -424,23 +423,103 @@ async function fitDownloadedVideoToEvolutionLimit(downloadedVideo, options = {})
   logger.info &&
     logger.info(
       JSON.stringify({
+        event: "dispatch.video_container_normalization.started",
+        campaign_id: jobData.campaign_id,
+        group_id: jobData.group_id,
+        progress_group_id: jobData.progress_group_id,
+        video_id: jobData.video_id,
+        source_mime_type: downloadedVideo.mime_type,
+        bytes: downloadedVideo.bytes.length,
+      })
+    );
+
+  const maxBase64Bytes = resolveDispatchMediaBase64Budget(config);
+  const normalized = await normalizeContainer(downloadedVideo, {
+    logger,
+    maxBase64Bytes: maxBase64Bytes || base64Length(downloadedVideo.bytes.length),
+  });
+
+  if (normalized !== downloadedVideo) {
+    // Libera os bytes originais assim que a versao mp4 existe, para nao manter
+    // as duas versoes na memoria do worker durante o upload.
+    downloadedVideo.bytes = undefined;
+  }
+
+  logger.info &&
+    logger.info(
+      JSON.stringify({
+        event: "dispatch.video_container_normalization.completed",
+        campaign_id: jobData.campaign_id,
+        group_id: jobData.group_id,
+        progress_group_id: jobData.progress_group_id,
+        video_id: jobData.video_id,
+        remuxed: Boolean(normalized.remuxed),
+        compressed: Boolean(normalized.compressed),
+        bytes: normalized.bytes.length,
+      })
+    );
+
+  return normalized;
+}
+
+// A Evolution API recusa com HTTP 413 qualquer corpo acima do limite do
+// body-parser dela (136 MB, fixo no bundle). Como a midia viaja em base64
+// (+33% sobre o arquivo), video a partir de ~102 MB nunca era entregue: o job
+// baixava o arquivo do Drive, montava o payload e tomava 413. Aqui o video e
+// reduzido para caber antes do envio.
+async function fitDownloadedVideoToEvolutionLimit(downloadedVideo, options = {}) {
+  const { compressVideo = compressVideoToFitBase64Budget, config = evolutionConfig, jobData = {}, logger = console } =
+    options;
+
+  const containerNormalized = await normalizeDownloadedVideoContainer(downloadedVideo, options);
+
+  if (!containerNormalized || !Buffer.isBuffer(containerNormalized.bytes)) {
+    return containerNormalized;
+  }
+
+  const maxBase64Bytes = resolveDispatchMediaBase64Budget(config);
+
+  if (!maxBase64Bytes || base64Length(containerNormalized.bytes.length) <= maxBase64Bytes) {
+    return containerNormalized;
+  }
+
+  if (!isDispatchVideoCompressionEnabled()) {
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "dispatch.video_compression.skipped",
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.group_id,
+          video_id: jobData.video_id,
+          bytes: containerNormalized.bytes.length,
+          max_base64_bytes: maxBase64Bytes,
+          reason: "EVOLUTION_MEDIA_COMPRESSION_ENABLED=false",
+        })
+      );
+
+    return containerNormalized;
+  }
+
+  logger.info &&
+    logger.info(
+      JSON.stringify({
         event: "dispatch.video_compression.started",
         campaign_id: jobData.campaign_id,
         group_id: jobData.group_id,
         progress_group_id: jobData.progress_group_id,
         video_id: jobData.video_id,
-        bytes: downloadedVideo.bytes.length,
-        base64_bytes: base64Length(downloadedVideo.bytes.length),
+        bytes: containerNormalized.bytes.length,
+        base64_bytes: base64Length(containerNormalized.bytes.length),
         max_base64_bytes: maxBase64Bytes,
       })
     );
 
-  const compressed = await compressVideo(downloadedVideo, { logger, maxBase64Bytes });
+  const compressed = await compressVideo(containerNormalized, { logger, maxBase64Bytes });
 
-  if (compressed !== downloadedVideo) {
+  if (compressed !== containerNormalized) {
     // Libera os bytes originais (~125 MB) assim que o video reduzido existe, para
     // nao manter as duas versoes na memoria do worker durante o upload.
-    downloadedVideo.bytes = undefined;
+    containerNormalized.bytes = undefined;
   }
 
   logger.info &&

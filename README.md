@@ -55,11 +55,9 @@ SUPABASE_URL=https://SEU_PROJECT_REF.supabase.co
 SUPABASE_ANON_KEY=change-me
 SUPABASE_SERVICE_ROLE_KEY=change-me
 
-# Acesso simples ao painel/API por IP
-# Em ambiente local, deixe vazio se nao quiser a tela de senha.
-ESTIMULO_ACCESS_PASSWORD=
-ESTIMULO_ACCESS_TTL_HOURS=720
-ESTIMULO_ACCESS_STATE_FILE=storage/access-gate-allowlist.json
+# Login do painel (usuario/senha na tabela app_users do Supabase)
+ESTIMULO_SESSION_TTL_HOURS=168
+ESTIMULO_SESSION_STATE_FILE=storage/sessions.json
 
 # Google Drive
 GOOGLE_DRIVE_CREDENTIALS=
@@ -78,7 +76,17 @@ TRANSCRIPTION_AUDIO_ONLY=true
 
 A `SUPABASE_SERVICE_ROLE_KEY` deve ficar apenas no backend. Nunca exponha essa chave no frontend, em logs, prints, documentacao publica ou codigo versionado.
 
-Para ambiente de teste compartilhado, configure `ESTIMULO_ACCESS_PASSWORD` no `.env` do servidor. Ao acertar a senha, o backend libera o IP de origem pelo periodo definido em `ESTIMULO_ACCESS_TTL_HOURS` (padrao: 720 horas) e persiste essa liberacao em `ESTIMULO_ACCESS_STATE_FILE`, entao a mesma rede/maquina nao precisa digitar a senha em toda visita.
+O painel exige login individual (usuario + senha) para qualquer pagina ou chamada de API - a tela `/app/access.html` e' a unica rota publica. As contas ficam na tabela `app_users` do Supabase (migracao `supabase/migrations/202608100001_create_app_users.sql`), com senha guardada como hash scrypt (nunca em texto puro). Ao autenticar, o backend emite um cookie de sessao `estimulo_session` (HttpOnly, token aleatorio de 256 bits) valido por `ESTIMULO_SESSION_TTL_HOURS` (padrao: 168h/7 dias) e persiste as sessoes ativas em `ESTIMULO_SESSION_STATE_FILE`, para sobreviver a um restart do processo. `/access/login` tem protecao contra forca bruta: apos tentativas erradas repetidas (por IP e por usuario), a chave fica temporariamente bloqueada com backoff exponencial. O botao "Sair" no topo do painel chama `POST /access/logout`, que invalida a sessao no servidor.
+
+Para criar/gerenciar logins:
+
+```bash
+npm run users:manage -- create <usuario> <senha>
+npm run users:manage -- set-password <usuario> <nova-senha>
+npm run users:manage -- deactivate <usuario>
+npm run users:manage -- activate <usuario>
+npm run users:manage -- list
+```
 
 ### 3. IA Para Legendas
 
@@ -548,7 +556,7 @@ O projeto esta deployado para testes. Para atualizar o servidor existente, garan
 1. O servidor fez `git pull` da branch correta.
 2. `npm install` foi executado quando `package-lock.json` mudou.
 3. As migrations novas foram aplicadas no Supabase.
-4. O `.env` do servidor contem Redis, Supabase, Evolution API, Google Drive, Gemini e, no painel publicado, `ESTIMULO_ACCESS_PASSWORD`.
+4. O `.env` do servidor contem Redis, Supabase, Evolution API, Google Drive, Gemini e as variaveis de sessao do login (`ESTIMULO_SESSION_TTL_HOURS`, `ESTIMULO_SESSION_STATE_FILE`); e ha pelo menos um usuario criado via `npm run users:manage -- create`.
 5. Redis esta acessivel pela API e pelos workers.
 6. Evolution API esta acessivel pelos workers de dispatch.
 7. Cada worker obrigatorio esta rodando como processo separado.

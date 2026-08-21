@@ -23,6 +23,32 @@
   height: 18px;
 }
 
+/* Logout button */
+.logout-btn {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.logout-btn:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.logout-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
 /* Notification bell */
 .notif-bell-wrap {
   position: relative;
