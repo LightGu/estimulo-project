@@ -6,6 +6,7 @@ const videoCatalogRepository = require("../repositories/video-catalog.repository
 const defaultSettingsService = require("./settings.service");
 // Regra compartilhada com o disparo pontual - ver delivery-confirmation.js.
 const { assertDeliveryConfirmed, extractProviderDelivery } = require("./delivery-confirmation");
+const { resolveStaleDispatchReason } = require("./dispatch-staleness");
 
 function writeStageLog(logger, level, event, payload = {}) {
   const writer = logger && (logger[level] || logger.info);
@@ -203,13 +204,18 @@ function createDispatchConsistencyService(dependencies = {}) {
       video_id: videoId,
     });
 
-    // Pausa nao muda o status do log (fica pendente para o resume conseguir
-    // retomar), entao so o claim atomico la na frente nao bastaria para
-    // impedir o envio - esta checagem e o que de fato para.
-    if (campaign && campaign.status === "pausado") {
+    // Pausa/cancelamento nao mudam o status do log de disparo pendente (fica
+    // pendente para o resume conseguir retomar, ou e cancelado em lote sem
+    // vinculo com o job do BullMQ que ja estava enfileirado com delay) - so o
+    // claim atomico la na frente nao bastaria para impedir o envio, e sem esta
+    // checagem aqui um job de campanha ja cancelada (que sobreviveu no Redis e
+    // so roda quando a infra do worker volta a subir) reencontra o log como
+    // "nao existe mais pendente/processando" e cria um novo log do zero,
+    // reenviando por cima do cancelamento.
+    if (campaign && (campaign.status === "pausado" || campaign.status === "cancelado")) {
       return {
         idempotent: true,
-        status: "pausado",
+        status: campaign.status,
         skippedSend: true,
         logId: null,
       };
@@ -262,6 +268,41 @@ function createDispatchConsistencyService(dependencies = {}) {
         skippedSend: true,
         logId: log.id,
       };
+    }
+
+    // Trava de atraso: um dispatch que so roda muito depois do horario
+    // planejado do log (fila parada, worker que caiu e voltou, resume de
+    // campanha pausada ha muito tempo) nao pode disparar por cima do horario
+    // perdido - cancela em vez de mandar video "atrasado" sem contexto.
+    const staleReason = resolveStaleDispatchReason(log.horario_envio_planejado);
+
+    if (staleReason) {
+      writeStageLog(logger, "warn", "dispatch_consistency.cancelled_stale", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+        scheduled_at: log.horario_envio_planejado,
+        reason: staleReason,
+      });
+
+      const cancelled = await dispatchLogsRepositoryDependency.cancelIfPending(log.id, staleReason);
+
+      if (!cancelled) {
+        writeStageLog(logger, "info", "dispatch_consistency.cancel_stale_lost", {
+          campaign_id: campaignId,
+          group_id: groupId,
+          video_id: videoId,
+          log_id: log.id,
+        });
+      } else {
+        return {
+          idempotent: true,
+          status: "cancelado",
+          skippedSend: true,
+          logId: log.id,
+        };
+      }
     }
 
     writeStageLog(logger, "info", "dispatch_consistency.mark_processing.started", {

@@ -79,6 +79,12 @@
                   </div>
 
                   <div class="field">
+                    <label for="msgMidia">Imagem ou vídeo (opcional)</label>
+                    <input id="msgMidia" type="file" accept="image/*,video/*">
+                    <p class="text-faint" style="font-size:11px;margin:4px 0 0;">O arquivo é enviado direto para os grupos e não fica salvo no sistema — só o texto e os metadados do disparo ficam registrados.</p>
+                  </div>
+
+                  <div class="field">
                     <label>Grupos destinatários</label>
                     <input id="groupSearchInput" type="search" placeholder="Buscar grupo por nome…" style="margin-bottom:6px;">
                     <label style="margin-bottom:6px;"><input type="checkbox" id="selectAllGroups"> <strong>Selecionar todos os grupos</strong></label>
@@ -264,6 +270,11 @@
         return selectedGroupIds().map((id) => state.groups.find((g) => g.id === id)?.nome).filter(Boolean);
       }
 
+      function attachedMediaFile() {
+        const files = document.getElementById("msgMidia").files;
+        return files && files.length ? files[0] : null;
+      }
+
       function updatePreview() {
         const titulo = document.getElementById("msgTitulo").value.trim() || "(sem título)";
         const texto = document.getElementById("msgTexto").value.trim() || "(sem texto ainda)";
@@ -271,6 +282,7 @@
         const data = document.getElementById("msgData").value;
         const inicio = document.getElementById("msgInicio").value;
         const fim = document.getElementById("msgFim").value;
+        const media = attachedMediaFile();
 
         let envioHtml;
         if (data && inicio && fim) {
@@ -279,9 +291,14 @@
           envioHtml = "defina data/início/fim para agendar";
         }
 
+        const mediaHtml = media
+          ? `<div class="pattach">${media.type.startsWith("video/") ? "🎞️" : "🖼️"} ${escapeHtml(media.name)}</div>`
+          : "";
+
         document.getElementById("previewBubble").innerHTML = `
           <div class="ptitle">${escapeHtml(titulo)}</div>
           <div style="font-size:13px;white-space:pre-wrap;">${escapeHtml(texto)}</div>
+          ${mediaHtml}
           <div class="pattach">👥 ${grupos.length ? escapeHtml(grupos.join(", ")) : "nenhum grupo selecionado"}</div>
           <div class="pattach">🕒 ${envioHtml}</div>
         `;
@@ -290,6 +307,7 @@
       ["msgTitulo", "msgTexto", "msgData", "msgInicio", "msgFim"].forEach((id) =>
         document.getElementById(id).addEventListener("input", updatePreview)
       );
+      document.getElementById("msgMidia").addEventListener("change", updatePreview);
 
       function currentContentPayload() {
         return {
@@ -297,6 +315,23 @@
           link: "",
           tipo_conteudo: "texto",
         };
+      }
+
+      // Monta o FormData para as rotas multipart (.../media): campos escalares
+      // como texto e o arquivo anexado como "media". group_ids vai serializado
+      // em JSON, ja que multipart nao tem um tipo nativo de array.
+      function buildMediaFormData(fields, mediaFile) {
+        const formData = new FormData();
+
+        Object.entries(fields).forEach(([key, value]) => {
+          if (value === undefined || value === null) {
+            return;
+          }
+          formData.append(key, Array.isArray(value) ? JSON.stringify(value) : String(value));
+        });
+        formData.append("media", mediaFile);
+
+        return formData;
       }
 
       document.getElementById("sendTestButton").addEventListener("click", async () => {
@@ -314,12 +349,24 @@
         status.style.color = "var(--text-muted)";
 
         try {
-          const payload = { group_ids: [groupId], ...currentContentPayload() };
-          const result = await requestJson("/mensagens/dispatch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
+          const mediaFile = attachedMediaFile();
+          let result;
+
+          if (mediaFile) {
+            const formData = buildMediaFormData(
+              { group_ids: [groupId], texto: document.getElementById("msgTexto").value.trim() },
+              mediaFile
+            );
+            result = await requestJson("/mensagens/dispatch/media", { method: "POST", body: formData });
+          } else {
+            const payload = { group_ids: [groupId], ...currentContentPayload() };
+            result = await requestJson("/mensagens/dispatch", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+          }
+
           const detail = result.results[0];
 
           if (detail.ok) {
@@ -355,20 +402,22 @@
       function resetForm() {
         document.getElementById("msgTitulo").value = "";
         document.getElementById("msgTexto").value = "";
+        document.getElementById("msgMidia").value = "";
         document.querySelectorAll(".group-check:checked").forEach((cb) => (cb.checked = false));
         updatePreview();
       }
 
       document.getElementById("scheduleMessageButton").addEventListener("click", async () => {
         const msg = collectMessageFromForm();
+        const mediaFile = attachedMediaFile();
 
         if (!msg.grupos.length) {
           window.alert("Selecione ao menos um grupo destinatário.");
           return;
         }
 
-        if (!msg.texto && !msg.link) {
-          window.alert("Informe um texto para a mensagem.");
+        if (!msg.texto && !msg.link && !mediaFile) {
+          window.alert("Informe um texto ou anexe uma imagem/vídeo para a mensagem.");
           return;
         }
 
@@ -395,23 +444,29 @@
             Number(document.getElementById("msgDelayMinSec").value) * 1000;
           const delayMax =
             Number(document.getElementById("msgDelayMaxMin").value) * 60000;
-          const result = await requestJson("/mensagens/dispatch/schedule", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              titulo: msg.titulo,
-              tipo: msg.tipo,
-              group_ids: msg.grupos,
-              texto: msg.texto,
-              link: msg.link,
-              tipo_conteudo: "texto",
-              window_start: windowStartIso,
-              window_end: windowEndIso,
-              jitter_delay_min_ms: delayMin,
-              jitter_delay_max_ms: delayMax,
-              persist_as_campaign: true,
-            }),
-          });
+          const commonFields = {
+            titulo: msg.titulo,
+            tipo: msg.tipo,
+            group_ids: msg.grupos,
+            texto: msg.texto,
+            window_start: windowStartIso,
+            window_end: windowEndIso,
+            jitter_delay_min_ms: delayMin,
+            jitter_delay_max_ms: delayMax,
+            persist_as_campaign: true,
+          };
+          let result;
+
+          if (mediaFile) {
+            const formData = buildMediaFormData(commonFields, mediaFile);
+            result = await requestJson("/mensagens/dispatch/schedule/media", { method: "POST", body: formData });
+          } else {
+            result = await requestJson("/mensagens/dispatch/schedule", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...commonFields, link: msg.link, tipo_conteudo: "texto" }),
+            });
+          }
 
           msg.detalhes = result.jobs.map((job) => ({ ok: true, group_id: job.group_id, group_nome: job.group_nome, scheduled_at: job.scheduled_at }));
           msg.status = "programado";

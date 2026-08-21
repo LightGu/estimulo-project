@@ -369,9 +369,53 @@ function createVideoCaptionsService(dependencies = {}) {
     return repository.markUsed(captionId, usedAt);
   }
 
+  async function listCaptionsByVideoId(videoId) {
+    const trimmed = String(videoId || "").trim();
+
+    if (!trimmed) {
+      throw new Error("Video id is required");
+    }
+
+    const video = await videoCatalogRepository.findById(trimmed);
+
+    if (!video) {
+      throw new Error("Video not found");
+    }
+
+    return repository.listByVideoId(trimmed);
+  }
+
+  async function updateCaption(captionId, videoId, payload) {
+    const trimmedCaptionId = String(captionId || "").trim();
+    const trimmedVideoId = String(videoId || "").trim();
+    const captionText = String(payload?.caption_text ?? "").trim();
+
+    if (!trimmedCaptionId) {
+      throw new Error("Caption id is required");
+    }
+
+    if (!trimmedVideoId) {
+      throw new Error("Video id is required");
+    }
+
+    if (!captionText) {
+      throw new Error("Caption text is required");
+    }
+
+    const existing = await repository.findById(trimmedCaptionId);
+
+    if (!existing || existing.video_id !== trimmedVideoId) {
+      throw new Error("Caption not found");
+    }
+
+    return repository.update(trimmedCaptionId, { caption_text: captionText });
+  }
+
   return {
+    listCaptionsByVideoId,
     markCaptionUsed,
     selectCaptionForVideo,
+    updateCaption,
   };
 }
 

@@ -5,6 +5,7 @@ const dispatchLogsRepository = require("../repositories/dispatch-logs.repository
 const defaultCampaignVideoCaptionsService = require("./campaign-video-captions.service");
 const defaultSettingsService = require("./settings.service");
 const defaultMensagensService = require("./mensagens.service");
+const defaultWhatsappInstancesService = require("./whatsapp-instances.service");
 const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
 // Modulos inteiros (nao desestruturados): campaignTriggerQueue/dispatchQueue/
 // mensagensDispatchQueue sao getters que criam a conexao BullMQ na primeira
@@ -144,6 +145,7 @@ function createCampaignsService(dependencies = {}) {
     dependencies.campaignVideoCaptionsService || defaultCampaignVideoCaptionsService;
   const settingsServiceDependency = dependencies.settingsService || defaultSettingsService;
   const mensagensServiceDependency = dependencies.mensagensService || defaultMensagensService;
+  const whatsappInstancesServiceDependency = dependencies.whatsappInstancesService || defaultWhatsappInstancesService;
   const enqueueCampaignTrigger = dependencies.addCampaignTriggerJob || addCampaignTriggerJob;
   const requeuePendingDispatchJobs =
     dependencies.requeuePendingDispatchJobsForCampaign || defaultRequeuePendingDispatchJobsForCampaign;
@@ -212,6 +214,15 @@ function createCampaignsService(dependencies = {}) {
 
   async function createAndQueue(payload = {}) {
     const groupIds = normalizeGroupIds(payload);
+
+    // Com 2+ numeros ativos, todo grupo programado precisa estar coberto por
+    // TODOS eles - senao o rodizio (dispatch-jitter.js resolveInstanceForOrder)
+    // manda uma rodada para um numero que nem esta naquele grupo. Bloqueia aqui,
+    // na criacao da campanha, para o usuario corrigir a cobertura antes de gastar
+    // legendas geradas (Etapa 2) numa campanha que so seria filtrada depois, em
+    // silencio, no createPendingDispatchLogsForCampaign.
+    await whatsappInstancesServiceDependency.assertGroupsDispatchable(groupIds);
+
     const executionDate = normalizeScheduledDate(
       payload.execution_at || payload.executionAt || payload.scheduled_at || payload.scheduledAt
     );

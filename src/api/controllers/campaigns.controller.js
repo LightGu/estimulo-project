@@ -35,6 +35,10 @@ function createCampaignsController(dependencies = {}) {
         return res.status(409).json({ error: message, conflicts: error.conflicts });
       }
 
+      if (error?.code === "GROUPS_MISSING_INSTANCE_COVERAGE") {
+        return res.status(409).json({ error: message, group_ids: error.groupIds });
+      }
+
       console.error(
         JSON.stringify({
           event: "campaigns.create.failed",
@@ -116,6 +120,10 @@ function createCampaignsController(dependencies = {}) {
 
       if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
         return res.status(409).json({ error: message, conflicts: error.conflicts });
+      }
+
+      if (error?.code === "GROUPS_MISSING_INSTANCE_COVERAGE") {
+        return res.status(409).json({ error: message, group_ids: error.groupIds });
       }
 
       console.error(

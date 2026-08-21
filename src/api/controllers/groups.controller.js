@@ -42,6 +42,10 @@ function createGroupsController(dependencies = {}) {
         return res.status(404).json({ error: message });
       }
 
+      if (error?.code === "EVOLUTION_SYNC_ALL_FAILED") {
+        return res.status(502).json({ error: message });
+      }
+
       return res.status(500).json({ error: "Internal server error" });
     }
   }

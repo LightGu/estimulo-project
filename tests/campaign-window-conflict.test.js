@@ -69,6 +69,9 @@ function buildCampaignsServiceHarness(overlapping = []) {
         return { timezone: "America/Sao_Paulo" };
       },
     },
+    whatsappInstancesService: {
+      async assertGroupsDispatchable() {},
+    },
     addCampaignTriggerJob: async () => ({ id: "job-1", name: "trigger-campaign", queueName: "campaign-trigger", data: {} }),
   });
 
@@ -292,11 +295,18 @@ function buildScheduleAdHocHarness(overrides = {}) {
         return { timezone: "America/Sao_Paulo" };
       },
     },
+    sendToEvolution: overrides.sendToEvolution,
+    confirmProviderDelivery: overrides.sendToEvolution ? CONFIRMED_DELIVERY : undefined,
     logger: { error() {} },
   });
 
   return { service, created, enqueued, logs, providerDeliveries };
 }
+
+// dispatchAdHoc chama sendToEvolution de verdade (faria uma request HTTP real)
+// quando o harness nao injeta um substituto - usado nos testes que exercitam
+// dispatchAdHoc (nao scheduleAdHoc, que so enfileira e nunca chama send).
+const CONFIRMED_SEND = async () => ({ status: 201, data: { key: { id: "3EB0MEDIA" }, status: "PENDING" } });
 
 const SCHEDULE_PAYLOAD = {
   group_ids: ["group-a", "group-b"],
@@ -385,6 +395,73 @@ function testMensagensJobDataKeepsInstanceId() {
   );
 }
 
+// Disparo pontual com midia anexada (upload): o controller ja resolve o
+// arquivo para { base64, mimeType, fileName, type } antes de chegar aqui -
+// normalizeContent deve aceitar esse formato direto, sem exigir link/texto,
+// e createAdHocCampaign nao pode persistir o base64 em lugar nenhum, so a
+// flag possui_midia.
+async function testDispatchAdHocWithMediaMarksPossuiMidiaWithoutPersistingFile() {
+  const { service, created } = buildScheduleAdHocHarness({ sendToEvolution: CONFIRMED_SEND });
+
+  const result = await service.dispatchAdHoc({
+    group_ids: ["group-a"],
+    texto: "Convite para o evento",
+    content: { base64: "ZmFrZS1pbWFnZQ==", mimeType: "image/png", fileName: "convite.png", type: "image" },
+    persist_as_campaign: true,
+  });
+
+  assert.equal(result.enviados, 1);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].possui_midia, true);
+  assert.equal(created[0].link_conteudo, null);
+  assert.equal(created[0].link_conteudo_tipo, null);
+}
+
+async function testScheduleAdHocWithMediaMarksPossuiMidiaWithoutPersistingFile() {
+  const { service, created, enqueued } = buildScheduleAdHocHarness({});
+
+  const result = await service.scheduleAdHoc({
+    ...SCHEDULE_PAYLOAD,
+    texto: undefined,
+    content: { base64: "ZmFrZS12aWRlbw==", mimeType: "video/mp4", fileName: "aviso.mp4", type: "video" },
+  });
+
+  assert.equal(result.scheduled, 2);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].possui_midia, true);
+  assert.equal(created[0].link_conteudo, null);
+  assert.equal(created[0].link_conteudo_tipo, null);
+  // O conteudo de midia (base64) chega ate o job de disparo, mas nunca passa
+  // por dispatchLogs/campaigns - so em memoria, no payload da fila.
+  assert.ok(enqueued.every((job) => job.content && job.content.base64 === "ZmFrZS12aWRlbw=="));
+}
+
+async function testDispatchAdHocWithoutMediaKeepsPossuiMidiaFalse() {
+  const { service, created } = buildScheduleAdHocHarness({ sendToEvolution: CONFIRMED_SEND });
+
+  await service.dispatchAdHoc({
+    group_ids: ["group-a"],
+    texto: "so texto, sem anexo",
+    persist_as_campaign: true,
+  });
+
+  assert.equal(created.length, 1);
+  assert.equal(created[0].possui_midia, false);
+}
+
+// Comunicado so com midia (sem legenda) e um caso valido - normalizeContent
+// nao pode exigir texto quando ha um anexo.
+async function testDispatchAdHocAllowsMediaOnlyWithoutText() {
+  const { service } = buildScheduleAdHocHarness({ sendToEvolution: CONFIRMED_SEND });
+
+  const result = await service.dispatchAdHoc({
+    group_ids: ["group-a"],
+    content: { base64: "ZmFrZS1pbWFnZQ==", mimeType: "image/png", fileName: "aviso.png", type: "image" },
+  });
+
+  assert.equal(result.enviados, 1);
+}
+
 async function testQueuedAdHocRecordsProviderEvidence() {
   const providerDeliveries = [];
   const processor = createMensagensDispatchProcessor({
@@ -455,6 +532,10 @@ async function main() {
   await testScheduledAdHocPropagatesInstanceRotation();
   await testScheduledAdHocRejectsGroupsWithoutInstanceCoverage();
   testMensagensJobDataKeepsInstanceId();
+  await testDispatchAdHocWithMediaMarksPossuiMidiaWithoutPersistingFile();
+  await testScheduleAdHocWithMediaMarksPossuiMidiaWithoutPersistingFile();
+  await testDispatchAdHocWithoutMediaKeepsPossuiMidiaFalse();
+  await testDispatchAdHocAllowsMediaOnlyWithoutText();
   await testQueuedAdHocRecordsProviderEvidence();
   await testProviderEvidenceFailureDoesNotFailTheJob();
 

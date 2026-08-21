@@ -70,6 +70,26 @@ async function findByDriveFileId(driveFileId, client) {
   return data || null;
 }
 
+async function findOrphanByNomeDoArquivo(nomeDoArquivo, client) {
+  const { data, error } = await getClient(client)
+    .from("video_catalog")
+    .select("*")
+    .is("drive_file_id", null)
+    .eq("nome_do_arquivo", nomeDoArquivo)
+    .order("id", { ascending: true })
+    .limit(2);
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data || data.length !== 1) {
+    return null;
+  }
+
+  return data[0];
+}
+
 async function findAllDriveFileIds(client) {
   const { data, error } = await getClient(client)
     .from("video_catalog")
@@ -134,6 +154,7 @@ module.exports = {
   findAllDriveFileIds,
   findByDriveFileId,
   findById,
+  findOrphanByNomeDoArquivo,
   listApproved,
   listByStatus,
   remove,

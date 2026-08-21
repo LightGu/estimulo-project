@@ -11,6 +11,7 @@ const {
   DEFAULT_MAX_POSTPONEMENTS,
   resolveAdHocDispatchBlock,
 } = require("../services/dispatch-exclusivity");
+const { resolveStaleDispatchReason } = require("../services/dispatch-staleness");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 
@@ -239,6 +240,46 @@ function createMensagensDispatchProcessor(options = {}) {
   return async function mensagensDispatchWorker(job) {
     const startedAt = new Date().toISOString();
 
+    // Trava de atraso: um job que so roda muito depois do horario planejado
+    // (fila parada, worker que caiu e voltou, resume de campanha pausada ha
+    // muito tempo) nao pode disparar por cima do horario perdido - cancela em
+    // vez de mandar uma mensagem "atrasada" sem contexto para o grupo.
+    const staleReason = resolveStaleDispatchReason(job.data.scheduled_at, { now });
+
+    if (staleReason) {
+      const cancelled = job.data.dispatch_log_id && typeof dispatchLogs.cancelIfPending === "function"
+        ? await dispatchLogs.cancelIfPending(job.data.dispatch_log_id, staleReason).catch(() => null)
+        : null;
+
+      // Sem dispatch_log_id (caminho legado) ou sem cancelIfPending disponivel: cai
+      // no update incondicional para nao deixar o envio atrasado escapar sem log.
+      if (!cancelled) {
+        await updateDispatchLogStatus(job.data.dispatch_log_id, "cancelado", staleReason);
+      }
+
+      await job.updateData({
+        ...job.data,
+        status: "cancelado",
+        cancelled_at: new Date().toISOString(),
+        cancel_reason: staleReason,
+      });
+
+      logger.warn &&
+        logger.warn(
+          JSON.stringify({
+            event: "mensagens_dispatch.cancelled_stale",
+            job_id: job.id,
+            group_id: job.data.group_id,
+            internal_group_id: job.data.internal_group_id,
+            dispatch_log_id: job.data.dispatch_log_id,
+            scheduled_at: job.data.scheduled_at,
+            reason: staleReason,
+          })
+        );
+
+      return { status: "cancelado", reason: staleReason };
+    }
+
     // Campanha pausada: o log continua pendente (para o resume conseguir
     // retomar), entao so o claim atomico mais abaixo nao bastaria para impedir
     // o envio - esta checagem antecipada e o que de fato para.
@@ -249,8 +290,8 @@ function createMensagensDispatchProcessor(options = {}) {
           ? await campaignsRepository.findById(pausedLog.campaign_id).catch(() => null)
           : null;
 
-      if (pausedCampaign && pausedCampaign.status === "pausado") {
-        return { status: "skipped_paused" };
+      if (pausedCampaign && (pausedCampaign.status === "pausado" || pausedCampaign.status === "cancelado")) {
+        return { status: pausedCampaign.status === "cancelado" ? "skipped_cancelled" : "skipped_paused" };
       }
     }
 
