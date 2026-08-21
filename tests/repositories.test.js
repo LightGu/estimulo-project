@@ -44,6 +44,10 @@ function createMockClient() {
       calls.push({ type: "is", column, value });
       return this;
     },
+    in(column, values) {
+      calls.push({ type: "in", column, values });
+      return this;
+    },
     or(condition) {
       calls.push({ type: "or", condition });
       return this;
@@ -76,6 +80,90 @@ function createMockClient() {
         ativo: true,
         envia_video: true,
       });
+    },
+    __calls: calls,
+  };
+
+  return client;
+}
+
+function createVideoCaptionsMockClient() {
+  const calls = [];
+  const captionsById = {
+    "caption-1": { id: "caption-1", video_id: "video-1", caption_text: "Legenda A" },
+    "caption-2": { id: "caption-2", video_id: "video-1", caption_text: "Legenda B" },
+  };
+
+  const client = {
+    from(tableName) {
+      calls.push({ type: "from", tableName });
+
+      let filterOp = null;
+      let filterColumn = null;
+      let filterValue = null;
+      let updatePayload = null;
+
+      const builder = {
+        select() {
+          return this;
+        },
+        update(payload) {
+          updatePayload = payload;
+          calls.push({ type: "update", payload });
+          return this;
+        },
+        eq(column, value) {
+          filterOp = "eq";
+          filterColumn = column;
+          filterValue = value;
+          calls.push({ type: "eq", column, value });
+          return this;
+        },
+        in(column, values) {
+          filterOp = "in";
+          filterColumn = column;
+          filterValue = values;
+          calls.push({ type: "in", column, values });
+          return this;
+        },
+        order() {
+          return this;
+        },
+        maybeSingle() {
+          if (filterOp === "eq" && filterColumn === "id") {
+            return Promise.resolve({ data: captionsById[filterValue] || null, error: null });
+          }
+
+          return Promise.resolve({ data: null, error: null });
+        },
+        single() {
+          if (updatePayload && filterOp === "eq" && filterColumn === "id") {
+            return Promise.resolve({
+              data: { ...captionsById[filterValue], ...updatePayload },
+              error: null,
+            });
+          }
+
+          return Promise.resolve({ data: captionsById[filterValue] || null, error: null });
+        },
+        then(resolve) {
+          if (filterOp === "eq" && filterColumn === "video_id") {
+            const matches = Object.values(captionsById).filter((caption) => caption.video_id === filterValue);
+            resolve({ data: matches, error: null });
+            return;
+          }
+
+          if (filterOp === "in" && filterColumn === "video_id") {
+            const matches = Object.values(captionsById).filter((caption) => filterValue.includes(caption.video_id));
+            resolve({ data: matches, error: null });
+            return;
+          }
+
+          resolve({ data: [], error: null });
+        },
+      };
+
+      return builder;
     },
     __calls: calls,
   };
@@ -148,6 +236,44 @@ async function main() {
     assert.ok(
       client.__calls.some(
         (call) => call.type === "insert" && call.payload.caption_text === "Legenda gerada"
+      )
+    );
+
+    const videoCaptionsClient = createVideoCaptionsMockClient();
+
+    const foundCaption = await videoCaptionsRepository.findById("caption-1", videoCaptionsClient);
+    assert.deepEqual(foundCaption, {
+      id: "caption-1",
+      video_id: "video-1",
+      caption_text: "Legenda A",
+    });
+
+    const captionsForVideo = await videoCaptionsRepository.listByVideoId("video-1", videoCaptionsClient);
+    assert.deepEqual(captionsForVideo, [
+      { id: "caption-1", video_id: "video-1", caption_text: "Legenda A" },
+      { id: "caption-2", video_id: "video-1", caption_text: "Legenda B" },
+    ]);
+
+    const captionsForVideos = await videoCaptionsRepository.listByVideoIds(["video-1", "video-2"], videoCaptionsClient);
+    assert.deepEqual(captionsForVideos, [
+      { id: "caption-1", video_id: "video-1", caption_text: "Legenda A" },
+      { id: "caption-2", video_id: "video-1", caption_text: "Legenda B" },
+    ]);
+    assert.deepEqual(await videoCaptionsRepository.listByVideoIds([], videoCaptionsClient), []);
+
+    const updatedCaption = await videoCaptionsRepository.update(
+      "caption-1",
+      { caption_text: "Legenda editada" },
+      videoCaptionsClient
+    );
+    assert.deepEqual(updatedCaption, {
+      id: "caption-1",
+      video_id: "video-1",
+      caption_text: "Legenda editada",
+    });
+    assert.ok(
+      videoCaptionsClient.__calls.some(
+        (call) => call.type === "update" && call.payload.caption_text === "Legenda editada"
       )
     );
 

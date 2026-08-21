@@ -378,6 +378,7 @@ async function main() {
     organizationRepository: orgRepository,
     repository: campaignRepository,
     videoCatalogRepository,
+    whatsappInstancesService: fakeWhatsappInstancesService,
     inAppNotificationsService: {
       notifyTrailFinished: async () => {},
     },

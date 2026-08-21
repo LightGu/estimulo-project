@@ -32,7 +32,7 @@ async function unlinkGroupsNotIn(whatsappInstanceId, groupIdsStillPresent, clien
   let query = db.from("group_whatsapp_instances").delete().eq("whatsapp_instance_id", whatsappInstanceId);
 
   if (groupIdsStillPresent.length > 0) {
-    query = query.not("group_id", "in", `(${groupIdsStillPresent.join(",")})`);
+    query = query.not("group_id", "in", `(${groupIdsStillPresent.map((id) => `"${id}"`).join(",")})`);
   }
 
   const { error } = await query;

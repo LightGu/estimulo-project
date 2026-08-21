@@ -493,6 +493,134 @@ async function testReturnsNullWhenEveryAttemptIsAMetaResponse() {
   assert.equal(created.length, 0);
 }
 
+async function testListsCaptionsByVideoIdWhenVideoExists() {
+  const calls = [];
+  const service = createVideoCaptionsService({
+    repository: {
+      async listByVideoId(videoId) {
+        calls.push({ type: "list", videoId });
+
+        return [{ id: "caption-1", video_id: videoId, caption_text: "Legenda A" }];
+      },
+    },
+    videoCatalogRepository: {
+      async findById(videoId) {
+        calls.push({ type: "findVideo", videoId });
+
+        return { id: videoId };
+      },
+    },
+  });
+
+  const captions = await service.listCaptionsByVideoId("video-1");
+
+  assert.deepEqual(captions, [{ id: "caption-1", video_id: "video-1", caption_text: "Legenda A" }]);
+  assert.deepEqual(calls, [
+    { type: "findVideo", videoId: "video-1" },
+    { type: "list", videoId: "video-1" },
+  ]);
+}
+
+async function testListCaptionsByVideoIdRejectsMissingVideoId() {
+  const service = createVideoCaptionsService({});
+
+  await assert.rejects(() => service.listCaptionsByVideoId(""), { message: "Video id is required" });
+  await assert.rejects(() => service.listCaptionsByVideoId(null), { message: "Video id is required" });
+}
+
+async function testListCaptionsByVideoIdRejectsWhenVideoNotFound() {
+  const service = createVideoCaptionsService({
+    repository: {
+      async listByVideoId() {
+        throw new Error("nao deveria buscar legendas sem o video existir");
+      },
+    },
+    videoCatalogRepository: {
+      async findById() {
+        return null;
+      },
+    },
+  });
+
+  await assert.rejects(() => service.listCaptionsByVideoId("video-missing"), { message: "Video not found" });
+}
+
+async function testUpdateCaptionPersistsTrimmedText() {
+  const calls = [];
+  const service = createVideoCaptionsService({
+    repository: {
+      async findById(captionId) {
+        calls.push({ type: "find", captionId });
+
+        return { id: captionId, video_id: "video-1", caption_text: "Legenda antiga" };
+      },
+      async update(captionId, payload) {
+        calls.push({ type: "update", captionId, payload });
+
+        return { id: captionId, video_id: "video-1", caption_text: payload.caption_text };
+      },
+    },
+  });
+
+  const updated = await service.updateCaption("caption-1", "video-1", { caption_text: "  Legenda nova  " });
+
+  assert.deepEqual(updated, { id: "caption-1", video_id: "video-1", caption_text: "Legenda nova" });
+  assert.deepEqual(calls, [
+    { type: "find", captionId: "caption-1" },
+    { type: "update", captionId: "caption-1", payload: { caption_text: "Legenda nova" } },
+  ]);
+}
+
+async function testUpdateCaptionRejectsMissingIds() {
+  const service = createVideoCaptionsService({});
+
+  await assert.rejects(
+    () => service.updateCaption("", "video-1", { caption_text: "Legenda" }),
+    { message: "Caption id is required" }
+  );
+  await assert.rejects(
+    () => service.updateCaption("caption-1", "", { caption_text: "Legenda" }),
+    { message: "Video id is required" }
+  );
+  await assert.rejects(
+    () => service.updateCaption("caption-1", "video-1", { caption_text: "   " }),
+    { message: "Caption text is required" }
+  );
+}
+
+async function testUpdateCaptionRejectsWhenCaptionNotFound() {
+  const service = createVideoCaptionsService({
+    repository: {
+      async findById() {
+        return null;
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => service.updateCaption("caption-missing", "video-1", { caption_text: "Legenda" }),
+    { message: "Caption not found" }
+  );
+}
+
+async function testUpdateCaptionRejectsWhenCaptionBelongsToAnotherVideo() {
+  const service = createVideoCaptionsService({
+    repository: {
+      async findById(captionId) {
+        return { id: captionId, video_id: "video-other", caption_text: "Legenda antiga" };
+      },
+      async update() {
+        throw new Error("nao deveria atualizar legenda de outro video");
+      },
+    },
+  });
+
+  await assert.rejects(
+    () => service.updateCaption("caption-1", "video-1", { caption_text: "Legenda nova" }),
+    { message: "Caption not found" }
+  );
+}
+
 async function main() {
   assert.equal(normalizeCaptionText({ caption_text: " Texto " }), "Texto");
 
@@ -526,6 +654,13 @@ async function main() {
   await testRetriesGeneratedCaptionWhenFirstCandidateIsRejected();
   await testRejectsMetaResponseAndRetriesUntilRealCaption();
   await testReturnsNullWhenEveryAttemptIsAMetaResponse();
+  await testListsCaptionsByVideoIdWhenVideoExists();
+  await testListCaptionsByVideoIdRejectsMissingVideoId();
+  await testListCaptionsByVideoIdRejectsWhenVideoNotFound();
+  await testUpdateCaptionPersistsTrimmedText();
+  await testUpdateCaptionRejectsMissingIds();
+  await testUpdateCaptionRejectsWhenCaptionNotFound();
+  await testUpdateCaptionRejectsWhenCaptionBelongsToAnotherVideo();
 
   console.log("video-captions-service tests OK");
 }

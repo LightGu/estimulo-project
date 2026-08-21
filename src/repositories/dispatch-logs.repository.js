@@ -216,6 +216,26 @@ async function claimForSend(id, client) {
   return data || null;
 }
 
+// Cancelamento por atraso (dispatch-staleness.js): so aplica se a linha ainda
+// estiver pendente nesse instante, para nao sobrescrever um log que outro
+// worker ja tenha movido para processando/enviado/falhou entre a leitura do
+// horario planejado e este UPDATE.
+async function cancelIfPending(id, mensagemErro = null, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .update({ status: "cancelado", mensagem_erro: mensagemErro })
+    .eq("id", id)
+    .eq("status", "pendente")
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
 // Grava o id do job do BullMQ responsavel por este envio, para o resume
 // conseguir localiza-lo direto (queue.getJob(id)) em vez de escanear a fila.
 async function updateDispatchJobId(id, dispatchJobId, client) {
@@ -344,6 +364,7 @@ async function listFailedForRetry(options = {}, client) {
 module.exports = {
   DEFAULT_FAILED_RETRY_BATCH_SIZE,
   DEFAULT_MAX_RETRY_COUNT,
+  cancelIfPending,
   cancelPendingByCampaign,
   claimForSend,
   createLog,

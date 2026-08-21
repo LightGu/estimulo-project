@@ -21,6 +21,57 @@ function isValidationError(message) {
   return VALIDATION_ERROR_PATTERNS.some((pattern) => message.includes(pattern));
 }
 
+// Multipart nao serializa arrays/objetos nativamente: os campos escalares do
+// form (titulo, tipo, group_ids, texto, window_start/end, jitter_delay_*)
+// chegam em req.body como strings; group_ids chega como uma string JSON.
+function parseMultipartBody(body = {}) {
+  let groupIds = body.group_ids;
+
+  if (typeof groupIds === "string") {
+    try {
+      groupIds = JSON.parse(groupIds);
+    } catch (error) {
+      groupIds = [];
+    }
+  }
+
+  return { ...body, group_ids: Array.isArray(groupIds) ? groupIds : [] };
+}
+
+// O arquivo fica so em memoria (multer memoryStorage) - convertido para base64
+// aqui, na hora de montar o payload, e nunca gravado em disco ou no banco.
+function buildContentFromUploadedFile(file) {
+  if (!file) {
+    return {};
+  }
+
+  return {
+    content: {
+      base64: file.buffer.toString("base64"),
+      mimeType: file.mimetype,
+      fileName: file.originalname,
+      type: file.mimetype && file.mimetype.startsWith("video/") ? "video" : "image",
+    },
+  };
+}
+
+// Contrato de erro compartilhado por dispatch/schedule e suas variantes com
+// midia: 409 com conflicts para janela ocupada por campanha de video, 400 para
+// erro de validacao conhecido, 500 generico para o resto.
+function respondWithError(res, error) {
+  const message = error?.message || "Internal server error";
+
+  if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
+    return res.status(409).json({ error: message, conflicts: error.conflicts });
+  }
+
+  if (isValidationError(message)) {
+    return res.status(400).json({ error: message });
+  }
+
+  return res.status(500).json({ error: "Internal server error" });
+}
+
 function createMensagensController(dependencies = {}) {
   const mensagensService = dependencies.mensagensService;
 
@@ -30,19 +81,7 @@ function createMensagensController(dependencies = {}) {
 
       return res.status(200).json(result);
     } catch (error) {
-      const message = error?.message || "Internal server error";
-
-      // Mesmo contrato do agendamento: campanha de video em andamento bloqueia o
-      // "enviar agora", e a tela precisa dizer qual campanha ocupa o momento.
-      if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
-        return res.status(409).json({ error: message, conflicts: error.conflicts });
-      }
-
-      if (isValidationError(message)) {
-        return res.status(400).json({ error: message });
-      }
-
-      return res.status(500).json({ error: "Internal server error" });
+      return respondWithError(res, error);
     }
   }
 
@@ -52,23 +91,33 @@ function createMensagensController(dependencies = {}) {
 
       return res.status(202).json(result);
     } catch (error) {
-      const message = error?.message || "Internal server error";
-
-      // Mesmo contrato do POST /campaigns/dispatch: 409 com os conflitos, para a
-      // tela poder dizer qual campanha ja ocupa a janela e em quais grupos.
-      if (error?.code === "CAMPAIGN_WINDOW_CONFLICT") {
-        return res.status(409).json({ error: message, conflicts: error.conflicts });
-      }
-
-      if (isValidationError(message)) {
-        return res.status(400).json({ error: message });
-      }
-
-      return res.status(500).json({ error: "Internal server error" });
+      return respondWithError(res, error);
     }
   }
 
-  return { dispatch, schedule };
+  async function dispatchWithMedia(req, res) {
+    try {
+      const payload = { ...parseMultipartBody(req.body), ...buildContentFromUploadedFile(req.file) };
+      const result = await mensagensService.dispatchAdHoc(payload);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return respondWithError(res, error);
+    }
+  }
+
+  async function scheduleWithMedia(req, res) {
+    try {
+      const payload = { ...parseMultipartBody(req.body), ...buildContentFromUploadedFile(req.file) };
+      const result = await mensagensService.scheduleAdHoc(payload);
+
+      return res.status(202).json(result);
+    } catch (error) {
+      return respondWithError(res, error);
+    }
+  }
+
+  return { dispatch, schedule, dispatchWithMedia, scheduleWithMedia };
 }
 
 module.exports = createMensagensController;

@@ -8,7 +8,8 @@ const { clearLoopbackDiscardProxyEnv } = require("../config/network");
 
 clearLoopbackDiscardProxyEnv();
 
-const { google } = require("googleapis");
+const { GoogleAuth } = require("google-auth-library");
+const { drive } = require("googleapis/build/src/apis/drive");
 
 const GOOGLE_DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
 
@@ -40,12 +41,12 @@ function createGoogleDriveClient(options = {}) {
   const credentials = options.credentials || resolveServiceAccountCredentials(options.credentialsValue);
   const auth =
     options.auth ||
-    new google.auth.GoogleAuth({
+    new GoogleAuth({
       credentials,
       scopes: options.scopes || [GOOGLE_DRIVE_READONLY_SCOPE],
     });
 
-  return google.drive({ version: "v3", auth });
+  return drive({ version: "v3", auth });
 }
 
 const DRIVE_FOLDER_URL_PATTERN = /drive\.google\.com\/(?:drive\/(?:u\/\d+\/)?folders|folderview)\/([a-zA-Z0-9_-]+)/;

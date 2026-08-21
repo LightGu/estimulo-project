@@ -1,7 +1,9 @@
 const express = require("express");
 const cors = require("cors");
+const multer = require("multer");
 const path = require("node:path");
 const { createAccessGate } = require("./access-gate");
+const { evolutionConfig } = require("../config/evolution");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createCampaignVideoCaptionsController = require("./controllers/campaign-video-captions.controller");
 const createGroupProfilesController = require("./controllers/group-profiles.controller");
@@ -28,6 +30,7 @@ const organizationsService = require("../services/organizations.service");
 const settingsService = require("../services/settings.service");
 const trilhasService = require("../services/trilhas.service");
 const trilhaSequenceService = require("../services/trilha-sequence.service");
+const videoCaptionsService = require("../services/video-captions.service");
 const videoCatalogService = require("../services/video-catalog.service");
 const whatsappInstancesService = require("../services/whatsapp-instances.service");
 
@@ -74,6 +77,7 @@ function createApp(dependencies = {}) {
   const settingsServiceDependency = dependencies.settingsService || settingsService;
   const trilhasServiceDependency = dependencies.trilhasService || trilhasService;
   const trilhaSequenceServiceDependency = dependencies.trilhaSequenceService || trilhaSequenceService;
+  const videoCaptionsServiceDependency = dependencies.videoCaptionsService || videoCaptionsService;
   const videoService = dependencies.videoCatalogService || videoCatalogService;
   const whatsappInstancesServiceDependency = dependencies.whatsappInstancesService || whatsappInstancesService;
   const campaignsController = createCampaignsController({ campaignService });
@@ -98,10 +102,45 @@ function createApp(dependencies = {}) {
     trilhasService: trilhasServiceDependency,
     trilhaSequenceService: trilhaSequenceServiceDependency,
   });
-  const videoCatalogController = createVideoCatalogController({ videoCatalogService: videoService });
+  const videoCatalogController = createVideoCatalogController({
+    videoCaptionsService: videoCaptionsServiceDependency,
+    videoCatalogService: videoService,
+  });
   const whatsappInstancesController = createWhatsappInstancesController({
     whatsappInstancesService: whatsappInstancesServiceDependency,
   });
+
+  // Anexo de imagem/video do Disparador Pontual: fica so em RAM (memoryStorage),
+  // nunca grava em disco. O limite de bytes do arquivo bruto usa 3/4 do limite
+  // de payload da Evolution (evolutionConfig.maxMediaPayloadBytes) para sobrar
+  // espaco para os +33% que o base64 adiciona antes de montar o payload.
+  const mediaUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: Math.floor((evolutionConfig.maxMediaPayloadBytes * 3) / 4) },
+  });
+
+  // multer chama next(error) fora do try/catch do controller; sem isso o erro
+  // (ex.: arquivo acima do limite) cai no handler default do Express e devolve
+  // HTML em vez do JSON { error } que o resto da API usa.
+  function handleMediaUpload(field) {
+    const middleware = mediaUpload.single(field);
+
+    return (req, res, next) => {
+      middleware(req, res, (error) => {
+        if (!error) {
+          next();
+          return;
+        }
+
+        if (error.code === "LIMIT_FILE_SIZE") {
+          res.status(413).json({ error: "Arquivo de midia excede o tamanho maximo permitido" });
+          return;
+        }
+
+        res.status(400).json({ error: error.message || "Falha ao processar o arquivo enviado" });
+      });
+    };
+  }
 
   app.get("/campaigns", campaignsController.list);
   app.post("/campaigns", campaignsController.create);
@@ -118,6 +157,12 @@ function createApp(dependencies = {}) {
   app.delete("/campaigns/:id", campaignsController.remove);
   app.post("/mensagens/dispatch", mensagensController.dispatch);
   app.post("/mensagens/dispatch/schedule", mensagensController.schedule);
+  app.post("/mensagens/dispatch/media", handleMediaUpload("media"), mensagensController.dispatchWithMedia);
+  app.post(
+    "/mensagens/dispatch/schedule/media",
+    handleMediaUpload("media"),
+    mensagensController.scheduleWithMedia
+  );
   app.get("/notifications", notificationsController.list);
   app.post("/notifications/read-all", notificationsController.markAllRead);
   app.post("/notifications/:id/read", notificationsController.markRead);
@@ -148,6 +193,8 @@ function createApp(dependencies = {}) {
   app.post("/trilhas/:id/reorder", trilhasController.reorderTrilhaVideos);
   app.post("/video-catalog/transcript", videoCatalogController.transcribeByDriveFileId);
   app.post("/video-catalog/:id/transcript", videoCatalogController.transcribeById);
+  app.get("/video-catalog/:id/captions", videoCatalogController.listCaptions);
+  app.patch("/video-catalog/:id/captions/:captionId", videoCatalogController.updateCaption);
   app.get("/groups/search", groupsController.search);
   app.get("/groups/unclassified", groupsController.listWithoutSegment);
   app.post("/groups/sync", groupsController.syncFromEvolution);
