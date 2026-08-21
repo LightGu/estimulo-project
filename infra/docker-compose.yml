@@ -1,15 +1,37 @@
+name: estimulo
+
+x-app: &app
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  env_file:
+    - ../.env
+  restart: unless-stopped
+  init: true
+  depends_on:
+    redis:
+      condition: service_healthy
+  environment:
+    NODE_ENV: production
+    REDIS_HOST: redis
+    REDIS_PORT: 6379
+    ESTIMULO_SESSION_STATE_FILE: /app/storage/sessions.json
+    GOOGLE_DRIVE_VIDEO_INDEX_STATE_FILE: /app/storage/google-drive-video-index-state.json
+  volumes:
+    - app-storage:/app/storage
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: "3"
+
 services:
   redis:
     image: redis:7.4-alpine
-    container_name: estimulo-redis
     restart: unless-stopped
-    command: sh -c 'redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"'
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
     env_file:
       - ../.env
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis-local}
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -17,19 +39,69 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  api:
+    <<: *app
+    command: ["node", "scripts/start-api.js"]
+    ports:
+      - "${API_BIND_ADDRESS:-0.0.0.0}:${PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  campaign-trigger-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-campaign-trigger-worker.js"]
+
+  dispatch-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-dispatch-worker.js"]
+
+  dispatch-review-timeout-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-dispatch-review-timeout-worker.js"]
+
+  dispatch-failure-retry-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-dispatch-failure-retry-worker.js"]
+
+  mensagens-dispatch-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-mensagens-dispatch-worker.js"]
+
+  group-sync-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-group-sync-worker.js"]
+
+  drive-video-index-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-google-drive-video-index-worker.js"]
 
   evolution-postgres:
     image: postgres:16-alpine
-    container_name: estimulo-evolution-postgres
     restart: unless-stopped
+    profiles: ["evolution"]
     env_file:
       - ../.env
     environment:
-      POSTGRES_USER: ${EVOLUTION_DB_USER:-evolution}
-      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD:-evolution-local}
-      POSTGRES_DB: ${EVOLUTION_DB_NAME:-evolution}
-    ports:
-      - "${EVOLUTION_DB_PORT:-5433}:5432"
+      POSTGRES_USER: ${EVOLUTION_DB_USER}
+      POSTGRES_PASSWORD: ${EVOLUTION_DB_PASSWORD}
+      POSTGRES_DB: ${EVOLUTION_DB_NAME}
     volumes:
       - evolution-postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -40,8 +112,8 @@ services:
 
   evolution-api:
     image: ${EVOLUTION_API_IMAGE:-evoapicloud/evolution-api:latest}
-    container_name: estimulo-evolution-api
     restart: unless-stopped
+    profiles: ["evolution"]
     depends_on:
       redis:
         condition: service_healthy
@@ -52,12 +124,12 @@ services:
     environment:
       SERVER_TYPE: http
       SERVER_PORT: 8080
-      SERVER_URL: ${EVOLUTION_API_URL:-http://localhost:8080}
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-change-me}
+      SERVER_URL: ${EVOLUTION_PUBLIC_URL:-http://localhost:8080}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
       AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
       DEL_INSTANCE: "false"
       DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://${EVOLUTION_DB_USER:-evolution}:${EVOLUTION_DB_PASSWORD:-evolution-local}@evolution-postgres:5432/${EVOLUTION_DB_NAME:-evolution}?schema=public
+      DATABASE_CONNECTION_URI: postgresql://${EVOLUTION_DB_USER}:${EVOLUTION_DB_PASSWORD}@evolution-postgres:5432/${EVOLUTION_DB_NAME}?schema=public
       DATABASE_CONNECTION_CLIENT_NAME: evolution_mvp
       DATABASE_SAVE_DATA_INSTANCE: "true"
       DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
@@ -68,7 +140,7 @@ services:
       DATABASE_SAVE_DATA_HISTORIC: "true"
       DATABASE_SAVE_IS_ON_WHATSAPP: "true"
       CACHE_REDIS_ENABLED: "true"
-      CACHE_REDIS_URI: redis://default:${REDIS_PASSWORD:-redis-local}@redis:6379/1
+      CACHE_REDIS_URI: redis://default:${REDIS_PASSWORD}@redis:6379/1
       CACHE_REDIS_PREFIX_KEY: evolution
       CACHE_REDIS_SAVE_INSTANCES: "false"
       CACHE_LOCAL_ENABLED: "false"
@@ -82,12 +154,11 @@ services:
       LOG_COLOR: "true"
       LOG_BAILEYS: error
       LANGUAGE: pt-BR
-    ports:
-      - "${EVOLUTION_API_PORT:-8080}:8080"
     volumes:
       - evolution-instances:/evolution/instances
 
 volumes:
+  app-storage:
   redis-data:
   evolution-postgres-data:
   evolution-instances:

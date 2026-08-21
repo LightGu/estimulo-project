@@ -2,7 +2,8 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const path = require("node:path");
-const { createAccessGate } = require("./access-gate");
+const { createAuthGate } = require("./auth-gate");
+const createAppUsersController = require("./controllers/app-users.controller");
 const { evolutionConfig } = require("../config/evolution");
 const createCampaignsController = require("./controllers/campaigns.controller");
 const createCampaignVideoCaptionsController = require("./controllers/campaign-video-captions.controller");
@@ -18,6 +19,7 @@ const createSettingsController = require("./controllers/settings.controller");
 const createTrilhasController = require("./controllers/trilhas.controller");
 const createVideoCatalogController = require("./controllers/video-catalog.controller");
 const createWhatsappInstancesController = require("./controllers/whatsapp-instances.controller");
+const authService = require("../services/auth.service");
 const campaignsService = require("../services/campaigns.service");
 const campaignVideoCaptionsService = require("../services/campaign-video-captions.service");
 const dispatchLogsService = require("../services/dispatch-logs.service");
@@ -36,6 +38,10 @@ const whatsappInstancesService = require("../services/whatsapp-instances.service
 
 function createApp(dependencies = {}) {
   const app = express();
+  const allowedOrigins = String(process.env.CORS_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   app.set("trust proxy", dependencies.trustProxy || process.env.EXPRESS_TRUST_PROXY || "loopback");
   app.use(
     cors({
@@ -47,21 +53,41 @@ function createApp(dependencies = {}) {
 
         try {
           const url = new URL(origin);
-          callback(null, ["localhost", "127.0.0.1", "::1"].includes(url.hostname));
+          callback(
+            null,
+            ["localhost", "127.0.0.1", "::1"].includes(url.hostname) || allowedOrigins.includes(origin)
+          );
         } catch (error) {
           callback(null, false);
         }
       },
+      // Necessario para o cookie de sessao (estimulo_session) ser aceito quando o
+      // painel e' aberto fora da porta da API (ex.: direto do file://, cenario que
+      // o fallback do nav.js/access.html cobre) - sem isso o navegador descarta o
+      // Set-Cookie de respostas cross-origin mesmo com fetch({ credentials: "include" }).
+      credentials: true,
     })
   );
   app.use(express.json());
 
   const publicRoot = path.join(__dirname, "../../public");
-  const accessGate = createAccessGate(dependencies.accessGate || {});
+  const authGate = createAuthGate(dependencies.authGate || {});
+  const authServiceDependency = dependencies.authService || authService;
+  const appUsersController = createAppUsersController({ authService: authServiceDependency });
 
-  app.get("/access/status", accessGate.statusHandler);
-  app.post("/access/login", accessGate.loginHandler);
-  app.use(accessGate.middleware);
+  app.get("/access/status", authGate.statusHandler);
+  app.post("/access/login", authGate.loginHandler);
+  app.post("/access/logout", authGate.logoutHandler);
+  // Publica de proposito: qualquer pessoa que souber a senha mestra
+  // (ESTIMULO_ADMIN_MASTER_PASSWORD) consegue criar seu proprio login sem
+  // precisar de uma sessao previa - resolve o problema de "ninguem loga para
+  // criar o primeiro usuario" e permite autoatendimento para novas pessoas.
+  app.post("/access/register", appUsersController.create);
+  app.use(authGate.middleware);
+  // Nao existe public/index.html (so public/app/*) - sem isso, "/" com
+  // sessao valida caia em "Cannot GET /" porque o static nao acha arquivo
+  // nenhum para servir na raiz.
+  app.get("/", (req, res) => res.redirect("/app/index.html"));
   app.use(express.static(publicRoot));
 
   const campaignService = dependencies.campaignService || campaignsService;
@@ -96,7 +122,9 @@ function createApp(dependencies = {}) {
     notificationsService: inAppNotificationsServiceDependency,
   });
   const organizationsController = createOrganizationsController({ organizationService });
-  const reportController = createReportController({ dispatchLogsService: dispatchLogsServiceDependency });
+  const reportController = createReportController({
+    dispatchLogsService: dispatchLogsServiceDependency,
+  });
   const settingsController = createSettingsController({ settingsService: settingsServiceDependency });
   const trilhasController = createTrilhasController({
     trilhasService: trilhasServiceDependency,
@@ -229,6 +257,8 @@ function createApp(dependencies = {}) {
   app.post("/settings/whatsapp/instances/reorder", whatsappInstancesController.reorder);
   app.get("/settings/whatsapp/rotation", whatsappInstancesController.getRotation);
   app.patch("/settings/whatsapp/rotation", whatsappInstancesController.updateRotation);
+  app.get("/settings/app-users", appUsersController.list);
+  app.patch("/settings/app-users/:id", appUsersController.setActive);
   app.get("/group-profiles", groupProfilesController.list);
   app.post("/group-profiles", groupProfilesController.create);
   app.get("/group-profiles/merges", groupProfilesController.listMerges);

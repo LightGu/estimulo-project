@@ -8,7 +8,7 @@ const createApp = require("../src/api/app");
 // volta para array antes de chegar no service.
 async function withServer(mensagensService, run) {
   const app = createApp({
-    accessGate: { password: null },
+    authGate: { enabled: false },
     mensagensService,
   });
   const server = app.listen(0);
