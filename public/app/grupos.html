@@ -30,6 +30,74 @@
       .sync-panel.open { display:flex; }
       .status-line { min-height:20px; margin-top:10px; font-size:12.5px; color:var(--text-muted); }
       .status-line.error { color:var(--danger); }
+      .tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin:4px 0 16px; overflow-x:auto; }
+      .tabs .tab-btn {
+        appearance:none; border:none; background:none; cursor:pointer;
+        padding:10px 16px; font-size:13.5px; font-weight:600; color:var(--text-muted);
+        border-bottom:2px solid transparent; white-space:nowrap;
+      }
+      .tabs .tab-btn:hover { color:var(--text); }
+      .tabs .tab-btn.active { color:var(--primary); border-bottom-color:var(--primary); }
+      .tabs .tab-btn .tab-count { color:var(--text-faint); font-weight:400; margin-left:4px; }
+
+      /* Tabela de grupos cabe na largura da tela sem scroll horizontal: overrides
+         locais do min-width/padding/font-size globais de .table-wrap/table. */
+      #main-content .table-wrap { overflow-x: hidden; }
+      #main-content table.groups-table {
+        min-width: 0;
+        width: 100%;
+        table-layout: fixed;
+      }
+      #main-content table.groups-table th,
+      #main-content table.groups-table td {
+        padding: 8px 8px;
+        font-size: 12px;
+        white-space: normal;
+        overflow-wrap: break-word;
+        word-break: break-word;
+      }
+      #main-content table.groups-table th { font-size: 10px; white-space: normal; }
+      #main-content table.groups-table .badge {
+        padding: 2px 7px;
+        font-size: 10px;
+        white-space: normal;
+        word-break: keep-all;
+        text-align: center;
+      }
+      #main-content table.groups-table td:nth-child(8) > *:first-child {
+        white-space: nowrap;
+      }
+      #main-content table.groups-table .btn-sm {
+        padding: 4px 8px;
+        font-size: 11.5px;
+      }
+      #main-content table.groups-table td.mono {
+        font-size: 10px;
+        display: inline-block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
+      }
+      #main-content table.groups-table th:nth-child(1),
+      #main-content table.groups-table td:nth-child(1) { width: 17%; }
+      #main-content table.groups-table th:nth-child(2),
+      #main-content table.groups-table td:nth-child(2) { width: 10%; }
+      #main-content table.groups-table th:nth-child(3),
+      #main-content table.groups-table td:nth-child(3) { width: 8%; }
+      #main-content table.groups-table th:nth-child(4),
+      #main-content table.groups-table td:nth-child(4) { width: 8%; }
+      #main-content table.groups-table th:nth-child(5),
+      #main-content table.groups-table td:nth-child(5) { width: 10%; }
+      #main-content table.groups-table th:nth-child(6),
+      #main-content table.groups-table td:nth-child(6) { width: 10%; }
+      #main-content table.groups-table th:nth-child(7),
+      #main-content table.groups-table td:nth-child(7) { width: 16%; }
+      #main-content table.groups-table th:nth-child(8),
+      #main-content table.groups-table td:nth-child(8) { width: 14%; }
+      #main-content table.groups-table th:last-child,
+      #main-content table.groups-table td:last-child { width: 7%; }
     </style>
   </head>
   <body data-page="grupos">
@@ -63,15 +131,11 @@
                   <option value="nao-classificados">N&atilde;o classificados</option>
                 </select>
               </div>
-              <div class="field" id="instanceFilterField" hidden>
-                <label for="instanceFilter">N&uacute;mero</label>
-                <select id="instanceFilter">
-                  <option value="todos">Todos</option>
-                </select>
-              </div>
               <div class="toolbar-spacer"></div>
               <button class="btn btn-secondary" id="syncButton" type="button">Sincronizar com Evolution API</button>
             </div>
+
+            <div class="tabs" id="instanceTabs" hidden role="tablist" aria-label="Filtrar por n&uacute;mero"></div>
 
             <div class="card sync-panel" id="syncPanel">
               <div class="card-body" style="width:100%;">
@@ -86,7 +150,7 @@
               <h2>Grupos <span class="badge badge-neutral" id="resultCount"></span></h2>
             </div>
             <div class="table-wrap">
-              <table>
+              <table class="groups-table">
                 <thead>
                   <tr>
                     <th>Grupo</th>
@@ -163,6 +227,7 @@
         profiles: [],
         trilhaNameById: new Map(),
         whatsappInstances: [],
+        activeInstanceTab: "todos",
       };
       let editingGroupId = null;
       let editReleaseTrap = null;
@@ -275,20 +340,81 @@
         if (q && !String(group.nome || "").toLowerCase().includes(q)) return false;
         if (statusFilter === "classificados" && !group.segmento) return false;
         if (statusFilter === "nao-classificados" && group.segmento) return false;
+
+        if (state.activeInstanceTab !== "todos") {
+          const linkedIds = Array.isArray(group.whatsapp_instance_ids) ? group.whatsapp_instance_ids : [];
+          if (!linkedIds.includes(state.activeInstanceTab)) return false;
+        }
+
         return true;
+      }
+
+      // Cada grupo pode ter mais de um numero vinculado (mesmo grupo do WhatsApp
+      // com dois dos nossos numeros dentro): ele aparece de novo em cada aba de
+      // numero a que pertence, alem da aba "Todos" que soma tudo sem repetir.
+      function renderInstanceTabs() {
+        const wrap = document.getElementById("instanceTabs");
+
+        if (!hasMultipleInstances()) {
+          wrap.hidden = true;
+          wrap.innerHTML = "";
+          return;
+        }
+
+        const countFor = (instanceId) => state.groups.filter((group) => {
+          if (instanceId === "todos") return true;
+          const linkedIds = Array.isArray(group.whatsapp_instance_ids) ? group.whatsapp_instance_ids : [];
+          return linkedIds.includes(instanceId);
+        }).length;
+
+        const tabs = [{ id: "todos", label: "Todos" }].concat(
+          state.whatsappInstances.map((instance) => ({
+            id: instance.id,
+            label: instance.phone_number || instance.instance_name,
+          }))
+        );
+
+        wrap.hidden = false;
+        wrap.innerHTML = tabs
+          .map((tab) => {
+            const instance = state.whatsappInstances.find((item) => item.id === tab.id);
+            const errorFlag = instance && instance.last_sync_error
+              ? ` <span class="has-tip" data-tip="${escapeHtml(`Ultima sincronizacao falhou: ${instance.last_sync_error}`)}" data-tip-tone="danger">&#9888;</span>`
+              : "";
+
+            return `
+            <button type="button" class="tab-btn${tab.id === state.activeInstanceTab ? " active" : ""}"
+              role="tab" aria-selected="${tab.id === state.activeInstanceTab}" data-instance-tab="${escapeHtml(tab.id)}">
+              ${escapeHtml(tab.label)}<span class="tab-count">${countFor(tab.id)}</span>${errorFlag}
+            </button>`;
+          })
+          .join("");
+
+        wrap.querySelectorAll("[data-instance-tab]").forEach((button) => {
+          button.addEventListener("click", () => {
+            state.activeInstanceTab = button.dataset.instanceTab;
+            renderGroups();
+          });
+        });
       }
 
       function renderGroups() {
         const showInstanceColumn = hasMultipleInstances();
         const colspan = showInstanceColumn ? 9 : 8;
         document.getElementById("instanceColumnHeader").hidden = !showInstanceColumn;
+        renderInstanceTabs();
 
         const filtered = state.groups.filter(matchesFilters);
         document.getElementById("resultCount").textContent = `${filtered.length} grupo(s)`;
 
         if (!filtered.length) {
+          const activeInstance = state.whatsappInstances.find((item) => item.id === state.activeInstanceTab);
+          const emptyMessage = activeInstance && activeInstance.last_sync_error
+            ? `A ultima sincronizacao deste numero falhou: ${activeInstance.last_sync_error}`
+            : "Ajuste os filtros ou sincronize novamente com a Evolution API.";
+
           document.getElementById("groupsBody").innerHTML = `
-            <tr><td colspan="${colspan}"><div class="empty-state"><strong>Nenhum grupo encontrado</strong><span>Ajuste os filtros ou sincronize novamente com a Evolution API.</span></div></td></tr>`;
+            <tr><td colspan="${colspan}"><div class="empty-state"><strong>Nenhum grupo encontrado</strong><span>${escapeHtml(emptyMessage)}</span></div></td></tr>`;
           return;
         }
 
@@ -466,20 +592,6 @@
       async function loadWhatsappInstances() {
         const instances = await requestJson("/settings/whatsapp/instances");
         state.whatsappInstances = Array.isArray(instances) ? instances : [];
-
-        const field = document.getElementById("instanceFilterField");
-        const select = document.getElementById("instanceFilter");
-
-        if (!hasMultipleInstances()) {
-          field.hidden = true;
-          return;
-        }
-
-        field.hidden = false;
-        select.innerHTML = '<option value="todos">Todos</option>' +
-          state.whatsappInstances
-            .map((instance) => `<option value="${escapeHtml(instance.id)}">${escapeHtml(instance.phone_number || instance.instance_name)}</option>`)
-            .join("");
       }
 
       async function loadProfiles() {
@@ -501,11 +613,7 @@
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
 
         try {
-          const instanceFilter = document.getElementById("instanceFilter").value;
-          const query = instanceFilter && instanceFilter !== "todos"
-            ? `?whatsapp_instance_id=${encodeURIComponent(instanceFilter)}`
-            : "";
-          const groups = await requestJson(`/groups/search${query}`);
+          const groups = await requestJson("/groups/search");
           state.groups = Array.isArray(groups) ? groups : [];
           renderGroups();
         } catch (error) {
@@ -559,7 +667,18 @@
             body: JSON.stringify({ get_participants: false, timeout_ms: 180000 }),
           });
 
-          status.innerHTML = `<span class="badge badge-success">Sincronizacao concluida</span> ${Number(result.inserted || 0)} inserido(s), ${Number(result.updated || 0)} atualizado(s), ${Number(result.ignored || 0)} ignorado(s).`;
+          const failedInstances = Array.isArray(result.failed_instances) ? result.failed_instances : [];
+          const badge = failedInstances.length
+            ? '<span class="badge badge-warning">Sincronizacao parcial</span>'
+            : '<span class="badge badge-success">Sincronizacao concluida</span>';
+
+          status.innerHTML = `${badge} ${Number(result.inserted || 0)} inserido(s), ${Number(result.updated || 0)} atualizado(s), ${Number(result.ignored || 0)} ignorado(s).`;
+
+          if (failedInstances.length) {
+            status.innerHTML += `<br><span class="text-muted" style="font-size:12px;">Falhou em: ${failedInstances
+              .map((entry) => `${escapeHtml(entry.instance_name)} (${escapeHtml(entry.error_message)})`)
+              .join("; ")}</span>`;
+          }
 
           const processedGroups = Array.isArray(result.groups) ? result.groups : [];
           if (processedGroups.length) {
@@ -606,7 +725,6 @@
       });
       document.getElementById("searchInput").addEventListener("input", renderGroups);
       document.getElementById("statusFilter").addEventListener("change", renderGroups);
-      document.getElementById("instanceFilter").addEventListener("change", loadGroups);
       document.getElementById("syncButton").addEventListener("click", syncGroups);
 
       initialize();

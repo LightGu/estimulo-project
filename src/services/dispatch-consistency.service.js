@@ -6,6 +6,7 @@ const videoCatalogRepository = require("../repositories/video-catalog.repository
 const defaultSettingsService = require("./settings.service");
 // Regra compartilhada com o disparo pontual - ver delivery-confirmation.js.
 const { assertDeliveryConfirmed, extractProviderDelivery } = require("./delivery-confirmation");
+const { resolveStaleDispatchReason } = require("./dispatch-staleness");
 
 function writeStageLog(logger, level, event, payload = {}) {
   const writer = logger && (logger[level] || logger.info);
@@ -262,6 +263,41 @@ function createDispatchConsistencyService(dependencies = {}) {
         skippedSend: true,
         logId: log.id,
       };
+    }
+
+    // Trava de atraso: um dispatch que so roda muito depois do horario
+    // planejado do log (fila parada, worker que caiu e voltou, resume de
+    // campanha pausada ha muito tempo) nao pode disparar por cima do horario
+    // perdido - cancela em vez de mandar video "atrasado" sem contexto.
+    const staleReason = resolveStaleDispatchReason(log.horario_envio_planejado);
+
+    if (staleReason) {
+      writeStageLog(logger, "warn", "dispatch_consistency.cancelled_stale", {
+        campaign_id: campaignId,
+        group_id: groupId,
+        video_id: videoId,
+        log_id: log.id,
+        scheduled_at: log.horario_envio_planejado,
+        reason: staleReason,
+      });
+
+      const cancelled = await dispatchLogsRepositoryDependency.cancelIfPending(log.id, staleReason);
+
+      if (!cancelled) {
+        writeStageLog(logger, "info", "dispatch_consistency.cancel_stale_lost", {
+          campaign_id: campaignId,
+          group_id: groupId,
+          video_id: videoId,
+          log_id: log.id,
+        });
+      } else {
+        return {
+          idempotent: true,
+          status: "cancelado",
+          skippedSend: true,
+          logId: log.id,
+        };
+      }
     }
 
     writeStageLog(logger, "info", "dispatch_consistency.mark_processing.started", {

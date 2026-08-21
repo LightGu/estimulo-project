@@ -40,7 +40,9 @@ function createDefaultVideoUpsert(repository = videoCatalogRepository) {
   let nextOrdemGeral;
 
   return async function upsertVideo(video) {
-    const existingVideo = await repository.findByDriveFileId(video.drive_file_id);
+    const existingVideo =
+      (await repository.findByDriveFileId(video.drive_file_id)) ||
+      (await repository.findOrphanByNomeDoArquivo(video.nome_do_arquivo || video.name));
     const payload = buildVideoCatalogPayload(video);
 
     if (existingVideo) {
