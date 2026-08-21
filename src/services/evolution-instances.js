@@ -76,7 +76,22 @@ async function deleteEvolutionInstance(instanceName, options = {}) {
       data: response.data,
     };
   } catch (error) {
-    throw parseEvolutionError(error);
+    const parsedError = parseEvolutionError(error);
+
+    // A instancia pode ja nao existir mais do lado da Evolution (reset de
+    // infra, remocao manual, etc) - sem tolerar o 404 aqui, removeInstance
+    // nunca chega a apagar a linha local e o registro fica travado para
+    // sempre, quebrando o sync de grupos com um erro que a UI nao deixa resolver.
+    if (parsedError.status === 404) {
+      return {
+        provider: "evolution",
+        status: 404,
+        data: null,
+        alreadyDeleted: true,
+      };
+    }
+
+    throw parsedError;
   }
 }
 

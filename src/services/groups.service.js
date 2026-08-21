@@ -7,6 +7,7 @@ const whatsappInstancesRepository = require("../repositories/whatsapp-instances.
 const groupWhatsappInstancesRepository = require("../repositories/group-whatsapp-instances.repository");
 const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
+const { evolutionConfig } = require("../config/evolution");
 const whatsappInstancesService = require("./whatsapp-instances.service");
 const defaultSettingsService = require("./settings.service");
 const defaultTrilhaSequenceService = require("./trilha-sequence.service");
@@ -409,14 +410,51 @@ function createGroupsService(dependencies = {}) {
     // uma instancia quando varios dos nossos numeros sao membros dele.
     const groupsByJid = new Map();
     const groupIdsSeenByInstance = new Map();
+    const failedInstances = [];
     let ignored = 0;
 
+    // Best-effort: grava o resultado da tentativa (sucesso ou motivo do erro)
+    // para a UI mostrar mesmo depois que a resposta deste sync deixar de estar
+    // na tela. `instancesRepository.update` pode nao existir em stubs de teste.
+    async function recordSyncAttempt(instanceId, payload) {
+      if (typeof instancesRepository.update !== "function") {
+        return;
+      }
+
+      await instancesRepository.update(instanceId, payload).catch(() => null);
+    }
+
     for (const instance of activeInstances) {
-      const response = await fetchEvolutionGroups({
-        getParticipants,
-        timeoutMs,
-        config: { instanceName: instance.instance_name },
-      });
+      let response;
+      const attemptedAt = new Date().toISOString();
+
+      try {
+        // Espalha evolutionConfig (baseUrl/apiKey/timeouts) antes de sobrescrever
+        // instanceName - sem isso o provider ficava sem apiKey/baseUrl.
+        response = await fetchEvolutionGroups({
+          getParticipants,
+          timeoutMs,
+          config: { ...evolutionConfig, instanceName: instance.instance_name },
+        });
+      } catch (error) {
+        // Uma instancia desconectada/com erro nao pode derrubar a sincronizacao
+        // das demais - registra a falha e segue para a proxima instancia.
+        const errorMessage = error?.message || String(error);
+
+        failedInstances.push({
+          instance_id: instance.id,
+          instance_name: instance.instance_name,
+          error_message: errorMessage,
+        });
+        groupIdsSeenByInstance.set(instance.id, new Set());
+
+        await recordSyncAttempt(instance.id, { last_sync_attempt_at: attemptedAt, last_sync_error: errorMessage });
+
+        continue;
+      }
+
+      await recordSyncAttempt(instance.id, { last_sync_attempt_at: attemptedAt, last_sync_error: null });
+
       const evolutionGroups = extractEvolutionGroups(response.data ?? response);
       const seenForInstance = new Set();
 
@@ -445,6 +483,16 @@ function createGroupsService(dependencies = {}) {
       }
 
       groupIdsSeenByInstance.set(instance.id, seenForInstance);
+    }
+
+    if (failedInstances.length === activeInstances.length) {
+      const error = new Error(
+        `Falha ao sincronizar com a Evolution API em todas as instancias ativas: ${failedInstances
+          .map((entry) => `${entry.instance_name} (${entry.error_message})`)
+          .join("; ")}`
+      );
+      error.code = "EVOLUTION_SYNC_ALL_FAILED";
+      throw error;
     }
 
     const result = {
@@ -495,13 +543,26 @@ function createGroupsService(dependencies = {}) {
       });
     }
 
+    const failedInstanceIds = new Set(failedInstances.map((entry) => entry.instance_id));
+
     for (const instance of activeInstances) {
+      // Instancia que falhou na busca nao tem lista real de grupos atuais - remover
+      // os vinculos dela aqui apagaria a sincronizacao anterior por causa de um erro
+      // temporario (timeout, instancia desconectada), entao pula o unlink.
+      if (failedInstanceIds.has(instance.id)) {
+        continue;
+      }
+
       const seenDedupeKeys = groupIdsSeenByInstance.get(instance.id) || new Set();
       const groupIdsStillPresent = [...seenDedupeKeys]
         .map((dedupeKey) => persistedIdByDedupeKey.get(dedupeKey))
         .filter(Boolean);
 
       await groupInstancesRepository.unlinkGroupsNotIn(instance.id, groupIdsStillPresent);
+    }
+
+    if (failedInstances.length > 0) {
+      result.failed_instances = failedInstances;
     }
 
     return result;

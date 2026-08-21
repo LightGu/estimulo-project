@@ -48,8 +48,73 @@ async function create(payload, client) {
   return data;
 }
 
+async function findById(id, client) {
+  const { data, error } = await getClient(client)
+    .from("video_captions")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+async function listByVideoId(videoId, client) {
+  const { data, error } = await getClient(client)
+    .from("video_captions")
+    .select("*")
+    .eq("video_id", videoId)
+    .order("criado_em", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function listByVideoIds(videoIds, client) {
+  if (!videoIds || !videoIds.length) {
+    return [];
+  }
+
+  const { data, error } = await getClient(client)
+    .from("video_captions")
+    .select("*")
+    .in("video_id", videoIds)
+    .order("criado_em", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+async function update(id, payload, client) {
+  const { data, error } = await getClient(client)
+    .from("video_captions")
+    .update(payload)
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 module.exports = {
   create,
+  findById,
+  listByVideoId,
+  listByVideoIds,
   listUnusedTodayByVideo,
   markUsed,
+  update,
 };

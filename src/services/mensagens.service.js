@@ -19,8 +19,35 @@ function normalizeGroupIds(payload = {}) {
   return Array.isArray(payload.group_ids) ? [...new Set(payload.group_ids.filter(Boolean))] : [];
 }
 
+// Anexo enviado via upload (Disparador Pontual com midia) ja chega pronto do
+// controller como { base64, mimeType, fileName, type } - sem link nem
+// tipo_conteudo, e sem nunca ter passado por disco ou banco.
+function normalizeUploadedContent(payload) {
+  const base64 = typeof payload.content?.base64 === "string" ? payload.content.base64 : "";
+
+  if (!base64) {
+    return null;
+  }
+
+  return {
+    content: {
+      base64,
+      mimeType: payload.content.mimeType,
+      fileName: payload.content.fileName,
+      type: payload.content.type === "video" ? "video" : "image",
+    },
+    tipoConteudo: payload.content.type === "video" ? "video" : "imagem",
+  };
+}
+
 function normalizeContent(payload = {}) {
   const texto = typeof payload.texto === "string" ? payload.texto.trim() : "";
+  const uploaded = normalizeUploadedContent(payload);
+
+  if (uploaded) {
+    return { texto, content: uploaded.content, tipoConteudo: uploaded.tipoConteudo };
+  }
+
   const link = typeof payload.link === "string" ? payload.link.trim() : "";
   const tipoConteudo = payload.tipo_conteudo || "texto";
 
@@ -142,6 +169,13 @@ function createMensagensService(dependencies = {}) {
   // sobreviveu no Redis (ja tinha disparado-e-virado-no-op durante a pausa).
   // O texto/link ja estao fixados na campanha - nao ha "proximo conteudo" para
   // re-resolver, so reenviar o que ja estava decidido.
+  // LIMITACAO CONHECIDA: campanhas com midia (possui_midia=true, vinda de
+  // upload) nao tem o arquivo em campaign.link_conteudo - por exigencia de
+  // nunca persistir o anexo, so a flag booleana fica salva. Se o job original
+  // for perdido do Redis durante a pausa, o resume cai neste caminho e
+  // reenvia so o texto, sem a midia, silenciosamente. Aceito como tradeoff:
+  // e um caso raro (o job so desaparece do Redis nesse meio tempo) e
+  // consistente com a exigencia de nao persistir o arquivo.
   async function requeuePendingMessages(campaign, pendingLogs) {
     if (!Array.isArray(pendingLogs) || pendingLogs.length === 0) {
       return [];
@@ -216,6 +250,7 @@ function createMensagensService(dependencies = {}) {
     texto,
     link,
     linkConteudoTipo,
+    possuiMidia,
     status,
     dataEnvio,
     windowStart,
@@ -235,8 +270,14 @@ function createMensagensService(dependencies = {}) {
       titulo: normalizeTitulo(payload),
       classificacao: normalizeClassificacao(payload),
       texto_mensagem: texto || null,
+      // Anexo de upload nunca vira link_conteudo (nao ha URL, so base64 em
+      // memoria) - so a flag possui_midia registra que houve midia no envio.
+      // link_conteudo_tipo so faz sentido acompanhando um link_conteudo real;
+      // sem link (caso do upload), tipoConteudo vem preenchido ("imagem"/
+      // "video") so para a Evolution, e nao deve virar coluna no BD.
       link_conteudo: link || null,
-      link_conteudo_tipo: linkConteudoTipo || null,
+      link_conteudo_tipo: link ? linkConteudoTipo || null : null,
+      possui_midia: Boolean(possuiMidia),
       data_envio: dataEnvio || formatDateOnlyInTimezone(referenceDate, scheduleSettings.timezone),
       window_start: windowStart || null,
       window_end: windowEnd || null,
@@ -352,6 +393,7 @@ function createMensagensService(dependencies = {}) {
           texto,
           link: content?.url,
           linkConteudoTipo: tipoConteudo,
+          possuiMidia: Boolean(content),
           status: "concluido",
         });
 
@@ -493,6 +535,7 @@ function createMensagensService(dependencies = {}) {
           texto,
           link: content?.url,
           linkConteudoTipo: tipoConteudo,
+          possuiMidia: Boolean(content),
           status: "programado",
           windowStart: payload.window_start,
           windowEnd: payload.window_end,

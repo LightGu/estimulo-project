@@ -157,6 +157,29 @@ async function main() {
         video: { id, drive_file_id: "drive-1" },
       }),
     },
+    videoCaptionsService: {
+      listCaptionsByVideoId: async (videoId) => {
+        if (videoId === "video-missing") {
+          throw new Error("Video not found");
+        }
+
+        return [
+          { id: "caption-1", video_id: videoId, caption_text: "Legenda A", criado_em: "2026-08-01T00:00:00.000Z", ultimo_uso_em: null },
+          { id: "caption-2", video_id: videoId, caption_text: "Legenda B", criado_em: "2026-07-01T00:00:00.000Z", ultimo_uso_em: "2026-08-10T00:00:00.000Z" },
+        ];
+      },
+      updateCaption: async (captionId, videoId, payload) => {
+        if (captionId === "caption-missing") {
+          throw new Error("Caption not found");
+        }
+
+        if (!payload.caption_text || !String(payload.caption_text).trim()) {
+          throw new Error("Caption text is required");
+        }
+
+        return { id: captionId, video_id: videoId, caption_text: payload.caption_text };
+      },
+    },
     trilhasService: {
       listAll: async () => [
         {
@@ -545,6 +568,49 @@ async function main() {
     const transcriptByIdPayload = await transcriptByIdResponse.json();
     assert.equal(transcriptByIdPayload.transcript, "Transcricao por id");
 
+    const listCaptionsResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-1/captions`);
+    assert.equal(listCaptionsResponse.status, 200);
+    const listCaptionsPayload = await listCaptionsResponse.json();
+    assert.equal(listCaptionsPayload.length, 2);
+    assert.equal(listCaptionsPayload[0].id, "caption-1");
+    assert.equal(listCaptionsPayload[0].video_id, "video-1");
+
+    const listCaptionsMissingVideoResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-missing/captions`);
+    assert.equal(listCaptionsMissingVideoResponse.status, 404);
+    const listCaptionsMissingVideoPayload = await listCaptionsMissingVideoResponse.json();
+    assert.equal(listCaptionsMissingVideoPayload.error, "Video not found");
+
+    const updateVideoCaptionResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-1/captions/caption-1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption_text: "Legenda editada" }),
+    });
+
+    assert.equal(updateVideoCaptionResponse.status, 200);
+    const updateVideoCaptionPayload = await updateVideoCaptionResponse.json();
+    assert.equal(updateVideoCaptionPayload.id, "caption-1");
+    assert.equal(updateVideoCaptionPayload.caption_text, "Legenda editada");
+
+    const updateVideoCaptionMissingResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-1/captions/caption-missing`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption_text: "Legenda editada" }),
+    });
+
+    assert.equal(updateVideoCaptionMissingResponse.status, 404);
+    const updateVideoCaptionMissingPayload = await updateVideoCaptionMissingResponse.json();
+    assert.equal(updateVideoCaptionMissingPayload.error, "Caption not found");
+
+    const updateVideoCaptionEmptyTextResponse = await fetch(`http://127.0.0.1:${port}/video-catalog/video-1/captions/caption-1`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ caption_text: "   " }),
+    });
+
+    assert.equal(updateVideoCaptionEmptyTextResponse.status, 400);
+    const updateVideoCaptionEmptyTextPayload = await updateVideoCaptionEmptyTextResponse.json();
+    assert.equal(updateVideoCaptionEmptyTextPayload.error, "Caption text is required");
+
     const groupSyncResponse = await fetch(`http://127.0.0.1:${port}/groups/sync`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -578,7 +644,7 @@ async function main() {
     assert.doesNotMatch(groupsAppPage, /MOCK\./);
     assert.doesNotMatch(groupsAppPage, /id="editTrilha"/);
     assert.match(groupsAppPage, /requestJson\("\/group-profiles"\)/);
-    assert.match(groupsAppPage, /requestJson\(`\/groups\/search\$\{query\}`\)/);
+    assert.match(groupsAppPage, /requestJson\("\/groups\/search"\)/);
     assert.match(groupsAppPage, /requestJson\("\/organizations"\)/);
     assert.match(groupsAppPage, /requestJson\("\/groups\/sync"/);
     assert.match(groupsAppPage, /requestJson\(`\/groups\/\$\{encodeURIComponent\(editingGroupId\)\}`/);

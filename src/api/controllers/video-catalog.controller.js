@@ -1,5 +1,6 @@
 function createVideoCatalogController(dependencies = {}) {
   const videoCatalogService = dependencies.videoCatalogService;
+  const videoCaptionsService = dependencies.videoCaptionsService;
 
   function resolveForce(req) {
     return req.body?.force ?? req.query?.force;
@@ -50,9 +51,51 @@ function createVideoCatalogController(dependencies = {}) {
     }
   }
 
+  async function listCaptions(req, res) {
+    try {
+      const captions = await videoCaptionsService.listCaptionsByVideoId(req.params.id);
+
+      return res.status(200).json(captions);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Video id is required") {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Video not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: message });
+    }
+  }
+
+  async function updateCaption(req, res) {
+    try {
+      const caption = await videoCaptionsService.updateCaption(req.params.captionId, req.params.id, req.body || {});
+
+      return res.status(200).json(caption);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (["Caption id is required", "Video id is required", "Caption text is required"].includes(message)) {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Caption not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: message });
+    }
+  }
+
   return {
+    listCaptions,
     transcribeByDriveFileId,
     transcribeById,
+    updateCaption,
   };
 }
 

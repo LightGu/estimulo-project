@@ -293,6 +293,24 @@
       </div>
     </div>
 
+    <div class="overlay" id="captionOverlay" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="captionModalTitle">
+        <div class="modal-header">
+          <h3 id="captionModalTitle">Revisar legenda</h3>
+          <button class="icon-btn-close" data-close-caption type="button" aria-label="Fechar">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="captionLabel" class="text-muted"></p>
+          <div id="captionList"></div>
+          <div id="captionStatus" class="status-line"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-close-caption type="button">Fechar</button>
+          <button class="btn" id="confirmCaptionButton" type="button">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -311,6 +329,7 @@
       let selectedMacrotemaKey = null;
       let selectedTrilhaKey = null;
       let movingVideo = null;
+      let reviewingCaption = null;
       let newVideoTrail = null;
       let draggingVideoId = null;
       let draggingTrilhaId = null;
@@ -535,7 +554,7 @@
               <td style="display:flex;gap:6px;flex-wrap:wrap;">
                 <button class="btn btn-secondary btn-sm" data-move="${escapeHtml(v.id)}">Adicionar a outra trilha</button>
                 <button class="btn btn-secondary btn-sm" data-remove="${escapeHtml(v.id)}">Remover desta trilha</button>
-                <button class="btn btn-ghost btn-sm" disabled title="Em breve">Revisar legenda</button>
+                <button class="btn btn-ghost btn-sm" data-review-caption="${escapeHtml(v.id)}">Revisar legenda</button>
               </td>
             </tr>`
           )
@@ -543,6 +562,7 @@
 
         document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(trail, btn.dataset.move)));
         document.querySelectorAll("[data-remove]").forEach((btn) => btn.addEventListener("click", () => removeVideoFromCurrentTrail(trail, btn.dataset.remove)));
+        document.querySelectorAll("[data-review-caption]").forEach((btn) => btn.addEventListener("click", () => openCaptionReview(trail, btn.dataset.reviewCaption)));
         document.querySelectorAll("[data-reorder-video-up]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoUp, -1)));
         document.querySelectorAll("[data-reorder-video-down]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoDown, 1)));
         attachDragAndDrop(trail);
@@ -1817,6 +1837,114 @@
         document.getElementById("macrotemaGrid").innerHTML = `
           <div class="empty-state"><strong>Falha ao carregar trilhas</strong><span>${escapeHtml(error.message)}</span></div>`;
       }
+
+      // Revisar legenda
+      const captionOverlay = document.getElementById("captionOverlay");
+      let captionReleaseTrap = null;
+
+      async function openCaptionReview(trail, videoId) {
+        const video = trail.videos.find((v) => v.id === videoId);
+        if (!video) return;
+
+        reviewingCaption = { videoId, selectedCaptionId: null };
+        document.getElementById("captionLabel").textContent = `Vídeo: ${video.nome_do_arquivo}`;
+        document.getElementById("captionList").innerHTML = `<p class="text-muted">Carregando legendas…</p>`;
+        document.getElementById("captionStatus").textContent = "";
+        document.getElementById("captionStatus").className = "status-line";
+        captionOverlay.hidden = false;
+        captionReleaseTrap = window.estimuloTrapFocus(captionOverlay);
+
+        try {
+          const captions = await requestJson(`/video-catalog/${encodeURIComponent(videoId)}/captions`);
+          reviewingCaption.captions = captions;
+          renderCaptionList(captions);
+        } catch (error) {
+          document.getElementById("captionList").innerHTML = "";
+          document.getElementById("captionStatus").textContent = error.message;
+          document.getElementById("captionStatus").className = "status-line error";
+        }
+      }
+
+      function renderCaptionList(captions) {
+        const list = document.getElementById("captionList");
+
+        if (!captions.length) {
+          list.innerHTML = `<p class="text-muted">Nenhuma legenda gerada para este vídeo ainda.</p>`;
+          return;
+        }
+
+        list.innerHTML = captions
+          .map(
+            (caption, index) => `
+            <div class="field">
+              <label>
+                <input type="radio" name="captionChoice" value="${escapeHtml(caption.id)}" ${index === 0 ? "checked" : ""}>
+                ${caption.ultimo_uso_em ? `Usada em ${new Date(caption.ultimo_uso_em).toLocaleString("pt-BR")}` : "Ainda não usada"}
+              </label>
+              <textarea data-caption-text="${escapeHtml(caption.id)}" rows="3">${escapeHtml(caption.caption_text)}</textarea>
+            </div>`
+          )
+          .join("");
+
+        reviewingCaption.selectedCaptionId = captions[0].id;
+
+        list.querySelectorAll('input[name="captionChoice"]').forEach((input) => {
+          input.addEventListener("change", () => {
+            reviewingCaption.selectedCaptionId = input.value;
+          });
+        });
+      }
+
+      function closeCaptionOverlay() {
+        captionOverlay.hidden = true;
+        reviewingCaption = null;
+        if (captionReleaseTrap) {
+          captionReleaseTrap();
+          captionReleaseTrap = null;
+        }
+      }
+      document.querySelectorAll("[data-close-caption]").forEach((el) => el.addEventListener("click", closeCaptionOverlay));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !captionOverlay.hidden) closeCaptionOverlay();
+      });
+
+      document.getElementById("confirmCaptionButton").addEventListener("click", async () => {
+        if (!reviewingCaption || !reviewingCaption.selectedCaptionId) {
+          closeCaptionOverlay();
+          return;
+        }
+
+        const button = document.getElementById("confirmCaptionButton");
+        const status = document.getElementById("captionStatus");
+        const captionId = reviewingCaption.selectedCaptionId;
+        const textarea = document.querySelector(`[data-caption-text="${CSS.escape(captionId)}"]`);
+        const captionText = textarea ? textarea.value.trim() : "";
+
+        if (!captionText) {
+          status.textContent = "A legenda não pode ficar vazia.";
+          status.className = "status-line error";
+          return;
+        }
+
+        button.disabled = true;
+        status.textContent = "Salvando…";
+        status.className = "status-line";
+
+        try {
+          await requestJson(`/video-catalog/${encodeURIComponent(reviewingCaption.videoId)}/captions/${encodeURIComponent(captionId)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ caption_text: captionText }),
+          });
+
+          closeCaptionOverlay();
+        } catch (error) {
+          status.textContent = error.message;
+          status.className = "status-line error";
+        } finally {
+          button.disabled = false;
+        }
+      });
 
       // Editar nome (macrotema/trilha)
       const renameOverlay = document.getElementById("renameOverlay");

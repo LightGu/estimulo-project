@@ -1,11 +1,13 @@
 const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
+const videoCaptionsRepository = require("../repositories/video-captions.repository");
 const groupProfilesService = require("./group-profiles.service");
 const { normalizePerfis } = require("../domain/trail-profiles");
 
 function createTrilhasService(dependencies = {}) {
   const repository = dependencies.repository || trilhasRepository;
   const videoRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
+  const captionsRepository = dependencies.videoCaptionsRepository || videoCaptionsRepository;
   const profilesService = dependencies.groupProfilesService || groupProfilesService;
 
   async function listValidPerfilNames() {

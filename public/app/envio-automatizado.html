@@ -43,8 +43,35 @@
       .dispatch-config-body .field-action .field-hint { visibility: hidden; }
       .dispatch-config-body .field-action .btn { height: 38px; }
 
-      .period-add-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
-      .period-add-row input[type="time"] { width: 92px; }
+      .period-add-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+      .period-add-row .time-picker { width: 118px; }
+
+      .dispatch-card-header { display: flex; align-items: center; gap: 12px; }
+      .dispatch-header-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(78, 121, 255, 0.12); color: var(--brand-blue); display: flex; align-items: center; justify-content: center; flex: none; }
+      .dispatch-header-icon .ico { width: 19px; height: 19px; }
+      .dispatch-card-header h3 { font-size: 16px; }
+      .dispatch-card-header p { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; font-weight: 400; }
+
+      .field-label-icon { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+      .field-label-icon .ico { width: 15px; height: 15px; color: var(--text-faint); flex: none; }
+
+      .time-picker { position: relative; }
+      .time-picker-trigger { appearance: none; -webkit-appearance: none; display: flex; align-items: center; gap: 8px; width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; font: inherit; color: var(--text); }
+      .time-picker-trigger:hover, .time-picker-trigger.is-open { border-color: var(--brand-blue); }
+      .time-picker-trigger .ico { width: 15px; height: 15px; color: var(--text-faint); flex: none; }
+      .time-picker-value { flex: 1; text-align: left; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13.5px; letter-spacing: 0.02em; }
+      .time-picker-toggle { flex: none; color: var(--text-faint); }
+      .time-picker-toggle .ico { width: 14px; height: 14px; }
+
+      .time-picker-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: 0 8px 24px rgba(15, 18, 40, 0.16); padding: 6px; }
+      .time-picker-panel[hidden] { display: none; }
+      .time-picker-col + .time-picker-col { border-left: 1px solid var(--line); }
+      .time-picker-list { width: 52px; height: 160px; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: thin; }
+      .time-picker-list::-webkit-scrollbar { width: 4px; }
+      .time-picker-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; }
+      .time-picker-opt { height: 32px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-muted); scroll-snap-align: start; cursor: pointer; border-radius: var(--radius-sm); }
+      .time-picker-opt:hover { background: var(--surface-sunken); }
+      .time-picker-opt.is-selected { background: rgba(78, 121, 255, 0.14); color: var(--brand-blue); font-weight: 700; }
 
       #stepConfig, #stepCaptions { display: flex; flex-direction: column; gap: 20px; }
 
@@ -143,43 +170,39 @@
               <div class="card">
                 <div class="card-body dispatch-config-body">
                   <div class="field field-date">
-                    <label for="dispatchDate">Data do disparo</label>
+                    <label for="dispatchDate" class="field-label-icon"><span id="fieldIconCalendar"></span>Data do disparo</label>
                     <input id="dispatchDate" type="date">
                     <p class="field-hint">Será enviado para os grupos abaixo.</p>
                   </div>
 
                   <div class="field field-periods">
-                    <label>Períodos de envio</label>
+                    <label class="field-label-icon"><span id="fieldIconClock"></span>Períodos de envio</label>
                     <div class="chip-list" id="periodChips"></div>
                     <div class="period-add-row">
-                      <input type="time" id="periodStart" value="07:00">
+                      <div class="time-picker" id="periodStartPicker"></div>
                       <span class="text-faint">até</span>
-                      <input type="time" id="periodEnd" value="12:00">
+                      <div class="time-picker" id="periodEndPicker"></div>
+                      <input type="hidden" id="periodStart" value="07:00">
+                      <input type="hidden" id="periodEnd" value="12:00">
                       <button class="btn btn-secondary btn-sm" id="addPeriodButton" type="button">+ Adicionar</button>
                     </div>
                     <p class="field-hint">Pode selecionar mais de um período.</p>
                   </div>
 
                   <div class="field field-delay">
-                    <label>Delay randômico mín.</label>
-                    <div style="display:flex;gap:10px;">
-                      <input id="delayMin" type="number" min="0" value="15" title="Minutos">
-                      <input id="delayMinSec" type="number" min="0" max="59" value="0" title="Segundos">
-                    </div>
+                    <label class="field-label-icon"><span id="fieldIconHourglassMin"></span>Delay aleatório mínimo</label>
+                    <div class="time-picker" id="delayMinPicker"></div>
+                    <input type="hidden" id="delayMin" value="15">
+                    <input type="hidden" id="delayMinSec" value="0">
                     <p class="field-hint">Minutos e segundos.</p>
                   </div>
 
                   <div class="field field-delay">
-                    <label>Delay randômico máx.</label>
-                    <div style="display:flex;gap:10px;">
-                      <input id="delayMax" type="number" min="0" value="45" title="Minutos">
-                    </div>
-                    <p class="field-hint">Minutos entre envios.</p>
-                  </div>
-
-                  <div class="field field-timezone">
-                    <label>Fuso horário</label>
-                    <p class="field-hint" id="scheduleTimezoneHint">Carregando…</p>
+                    <label class="field-label-icon"><span id="fieldIconHourglassMax"></span>Delay aleatório máximo</label>
+                    <div class="time-picker" id="delayMaxPicker"></div>
+                    <input type="hidden" id="delayMax" value="45">
+                    <input type="hidden" id="delayMaxSec" value="0">
+                    <p class="field-hint">Tempo aleatório entre envios.</p>
                   </div>
 
                   <div class="field field-action">
@@ -372,10 +395,141 @@
         refresh: '<path d="M20 11A8 8 0 1 0 18.5 15.5" /><path d="M20 5v6h-6" />',
         warning: '<path d="M10.3 3.9 1.9 18a1 1 0 0 0 .9 1.5h18.4a1 1 0 0 0 .9-1.5L13.7 3.9a1 1 0 0 0-1.7 0Z" /><path d="M12 9v4" /><path d="M12 16.5h.01" />',
         check: '<path d="M20 6 9 17l-5-5" />',
+        send: '<path d="M22 2 11 13" /><path d="M22 2 15 22l-4-9-9-4Z" />',
+        calendar: '<rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4" /><path d="M8 2v4" /><path d="M3 10h18" />',
+        clock: '<circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />',
+        hourglass: '<path d="M5 22h14" /><path d="M5 2h14" /><path d="M17 22v-4.17a2 2 0 0 0-.59-1.42L12 12l-4.41 4.41A2 2 0 0 0 7 17.83V22" /><path d="M7 2v4.17a2 2 0 0 0 .59 1.42L12 12l4.41-4.41A2 2 0 0 0 17 6.17V2" />',
+        chevronUpDown: '<path d="m7 15 5 5 5-5" /><path d="m7 9 5-5 5 5" />',
       };
       function icon(name) {
         return `<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ""}</svg>`;
       }
+      function pad2(value) {
+        return String(value).padStart(2, "0");
+      }
+      function fillIconSlot(id, name) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = icon(name);
+      }
+      fillIconSlot("fieldIconCalendar", "calendar");
+      fillIconSlot("fieldIconClock", "clock");
+      fillIconSlot("fieldIconHourglassMin", "hourglass");
+      fillIconSlot("fieldIconHourglassMax", "hourglass");
+
+      // Seletor de horario com colunas rolaveis (h/m/s), no lugar do <input type="time">
+      // nativo: o layout do anexo pedia rolagem estilo "spinner" para delay e periodos.
+      function createTimePicker(container, { units, initial, separator, onChange }) {
+        const sep = separator === undefined ? ":" : separator;
+        const state = { ...initial };
+
+        function buildColumn(unit) {
+          let rows = "";
+          for (let i = 0; i <= unit.max; i++) {
+            rows += `<div class="time-picker-opt${i === state[unit.key] ? " is-selected" : ""}" data-value="${i}">${pad2(i)}</div>`;
+          }
+          return `<div class="time-picker-col" data-unit="${unit.key}"><div class="time-picker-list">${rows}</div></div>`;
+        }
+
+        container.innerHTML = `
+          <div class="time-picker-trigger" role="button" tabindex="0">
+            <span class="time-picker-value"></span>
+            <span class="time-picker-toggle">${icon("chevronUpDown")}</span>
+          </div>
+          <div class="time-picker-panel" hidden>${units.map(buildColumn).join("")}</div>
+        `;
+
+        const trigger = container.querySelector(".time-picker-trigger");
+        const valueEl = container.querySelector(".time-picker-value");
+        const panel = container.querySelector(".time-picker-panel");
+
+        function refreshValue() {
+          valueEl.textContent = units.map((u) => pad2(state[u.key])).join(sep);
+        }
+
+        function scrollColumnTo(col, index, smooth) {
+          const list = col.querySelector(".time-picker-list");
+          const row = list.firstElementChild;
+          if (!row) return;
+          const top = index * row.offsetHeight;
+          if (smooth) list.scrollTo({ top, behavior: "smooth" });
+          else list.scrollTop = top;
+        }
+
+        function selectInColumn(unit, col, index, opts) {
+          state[unit.key] = index;
+          col.querySelectorAll(".time-picker-opt").forEach((opt) => {
+            opt.classList.toggle("is-selected", Number(opt.dataset.value) === index);
+          });
+          refreshValue();
+          if (opts && opts.scroll) scrollColumnTo(col, index, opts.smooth);
+          onChange({ ...state });
+        }
+
+        units.forEach((unit) => {
+          const col = container.querySelector(`.time-picker-col[data-unit="${unit.key}"]`);
+          const list = col.querySelector(".time-picker-list");
+
+          list.addEventListener("click", (event) => {
+            const opt = event.target.closest(".time-picker-opt");
+            if (!opt) return;
+            selectInColumn(unit, col, Number(opt.dataset.value), { scroll: true, smooth: true });
+          });
+
+          let scrollTimer = null;
+          list.addEventListener("scroll", () => {
+            clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(() => {
+              const row = list.firstElementChild;
+              if (!row) return;
+              const index = Math.max(0, Math.min(unit.max, Math.round(list.scrollTop / row.offsetHeight)));
+              if (index !== state[unit.key]) selectInColumn(unit, col, index, { scroll: false });
+            }, 120);
+          });
+        });
+
+        trigger.addEventListener("click", () => {
+          const willOpen = panel.hidden;
+          document.querySelectorAll(".time-picker-panel").forEach((p) => (p.hidden = true));
+          document.querySelectorAll(".time-picker-trigger").forEach((t) => t.classList.remove("is-open"));
+          panel.hidden = !willOpen;
+          trigger.classList.toggle("is-open", willOpen);
+          if (willOpen) {
+            units.forEach((unit) => {
+              const col = container.querySelector(`.time-picker-col[data-unit="${unit.key}"]`);
+              scrollColumnTo(col, state[unit.key], false);
+            });
+          }
+        });
+
+        trigger.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            trigger.click();
+          }
+        });
+
+        refreshValue();
+
+        return {
+          setValue(next) {
+            Object.assign(state, next);
+            units.forEach((unit) => {
+              const col = container.querySelector(`.time-picker-col[data-unit="${unit.key}"]`);
+              col.querySelectorAll(".time-picker-opt").forEach((opt) => {
+                opt.classList.toggle("is-selected", Number(opt.dataset.value) === state[unit.key]);
+              });
+              scrollColumnTo(col, state[unit.key], false);
+            });
+            refreshValue();
+          },
+        };
+      }
+
+      document.addEventListener("click", (event) => {
+        if (event.target.closest(".time-picker")) return;
+        document.querySelectorAll(".time-picker-panel").forEach((p) => (p.hidden = true));
+        document.querySelectorAll(".time-picker-trigger").forEach((t) => t.classList.remove("is-open"));
+      });
 
       const SEGMENT_BADGE = { "Pré-Infância": "badge-info", "Infância": "badge-warning", "Adolescente": "badge-success", "Maturidade": "badge-success" };
 
@@ -454,7 +608,10 @@
         const payload = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+          const error = new Error(payload.error || `Falha na requisicao (${response.status})`);
+          error.status = response.status;
+          error.payload = payload;
+          throw error;
         }
 
         return payload;
@@ -780,6 +937,42 @@
         if (!inicio || !fim || inicio >= fim) return;
         periods.push({ inicio, fim });
         renderPeriodChips();
+      });
+
+      const periodStartPicker = createTimePicker(document.getElementById("periodStartPicker"), {
+        units: [{ key: "h", max: 23 }, { key: "m", max: 59 }],
+        initial: { h: 7, m: 0 },
+        onChange: (v) => {
+          document.getElementById("periodStart").value = `${pad2(v.h)}:${pad2(v.m)}`;
+        },
+      });
+
+      const periodEndPicker = createTimePicker(document.getElementById("periodEndPicker"), {
+        units: [{ key: "h", max: 23 }, { key: "m", max: 59 }],
+        initial: { h: 12, m: 0 },
+        onChange: (v) => {
+          document.getElementById("periodEnd").value = `${pad2(v.h)}:${pad2(v.m)}`;
+        },
+      });
+
+      const delayMinPicker = createTimePicker(document.getElementById("delayMinPicker"), {
+        units: [{ key: "m", max: 59 }, { key: "s", max: 59 }],
+        initial: { m: 15, s: 0 },
+        separator: " : ",
+        onChange: (v) => {
+          document.getElementById("delayMin").value = String(v.m);
+          document.getElementById("delayMinSec").value = String(v.s);
+        },
+      });
+
+      const delayMaxPicker = createTimePicker(document.getElementById("delayMaxPicker"), {
+        units: [{ key: "m", max: 59 }, { key: "s", max: 59 }],
+        initial: { m: 45, s: 0 },
+        separator: " : ",
+        onChange: (v) => {
+          document.getElementById("delayMax").value = String(v.m);
+          document.getElementById("delayMaxSec").value = String(v.s);
+        },
       });
 
       async function renderGroupList() {
@@ -1191,7 +1384,7 @@
         try {
           const dataEnvio = document.getElementById("dispatchDate").value;
           const delayMinMs = readDelayMs("delayMin", "delayMinSec");
-          const delayMaxMs = readDelayMs("delayMax");
+          const delayMaxMs = readDelayMs("delayMax", "delayMaxSec");
           const firstPeriod = periods[0] || {};
           const executionAt = new Date(`${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`);
 
@@ -1217,7 +1410,21 @@
           startCaptionPolling();
         } catch (error) {
           callout.style.display = "flex";
-          callout.innerHTML = `<div><strong>Falha ao disparar a campanha:</strong> ${escapeHtml(error.message)}</div>`;
+
+          // Falta pelo menos um numero conectado em algum dos grupos programados -
+          // o rodizio entre numeros (dispatch-jitter.js) so pode incluir um grupo se
+          // TODOS os numeros ativos estiverem nele. Mostra quais grupos faltam em vez
+          // de so repetir a mensagem generica do backend.
+          const missingGroupIds = error.payload && error.payload.group_ids;
+          if (Array.isArray(missingGroupIds) && missingGroupIds.length) {
+            const names = missingGroupIds.map((id) => {
+              const group = state.groups.find((g) => g.id === id);
+              return group ? group.nome : id;
+            });
+            callout.innerHTML = `<div><strong>Não é possível disparar:</strong> os grupos abaixo não têm todos os números de WhatsApp adicionados. Adicione o(s) número(s) faltante(s) ao grupo e sincronize em Grupos antes de tentar novamente.<ul style="margin:6px 0 0 18px;padding:0;">${names.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul></div>`;
+          } else {
+            callout.innerHTML = `<div><strong>Falha ao disparar a campanha:</strong> ${escapeHtml(error.message)}</div>`;
+          }
         } finally {
           dispatchButton.disabled = false;
         }
@@ -1538,7 +1745,7 @@
           const firstPeriod = periods[0] || {};
           const executionAt = new Date(`${dataEnvio}T${(firstPeriod.inicio || "07:00")}:00`);
           const delayMinMs = readDelayMs("delayMin", "delayMinSec");
-          const delayMaxMs = readDelayMs("delayMax");
+          const delayMaxMs = readDelayMs("delayMax", "delayMaxSec");
 
           const confirmations = await Promise.all(
             state.currentCampaignIds.map((campaignId) =>
@@ -1705,26 +1912,25 @@
       }
 
       async function loadDefaultScheduleSettings() {
-        const timezoneHint = document.getElementById("scheduleTimezoneHint");
         try {
           const settings = await requestJson("/settings/schedule");
           if (settings.min_interval_min !== undefined) {
-            document.getElementById("delayMin").value = settings.min_interval_min;
+            const totalMin = Number(settings.min_interval_min) || 0;
+            document.getElementById("delayMin").value = totalMin;
+            delayMinPicker.setValue({ m: totalMin });
           }
           if (settings.max_interval_min !== undefined) {
-            document.getElementById("delayMax").value = settings.max_interval_min;
+            const totalMax = Number(settings.max_interval_min) || 0;
+            document.getElementById("delayMax").value = totalMax;
+            delayMaxPicker.setValue({ m: totalMax });
           }
           if (Array.isArray(settings.dispatch_periods) && settings.dispatch_periods.length) {
             periods = settings.dispatch_periods.map((p) => ({ inicio: p.inicio, fim: p.fim }));
             renderPeriodChips();
           }
           state.timezone = settings.timezone || null;
-          timezoneHint.textContent = state.timezone
-            ? `Horários registrados em ${state.timezone}.`
-            : "Não foi possível carregar o fuso configurado.";
         } catch (error) {
           // mantém os valores padrão exibidos no HTML caso a chamada falhe
-          timezoneHint.textContent = "Não foi possível carregar o fuso configurado.";
         }
       }
 
