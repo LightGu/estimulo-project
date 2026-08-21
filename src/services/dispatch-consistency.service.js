@@ -204,13 +204,18 @@ function createDispatchConsistencyService(dependencies = {}) {
       video_id: videoId,
     });
 
-    // Pausa nao muda o status do log (fica pendente para o resume conseguir
-    // retomar), entao so o claim atomico la na frente nao bastaria para
-    // impedir o envio - esta checagem e o que de fato para.
-    if (campaign && campaign.status === "pausado") {
+    // Pausa/cancelamento nao mudam o status do log de disparo pendente (fica
+    // pendente para o resume conseguir retomar, ou e cancelado em lote sem
+    // vinculo com o job do BullMQ que ja estava enfileirado com delay) - so o
+    // claim atomico la na frente nao bastaria para impedir o envio, e sem esta
+    // checagem aqui um job de campanha ja cancelada (que sobreviveu no Redis e
+    // so roda quando a infra do worker volta a subir) reencontra o log como
+    // "nao existe mais pendente/processando" e cria um novo log do zero,
+    // reenviando por cima do cancelamento.
+    if (campaign && (campaign.status === "pausado" || campaign.status === "cancelado")) {
       return {
         idempotent: true,
-        status: "pausado",
+        status: campaign.status,
         skippedSend: true,
         logId: null,
       };

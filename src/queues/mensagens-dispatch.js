@@ -290,8 +290,8 @@ function createMensagensDispatchProcessor(options = {}) {
           ? await campaignsRepository.findById(pausedLog.campaign_id).catch(() => null)
           : null;
 
-      if (pausedCampaign && pausedCampaign.status === "pausado") {
-        return { status: "skipped_paused" };
+      if (pausedCampaign && (pausedCampaign.status === "pausado" || pausedCampaign.status === "cancelado")) {
+        return { status: pausedCampaign.status === "cancelado" ? "skipped_cancelled" : "skipped_paused" };
       }
     }
 
