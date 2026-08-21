@@ -19,6 +19,11 @@ x-app: &app
     GOOGLE_DRIVE_VIDEO_INDEX_STATE_FILE: /app/storage/google-drive-video-index-state.json
   volumes:
     - app-storage:/app/storage
+    # ./credentials fica fora da imagem (.dockerignore) de proposito - o JSON
+    # da service account do Google Drive so existe no host, nunca commitado
+    # nem embutido no build. GOOGLE_DRIVE_CREDENTIALS no .env aponta pro
+    # caminho dentro do container (./credentials/<arquivo>.json).
+    - ../credentials:/app/credentials:ro
   logging:
     driver: local
     options:
