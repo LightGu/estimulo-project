@@ -6,7 +6,7 @@ const videoCatalogRepository = require("../repositories/video-catalog.repository
 const defaultSettingsService = require("./settings.service");
 // Regra compartilhada com o disparo pontual - ver delivery-confirmation.js.
 const { assertDeliveryConfirmed, extractProviderDelivery } = require("./delivery-confirmation");
-const { resolveStaleDispatchReason } = require("./dispatch-staleness");
+const { resolveMaxVideoDispatchDelayMs, resolveStaleDispatchReason } = require("./dispatch-staleness");
 
 function writeStageLog(logger, level, event, payload = {}) {
   const writer = logger && (logger[level] || logger.info);
@@ -96,6 +96,12 @@ function createDispatchConsistencyService(dependencies = {}) {
       video_id: payload.videoId,
       status: "pendente",
       mensagem_erro: null,
+      // Grava o horario do job. Sem isto o log nascia com
+      // horario_envio_planejado NULL - a origem dos "logs orfaos" que apareciam
+      // no relatorio com "-" e, pior, que faziam todo caminho de resume/retry
+      // reenfileirar o envio sem nenhum horario em que ancorar a trava de
+      // atraso (o default `new Date()` assumia e o envio antigo saia como novo).
+      horario_envio_planejado: payload.scheduledAt || null,
     });
 
     return { log, created: true, skipSend: false };
@@ -107,7 +113,8 @@ function createDispatchConsistencyService(dependencies = {}) {
     }
 
     const duplicate = await groupVideoProgressRepositoryDependency.hasDuplicate(groupId, videoId);
-    let record;
+    let record = null;
+    let skippedProgress = false;
 
     if (duplicate) {
       if (options.neverRepeatVideo === false) {
@@ -117,7 +124,7 @@ function createDispatchConsistencyService(dependencies = {}) {
           trilha_id: trilhaId || null,
         });
       } else {
-        return { duplicate: true, record: null };
+        skippedProgress = true;
       }
     } else {
       record = await groupVideoProgressRepositoryDependency.registerDelivery({
@@ -127,6 +134,10 @@ function createDispatchConsistencyService(dependencies = {}) {
       });
     }
 
+    // A mensagem ja foi enviada mesmo quando o registro de progresso e pulado
+    // (repeticao com "nunca repetir video" ativo) - o forced_next_video_id
+    // precisa ser limpo de qualquer forma, senao o proximo disparo tenta
+    // reenviar o mesmo video forcado indefinidamente.
     const groupUpdate = { ...(trilhaId ? { trilha_id: trilhaId } : {}) };
 
     if (options.forcedNextVideoId && options.forcedNextVideoId === videoId) {
@@ -135,6 +146,10 @@ function createDispatchConsistencyService(dependencies = {}) {
 
     if (Object.keys(groupUpdate).length > 0) {
       await groupsRepositoryDependency.update(groupId, groupUpdate);
+    }
+
+    if (skippedProgress) {
+      return { duplicate: true, record: null };
     }
 
     return { duplicate: false, record };
@@ -190,6 +205,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       deliveryPayload,
       neverRepeatVideo,
       forcedNextVideoId,
+      scheduledAt,
     } = options;
 
     writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.started", {
@@ -252,6 +268,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       campaignId,
       groupId,
       videoId,
+      scheduledAt,
     });
     writeStageLog(logger, "info", "dispatch_consistency.create_attempt_log.completed", {
       campaign_id: campaignId,
@@ -274,7 +291,16 @@ function createDispatchConsistencyService(dependencies = {}) {
     // planejado do log (fila parada, worker que caiu e voltou, resume de
     // campanha pausada ha muito tempo) nao pode disparar por cima do horario
     // perdido - cancela em vez de mandar video "atrasado" sem contexto.
-    const staleReason = resolveStaleDispatchReason(log.horario_envio_planejado);
+    //
+    // O fallback para scheduledAt (horario do job) e essencial: createAttemptLog
+    // cria o log sem horario_envio_planejado, entao sozinho ele deixava esta
+    // trava cega em todo primeiro envio de um par campanha/grupo/video.
+    const staleReason = resolveStaleDispatchReason(log.horario_envio_planejado || scheduledAt, {
+      // Mesmo teto generoso do worker de video (ver dispatch-staleness.js): com
+      // concorrencia 1 os ultimos grupos de uma campanha grande acumulam atraso
+      // legitimo, e o teto de 30 min do envio pontual cancelaria esses envios.
+      maxDelayMs: resolveMaxVideoDispatchDelayMs(),
+    });
 
     if (staleReason) {
       writeStageLog(logger, "warn", "dispatch_consistency.cancelled_stale", {

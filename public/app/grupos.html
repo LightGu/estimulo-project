@@ -131,6 +131,32 @@
                   <option value="nao-classificados">N&atilde;o classificados</option>
                 </select>
               </div>
+              <div class="field">
+                <label for="organizationFilter">Organiza&ccedil;&atilde;o</label>
+                <select id="organizationFilter">
+                  <option value="todos">Todas</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="profileFilter">Perfil</label>
+                <select id="profileFilter">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
+              <div class="field" id="setorFilterField" hidden>
+                <label for="setorFilter">Setor</label>
+                <select id="setorFilter">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="videoFilter">Envia v&iacute;deo</label>
+                <select id="videoFilter">
+                  <option value="todos">Todos</option>
+                  <option value="sim">Envia v&iacute;deo</option>
+                  <option value="nao">N&atilde;o envia v&iacute;deo</option>
+                </select>
+              </div>
               <div class="toolbar-spacer"></div>
               <button class="btn btn-secondary" id="syncButton" type="button">Sincronizar com Evolution API</button>
             </div>
@@ -159,7 +185,6 @@
                     <th>Setor</th>
                     <th>Classifica&ccedil;&atilde;o</th>
                     <th>Envia v&iacute;deo</th>
-                    <th>Trilha</th>
                     <th id="instanceColumnHeader" hidden>N&uacute;mero</th>
                     <th>A&ccedil;&otilde;es</th>
                   </tr>
@@ -225,7 +250,6 @@
         groups: [],
         organizations: [],
         profiles: [],
-        trilhaNameById: new Map(),
         whatsappInstances: [],
         activeInstanceTab: "todos",
       };
@@ -260,14 +284,6 @@
       function orgName(group) {
         const org = state.organizations.find((item) => item.id === group.organization_id);
         return org ? org.nome : text(group.organization_id, "-");
-      }
-
-      function resolveTrilhaLabel(group) {
-        if (group.trilha_id) {
-          return state.trilhaNameById.get(group.trilha_id) || group.trilha_override || null;
-        }
-
-        return group.trilha_override || null;
       }
 
       function classificationBadge(group) {
@@ -336,10 +352,26 @@
       function matchesFilters(group) {
         const q = document.getElementById("searchInput").value.trim().toLowerCase();
         const statusFilter = document.getElementById("statusFilter").value;
+        const organizationFilter = document.getElementById("organizationFilter").value;
+        const profileFilter = document.getElementById("profileFilter").value;
+        const setorFilter = document.getElementById("setorFilter").value;
+        const videoFilter = document.getElementById("videoFilter").value;
 
         if (q && !String(group.nome || "").toLowerCase().includes(q)) return false;
         if (statusFilter === "classificados" && !group.segmento) return false;
         if (statusFilter === "nao-classificados" && group.segmento) return false;
+
+        if (organizationFilter !== "todos" && group.organization_id !== organizationFilter) return false;
+
+        if (profileFilter !== "todos") {
+          const groupProfileId = group.profile_id || resolveProfileIdFromSegmento(group.segmento);
+          if (groupProfileId !== profileFilter) return false;
+        }
+
+        if (setorFilter !== "todos" && normalizeComparable(group.setor) !== normalizeComparable(setorFilter)) return false;
+
+        if (videoFilter === "sim" && group.envia_video !== true) return false;
+        if (videoFilter === "nao" && group.envia_video === true) return false;
 
         if (state.activeInstanceTab !== "todos") {
           const linkedIds = Array.isArray(group.whatsapp_instance_ids) ? group.whatsapp_instance_ids : [];
@@ -400,7 +432,7 @@
 
       function renderGroups() {
         const showInstanceColumn = hasMultipleInstances();
-        const colspan = showInstanceColumn ? 9 : 8;
+        const colspan = showInstanceColumn ? 8 : 7;
         document.getElementById("instanceColumnHeader").hidden = !showInstanceColumn;
         renderInstanceTabs();
 
@@ -437,10 +469,6 @@
                 <td>${group.setor ? escapeHtml(group.setor) : '<span class="text-faint">-</span>'}</td>
                 <td>${classificationBadge(group)}</td>
                 <td>${enviaVideoBadge(group)}</td>
-                <td>${(() => {
-                  const trilhaLabel = resolveTrilhaLabel(group);
-                  return trilhaLabel ? escapeHtml(trilhaLabel) : '<span class="text-faint">Sem trilha</span>';
-                })()}</td>
                 ${showInstanceColumn ? `<td>${instanceCell(group)}</td>` : ""}
                 <td><button class="btn btn-secondary btn-sm" data-edit="${escapeHtml(group.id)}">Editar</button></td>
               </tr>`;
@@ -577,8 +605,52 @@
         }
       }
 
+      function populateToolbarFilters() {
+        const organizationFilter = document.getElementById("organizationFilter");
+        const previousOrganization = organizationFilter.value || "todos";
+        organizationFilter.innerHTML = '<option value="todos">Todas</option>';
+        state.organizations.forEach((organization) => {
+          const option = document.createElement("option");
+          option.value = organization.id;
+          option.textContent = organization.nome;
+          organizationFilter.appendChild(option);
+        });
+        organizationFilter.value = [...organizationFilter.options].some((option) => option.value === previousOrganization)
+          ? previousOrganization
+          : "todos";
+
+        const profileFilter = document.getElementById("profileFilter");
+        const previousProfile = profileFilter.value || "todos";
+        profileFilter.innerHTML = '<option value="todos">Todos</option>';
+        state.profiles.forEach((profile) => {
+          const option = document.createElement("option");
+          option.value = profile.id;
+          option.textContent = profile.nome;
+          profileFilter.appendChild(option);
+        });
+        profileFilter.value = [...profileFilter.options].some((option) => option.value === previousProfile)
+          ? previousProfile
+          : "todos";
+
+        const setores = knownSetores();
+        const setorFilterField = document.getElementById("setorFilterField");
+        const setorFilter = document.getElementById("setorFilter");
+        setorFilterField.hidden = setores.length === 0;
+        const previousSetor = setorFilter.value || "todos";
+        setorFilter.innerHTML = '<option value="todos">Todos</option>';
+        setores.forEach((setor) => {
+          const option = document.createElement("option");
+          option.value = setor;
+          option.textContent = setor;
+          setorFilter.appendChild(option);
+        });
+        setorFilter.value = [...setorFilter.options].some((option) => option.value === previousSetor)
+          ? previousSetor
+          : "todos";
+      }
+
       function renderLoadError(error) {
-        const colspan = hasMultipleInstances() ? 9 : 8;
+        const colspan = hasMultipleInstances() ? 8 : 7;
         document.getElementById("resultCount").textContent = "";
         document.getElementById("groupsBody").innerHTML = `
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
@@ -599,22 +671,15 @@
         state.profiles = Array.isArray(profiles) ? profiles : [];
       }
 
-      async function loadTrilhas() {
-        const trilhas = await requestJson("/trilhas");
-        const list = Array.isArray(trilhas) ? trilhas : [];
-        list.forEach((trail) => {
-          state.trilhaNameById.set(trail.id, `${trail.macrotema} - ${trail.trilha}`);
-        });
-      }
-
       async function loadGroups() {
-        const colspan = hasMultipleInstances() ? 9 : 8;
+        const colspan = hasMultipleInstances() ? 8 : 7;
         document.getElementById("groupsBody").innerHTML = `
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
 
         try {
           const groups = await requestJson("/groups/search");
           state.groups = Array.isArray(groups) ? groups : [];
+          populateToolbarFilters();
           renderGroups();
         } catch (error) {
           renderLoadError(error);
@@ -622,31 +687,30 @@
       }
 
       async function initialize() {
+        window.estimuloShowLoading();
         try {
-          await loadOrganizations();
-        } catch (error) {
-          state.organizations = [];
-        }
+          try {
+            await loadOrganizations();
+          } catch (error) {
+            state.organizations = [];
+          }
 
-        try {
-          await loadProfiles();
-        } catch (error) {
-          state.profiles = [];
-        }
+          try {
+            await loadProfiles();
+          } catch (error) {
+            state.profiles = [];
+          }
 
-        try {
-          await loadTrilhas();
-        } catch (error) {
-          state.trilhaNameById = new Map();
-        }
+          try {
+            await loadWhatsappInstances();
+          } catch (error) {
+            state.whatsappInstances = [];
+          }
 
-        try {
-          await loadWhatsappInstances();
-        } catch (error) {
-          state.whatsappInstances = [];
+          await loadGroups();
+        } finally {
+          window.estimuloHideLoading();
         }
-
-        await loadGroups();
       }
 
       async function syncGroups() {
@@ -725,6 +789,10 @@
       });
       document.getElementById("searchInput").addEventListener("input", renderGroups);
       document.getElementById("statusFilter").addEventListener("change", renderGroups);
+      document.getElementById("organizationFilter").addEventListener("change", renderGroups);
+      document.getElementById("profileFilter").addEventListener("change", renderGroups);
+      document.getElementById("setorFilter").addEventListener("change", renderGroups);
+      document.getElementById("videoFilter").addEventListener("change", renderGroups);
       document.getElementById("syncButton").addEventListener("click", syncGroups);
 
       initialize();

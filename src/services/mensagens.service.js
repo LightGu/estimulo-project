@@ -6,6 +6,7 @@ const { sendToEvolution } = require("./evolution");
 const { assertDeliveryConfirmed, confirmProviderDelivery, extractProviderDelivery } = require("./delivery-confirmation");
 const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
 const { assertNoVideoCampaignInWindow, resolveAdHocDispatchBlock } = require("./dispatch-exclusivity");
+const { resolveLogScheduledAt } = require("./dispatch-staleness");
 const { buildJitteredDispatchSchedule, resolveInstanceForOrder } = require("../queues/dispatch-jitter");
 const { addMensagensDispatchJob } = require("../queues/mensagens-dispatch");
 const defaultSettingsService = require("./settings.service");
@@ -198,6 +199,25 @@ function createMensagensService(dependencies = {}) {
 
     for (const [index, log] of pendingLogs.entries()) {
       try {
+        // Horario original do log, nunca "agora": buildMensagensJobData usa
+        // `= new Date()` como default do parametro, entao passar null aqui
+        // reestampava o envio antigo como recem-agendado e ele escapava da trava
+        // de atraso. Sem horario em que ancorar, o log exige acao manual.
+        const logScheduledAt = resolveLogScheduledAt(log);
+
+        if (!logScheduledAt) {
+          logger.warn &&
+            logger.warn(
+              JSON.stringify({
+                event: "mensagens.requeue_skipped_sem_horario",
+                campaign_id: campaign.id,
+                log_id: log.id,
+                group_id: log.group_id,
+              })
+            );
+          continue;
+        }
+
         const group = await repository.findById(log.group_id);
 
         if (!group || !group.evolution_group_id) {
@@ -212,7 +232,7 @@ function createMensagensService(dependencies = {}) {
             group_nome: group.nome,
             message: texto,
             content,
-            scheduled_at: log.horario_envio_planejado,
+            scheduled_at: logScheduledAt,
             dispatch_order: dispatchOrder,
             dispatch_log_id: log.id,
             whatsapp_instance_id: resolveInstanceForOrder(

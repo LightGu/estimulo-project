@@ -19,6 +19,11 @@ const {
   resolveGroupsVideoFlow,
   selectNextApprovedUnsentVideo,
 } = require("../services/group-video-flow");
+const {
+  resolveLogScheduledAt,
+  resolveMaxVideoDispatchDelayMs,
+  resolveStaleDispatchReason,
+} = require("../services/dispatch-staleness");
 const { queueNames } = require("./names");
 
 const CAMPAIGN_TRIGGER_JOB_NAME = "trigger-campaign";
@@ -819,6 +824,26 @@ async function requeuePendingDispatchJobsForCampaign(campaignId, pendingLogs, op
 
   for (const [index, log] of pendingLogs.entries()) {
     try {
+      // Horario original do log, nunca "agora": passar null adiante faria
+      // buildDispatchJobData assumir o default `new Date()` e o envio antigo
+      // voltaria para a fila parecendo recem-agendado, driblando a trava de
+      // atraso. Sem horario em que ancorar, o log exige acao manual.
+      const logScheduledAt = resolveLogScheduledAt(log);
+
+      if (!logScheduledAt) {
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "campaign_trigger.requeue_skipped_sem_horario",
+              campaign_id: campaignId,
+              log_id: log.id,
+              group_id: log.group_id,
+              note: "log sem horario_envio_planejado nem criado_em; reenviar exigiria inventar um horario",
+            })
+          );
+        continue;
+      }
+
       const group = await groupsRepositoryOption.findById(log.group_id);
 
       if (!group || !group.evolution_group_id) {
@@ -851,7 +876,7 @@ async function requeuePendingDispatchJobsForCampaign(campaignId, pendingLogs, op
         legenda: (caption && caption.caption_text) || "",
         caption_id: caption && caption.id,
         caption_generated: Boolean(caption),
-        scheduled_at: log.horario_envio_planejado,
+        scheduled_at: logScheduledAt,
         dispatch_order: dispatchOrder,
         whatsapp_instance_id: resolveInstanceForOrder(dispatchOrder, whatsappInstances, rotationGroupCount),
       });
@@ -1034,6 +1059,44 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
   };
 }
 
+// Trava de atraso do trigger de campanha.
+//
+// Este e o caminho que gerou a rajada de mensagens ao subir o Docker: um job de
+// trigger agendado dias antes fica gravado no Redis (a infra usa
+// `--appendonly yes` com volume), e quando o worker volta a BullMQ o promove na
+// hora. O processor entao monta os jobs por grupo com os horarios da janela
+// original - toda ela no passado - e buildDispatchJobOptions calcula
+// `Math.max(scheduled - agora, 0)` = delay 0 para TODOS os grupos. Resultado:
+// dezenas de envios simultaneos de uma campanha antiga.
+//
+// Jobs recorrentes (repeat/cron) ficam de fora de proposito: neles o disparo do
+// cron E o horario legitimo, e a janela gravada no job e a do cadastro - compara-la
+// com "agora" bloquearia toda campanha recorrente valida.
+function resolveTriggerStaleReason(jobData = {}, options = {}) {
+  if (jobData.trigger_type === CAMPAIGN_TRIGGER_TYPE_RECURRING) {
+    return null;
+  }
+
+  const windowEnd = jobData.time_window && (jobData.time_window.end || jobData.time_window.end_at);
+  // Compara com o horario MAIS TARDE que o job admite: se nem ele ainda e
+  // valido, a execucao esta vencida por completo. `time_window.end` entra so
+  // quando e uma data completa - a janela tambem aceita hora-solta ("10:00"),
+  // que nao da para comparar com "agora"; nesse caso execution_at governa
+  // (normalizeExecutionDate garante que ele e sempre uma data valida).
+  const referenceMs = [jobData.execution_at, windowEnd]
+    .map((value) => (value ? new Date(value).getTime() : Number.NaN))
+    .filter((value) => Number.isFinite(value));
+
+  if (!referenceMs.length) {
+    return null;
+  }
+
+  return resolveStaleDispatchReason(new Date(Math.max(...referenceMs)), {
+    maxDelayMs: resolveMaxVideoDispatchDelayMs(),
+    ...options,
+  });
+}
+
 function createCampaignTriggerProcessor(options = {}) {
   const {
     campaignGroups = campaignGroupsRepository,
@@ -1045,6 +1108,7 @@ function createCampaignTriggerProcessor(options = {}) {
     notificationsService = defaultNotificationsService,
     inAppNotificationsService = defaultInAppNotificationsService,
     settingsService: settingsServiceOption = defaultSettingsService,
+    now = () => new Date(),
     logger = console,
   } = options;
   const validateCampaignId = options.validateCampaignId ?? campaigns === campaignsRepository;
@@ -1059,6 +1123,40 @@ function createCampaignTriggerProcessor(options = {}) {
     });
 
     try {
+      // Antes de qualquer coisa: um trigger vencido nao pode virar dezenas de
+      // jobs de disparo com delay 0. Barrar aqui (e nao so no worker de dispatch)
+      // evita tambem os efeitos colaterais que o trigger produz antes do envio -
+      // criar logs "pendente" para todos os grupos, reivindicar trigger_fired_at
+      // e mandar a notificacao de "campanha iniciada" no WhatsApp.
+      const triggerStaleReason = resolveTriggerStaleReason(job.data, { now });
+
+      if (triggerStaleReason) {
+        const completedAt = new Date().toISOString();
+        const result = {
+          campaign_id: job.data.campaign_id,
+          status: "skipped",
+          reason: "trigger_stale",
+          detail: triggerStaleReason,
+          started_at: startedAt,
+          completed_at: completedAt,
+        };
+
+        await job.updateData({ ...job.data, ...result });
+
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "campaign_trigger.skipped_stale",
+              job_id: job.id,
+              execution_at: job.data.execution_at,
+              window_end: job.data.time_window && job.data.time_window.end,
+              ...result,
+            })
+          );
+
+        return result;
+      }
+
       if (validateCampaignId && !UUID_PATTERN.test(String(job.data.campaign_id || ""))) {
         const completedAt = new Date().toISOString();
         const result = {
@@ -1327,6 +1425,7 @@ module.exports = {
   ensurePendingDispatchLogs,
   isVideoEnabledGroup,
   requeuePendingDispatchJobsForCampaign,
+  resolveTriggerStaleReason,
   get campaignTriggerQueue() {
     return getCampaignTriggerQueue();
   },

@@ -3,6 +3,16 @@ const assert = require("node:assert/strict");
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 const { DISPATCH_FAILED_STATUS, buildDispatchJobData, createDispatchProcessor } = require("../src/queues/dispatch");
 
+// Horario relativo ao "agora" do teste, nunca uma data fixa.
+//
+// O worker de dispatch tem uma trava de atraso na entrada (resolveJobStaleReason
+// em src/queues/dispatch.js): job cujo scheduled_at passou do teto e cancelado
+// sem enviar. Datas fixas no codigo envelhecem e fariam estes testes de
+// notificacao cancelarem o envio em vez de exercitar o fluxo que pretendem.
+function minutesAgoIso(minutes) {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
 function createFakeJob(data) {
   const updates = [];
 
@@ -24,7 +34,7 @@ function buildFailingJobData(overrides = {}) {
     video_id: "video-1",
     link_video: "https://example.com/video.mp4",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
     ...overrides,
   });
 }
@@ -70,7 +80,7 @@ async function testDispatchFailureViaConsistencyServiceNotifiesOnce() {
     progress_group_id: "22222222-2222-1222-8222-222222222222",
     link_video: "https://example.com/video.mp4",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const job = createFakeJob(jobData);
   const processor = createDispatchProcessor({
@@ -152,7 +162,7 @@ async function testDispatchSuccessNotifiesTrailFinishedWhenNoNextVideo() {
     trilha_id: "trilha-1",
     link_video: "https://example.com/video.mp4",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const job = createFakeJob(jobData);
   const processor = createDispatchProcessor({
@@ -202,7 +212,7 @@ async function testDispatchSuccessSkipsTrailFinishedWhenNextVideoExists() {
     trilha_id: "trilha-1",
     link_video: "https://example.com/video.mp4",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const job = createFakeJob(jobData);
   const processor = createDispatchProcessor({
@@ -257,7 +267,7 @@ async function testDispatchSuccessSkipsTrailFinishedOnDuplicateProgress() {
     never_repeat_video: true,
     link_video: "https://example.com/video.mp4",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const job = createFakeJob(jobData);
   const processor = createDispatchProcessor({
@@ -303,7 +313,7 @@ async function testTrailFinishedNotificationFailureDoesNotBreakDispatchFlow() {
     trilha_id: "trilha-1",
     link_video: "https://example.com/video.mp4",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const job = createFakeJob(jobData);
   const processor = createDispatchProcessor({

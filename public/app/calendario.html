@@ -291,10 +291,10 @@
             }
             const count = campaignsForDate(cell.dateStr).length;
             return `
-              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}${count ? " has-items" : ""}" data-date="${cell.dateStr}"${count ? ` aria-label="${count} programação${count > 1 ? "ões" : ""} em ${cell.day}"` : ""}>
+              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}${count ? " has-items" : ""}" data-date="${cell.dateStr}"${count ? ` aria-label="${count} programaç${count > 1 ? "ões" : "ão"} em ${cell.day}"` : ""}>
                 <span class="cal-daynum">${cell.day}</span>
                 <div class="cal-cell-body">
-                  ${count ? `<span class="cal-count-pill"><span class="dot"></span>${count} programação${count > 1 ? "ões" : ""}</span>` : ""}
+                  ${count ? `<span class="cal-count-pill"><span class="dot"></span>${count} programaç${count > 1 ? "ões" : "ão"}</span>` : ""}
                 </div>
               </div>`;
           })
@@ -486,12 +486,15 @@
       async function initialize() {
         renderWeekdaysRow();
 
+        window.estimuloShowLoading();
         try {
           const campaigns = await requestJson("/campaigns");
           state.campaigns = Array.isArray(campaigns) ? campaigns : [];
         } catch (error) {
           console.error("Falha ao carregar campanhas", error);
           state.campaigns = [];
+        } finally {
+          window.estimuloHideLoading();
         }
 
         renderCalendar();

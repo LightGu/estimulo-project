@@ -5,6 +5,7 @@ const defaultDispatchLogsRepository = require("../repositories/dispatch-logs.rep
 const defaultGroupsRepository = require("../repositories/groups.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 const defaultSettingsService = require("../services/settings.service");
+const { resolveLogScheduledAt } = require("../services/dispatch-staleness");
 
 const DISPATCH_FAILURE_RETRY_JOB_NAME = "dispatch-failure-retry-sweep";
 const DISPATCH_FAILURE_RETRY_SCHEDULE_KEY = "dispatch-failure-retry-sweep";
@@ -69,6 +70,20 @@ async function scheduleDispatchFailureRetrySweep(options = {}) {
   );
 }
 
+// Horario original daquele envio, NUNCA "agora".
+//
+// Antes esta funcao estampava `scheduled_at: new Date()` no job de retry. Isso
+// apagava a unica evidencia de que o envio era antigo: a trava de atraso passava
+// a comparar o horario contra ele mesmo e sempre autorizava. Um log "falhou" de
+// dias atras voltava para a fila como se tivesse sido agendado naquele instante
+// e era entregue no grupo - e, como o sweep e re-registrado a cada start dos
+// workers, isso se repetia em todo `docker compose up`.
+//
+// Retorna null quando nao ha horario nenhum para ancorar o retry; nesse caso o
+// sweep pula o log em vez de inventar um horario (ver o loop do processor).
+// Regra compartilhada com os caminhos de resume - ver dispatch-staleness.js.
+const resolveRetryScheduledAt = resolveLogScheduledAt;
+
 function buildRetryJobData(log) {
   const group = log.groups || {};
   const video = log.video_catalog || {};
@@ -89,7 +104,7 @@ function buildRetryJobData(log) {
     // (na primeira tentativa), em vez de reenviar a mesma notificacao a cada
     // sweep de retry.
     retry_count: log.retry_count || 0,
-    scheduled_at: new Date(),
+    scheduled_at: resolveRetryScheduledAt(log),
   };
 }
 
@@ -189,6 +204,24 @@ function createDispatchFailureRetryProcessor(options = {}) {
           continue;
         }
 
+        // Sem horario original nao existe como validar o atraso deste reenvio, e
+        // inventar "agora" e exatamente o que fazia um envio antigo passar pela
+        // trava. Pula e registra: reenviar as cegas nao e uma opcao.
+        if (!resolveRetryScheduledAt(log)) {
+          logger.warn &&
+            logger.warn(
+              JSON.stringify({
+                event: "dispatch_failure_retry.skipped_sem_horario",
+                log_id: log.id,
+                campaign_id: log.campaign_id,
+                group_id: log.group_id,
+                video_id: log.video_id,
+                note: "log sem horario_envio_planejado nem criado_em; reenvio exige acao manual",
+              })
+            );
+          continue;
+        }
+
         const nextRetryCount = (log.retry_count || 0) + 1;
 
         await dispatchLogsRepository.markRetrying(log.id, nextRetryCount);
@@ -242,6 +275,7 @@ module.exports = {
   PERMANENT_FAILURE_PATTERNS,
   buildRetryJobData,
   isPermanentFailureMessage,
+  resolveRetryScheduledAt,
   createDispatchFailureRetryProcessor,
   createDispatchFailureRetryWorker,
   createDispatchFailureRetryEvents,

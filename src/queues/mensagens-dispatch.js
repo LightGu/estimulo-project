@@ -11,7 +11,7 @@ const {
   DEFAULT_MAX_POSTPONEMENTS,
   resolveAdHocDispatchBlock,
 } = require("../services/dispatch-exclusivity");
-const { resolveStaleDispatchReason } = require("../services/dispatch-staleness");
+const { resolveJobStaleReason } = require("../services/dispatch-staleness");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 
@@ -244,7 +244,12 @@ function createMensagensDispatchProcessor(options = {}) {
     // (fila parada, worker que caiu e voltou, resume de campanha pausada ha
     // muito tempo) nao pode disparar por cima do horario perdido - cancela em
     // vez de mandar uma mensagem "atrasada" sem contexto para o grupo.
-    const staleReason = resolveStaleDispatchReason(job.data.scheduled_at, { now });
+    //
+    // Falha fechado (resolveJobStaleReason, nao resolveStaleDispatchReason):
+    // todo job desta fila nasce com scheduled_at preenchido, entao job sem
+    // horario aqui e job corrompido/legado - e a resposta segura para "nao sei
+    // quando isto deveria sair" e nao enviar.
+    const staleReason = resolveJobStaleReason(job.data.scheduled_at, { now });
 
     if (staleReason) {
       const cancelled = job.data.dispatch_log_id && typeof dispatchLogs.cancelIfPending === "function"

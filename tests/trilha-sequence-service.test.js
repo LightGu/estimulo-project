@@ -114,20 +114,20 @@ async function testSetorDesvioIgnoredWhenSetorDoesNotMatch() {
   assert.deepEqual(next, { trilha_id: "T3", profile_id: "P1", checkpoint: false, reason: "sequencia" });
 }
 
-async function testCheckpointAdvancesToNextProfile() {
+async function testNeverAdvancesToNextProfileAutomatically() {
   const service = buildService({ deliveredTrilhaIds: ["T1", "T2", "T3"] });
 
   const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P1" });
 
-  assert.deepEqual(next, { trilha_id: "T4", profile_id: "P2", checkpoint: true, reason: "checkpoint_perfil" });
+  assert.equal(next, null);
 }
 
-async function testCheckpointHopsOverProfileWithEmptySequence() {
+async function testEmptySequenceNeverHopsToAnotherProfile() {
   const service = buildService({ deliveredTrilhaIds: ["T4"] });
 
-  const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P2" });
+  const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P3" });
 
-  assert.deepEqual(next, { trilha_id: "T5", profile_id: "P4", checkpoint: true, reason: "checkpoint_perfil" });
+  assert.equal(next, null);
 }
 
 async function testJourneyCompleteReturnsNull() {
@@ -136,6 +136,17 @@ async function testJourneyCompleteReturnsNull() {
   const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P4" });
 
   assert.equal(next, null);
+}
+
+async function testCursorAnchorsOnCurrentTrilhaIdNotDeliveryHistory() {
+  // Grupo ja entregou ate a T3 (ultima trilha de P1) no passado, mas o operador
+  // trocou manualmente a trilha atual de volta para T1 - a proxima deve ser a T2,
+  // seguindo a trilha selecionada agora, nao o maior "ordem" ja entregue.
+  const service = buildService({ deliveredTrilhaIds: ["T1", "T2", "T3"] });
+
+  const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P1", trilha_id: "T1" });
+
+  assert.deepEqual(next, { trilha_id: "T2", profile_id: "P1", checkpoint: false, reason: "sequencia" });
 }
 
 async function testExcludeTrilhaIdsSkipsEmptyTrilha() {
@@ -176,6 +187,8 @@ async function testMatchingDesvioTieBreaksByOldestCreatedAt() {
 }
 
 async function testCountReachableSteps() {
+  // So conta o que resta na sequencia do perfil atual (3 trilhas, cursor -1) mais
+  // os desvios desse mesmo perfil - o motor nunca alcanca outro perfil sozinho.
   const desvios = [
     { id: "d1", profile_id: "P1", after_trilha_id: "T2", setores: ["Bares e Restaurantes"], trilha_destino_id: "TD1", created_at: "2026-01-01T00:00:00.000Z" },
   ];
@@ -183,7 +196,7 @@ async function testCountReachableSteps() {
 
   const total = await service.countReachableSteps({ id: "g1", profile_id: "P1" });
 
-  assert.equal(total, 6);
+  assert.equal(total, 4);
 }
 
 async function testCountReachableStepsWithoutProfileIsZero() {
@@ -297,9 +310,10 @@ async function main() {
   await testSetorDesvioFiresWhenNotYetReceived();
   await testSetorDesvioSkippedWhenAlreadyReceived();
   await testSetorDesvioIgnoredWhenSetorDoesNotMatch();
-  await testCheckpointAdvancesToNextProfile();
-  await testCheckpointHopsOverProfileWithEmptySequence();
+  await testNeverAdvancesToNextProfileAutomatically();
+  await testEmptySequenceNeverHopsToAnotherProfile();
   await testJourneyCompleteReturnsNull();
+  await testCursorAnchorsOnCurrentTrilhaIdNotDeliveryHistory();
   await testExcludeTrilhaIdsSkipsEmptyTrilha();
   await testExcludeTrilhaIdsAppliesToDesvio();
   await testMatchingDesvioTieBreaksByOldestCreatedAt();

@@ -7,13 +7,23 @@ const {
 } = require("../src/queues/campaign-trigger");
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 
+// Data relativa ao "agora" do teste, nunca uma data fixa no codigo.
+//
+// A trava de atraso do trigger (resolveTriggerStaleReason) compara execution_at
+// com o horario atual: um execution_at fixo no passado faz o processor pular a
+// execucao - correto em producao, mas transformaria estes testes de fluxo em
+// falsos negativos que "quebram sozinhos" conforme o calendario anda.
+function minutesAgoIso(minutes) {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
 function createJob(data = {}) {
   const updates = [];
   const job = {
     id: "job-1",
     data: {
       campaign_id: "campaign-1",
-      execution_at: "2026-07-17T10:00:00.000Z",
+      execution_at: minutesAgoIso(1),
       ...data,
     },
     updates,
@@ -374,7 +384,8 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
     addDispatchJob: async (payload) => ({ id: "dispatch-1", data: payload }),
   });
 
-  const result = await processor(createJob());
+  const job = createJob();
+  const result = await processor(job);
 
   assert.equal(result.pending_logs_created, 1);
   assert.deepEqual(createdLogs, [
@@ -385,7 +396,9 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
       video_id: "video-1",
       status: "pendente",
       mensagem_erro: null,
-      horario_envio_planejado: "2026-07-17T10:00:00.000Z",
+      // Derivado do job (e nao uma data fixa): o horario planejado do log vem
+      // do execution_at, que agora e relativo ao "agora" do teste.
+      horario_envio_planejado: job.updates[0].execution_at,
     },
   ]);
 }

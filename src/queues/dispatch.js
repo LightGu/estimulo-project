@@ -22,6 +22,12 @@ const defaultCampaignGroupsRepository = require("../repositories/campaign-groups
 const defaultNotificationsService = require("../services/notifications.service");
 const defaultInAppNotificationsService = require("../services/in-app-notifications.service");
 const defaultTrilhasRepository = require("../repositories/trilhas.repository");
+const defaultDispatchLogsRepository = require("../repositories/dispatch-logs.repository");
+const {
+  resolveCampaignBlockReason,
+  resolveJobStaleReason,
+  resolveMaxVideoDispatchDelayMs,
+} = require("../services/dispatch-staleness");
 const { resolveGroupTrailId, selectNextApprovedUnsentVideo } = require("../services/group-video-flow");
 
 const DISPATCH_JOB_NAME = "dispatch-content";
@@ -781,13 +787,10 @@ async function registerDispatchProgress(
     });
   }
 
-  if (wasDuplicate) {
-    return {
-      duplicate: true,
-      record: null,
-    };
-  }
-
+  // A mensagem ja foi enviada mesmo quando o registro de progresso e pulado
+  // (repeticao com "nunca repetir video" ativo) - o forced_next_video_id
+  // precisa ser limpo de qualquer forma, senao o proximo disparo tenta
+  // reenviar o mesmo video forcado indefinidamente.
   const groupUpdate = { ...(trilhaId ? { trilha_id: trilhaId } : {}) };
 
   if (jobData.forced_next_video_id && jobData.forced_next_video_id === videoId) {
@@ -796,6 +799,13 @@ async function registerDispatchProgress(
 
   if (Object.keys(groupUpdate).length > 0) {
     await groupsRepository.update(groupId, groupUpdate);
+  }
+
+  if (wasDuplicate) {
+    return {
+      duplicate: true,
+      record: null,
+    };
   }
 
   return {
@@ -911,6 +921,45 @@ async function maybeNotifyCampaignFinished(jobData, dependencies = {}) {
   }
 }
 
+// Cancela, best-effort, o log ainda pendente do trio campaign/group/video, para
+// que o relatorio mostre "cancelado" em vez de deixar a linha presa em pendente
+// quando o portao de entrada barra o envio. Nunca pode derrubar o job: o que
+// importa e nao enviar.
+async function cancelPendingLogForBlockedDispatch(jobData, dispatchLogs, reason, logger = console) {
+  if (!dispatchLogs || typeof dispatchLogs.listByCampaign !== "function" || !jobData.campaign_id) {
+    return null;
+  }
+
+  try {
+    const logs = await dispatchLogs.listByCampaign(jobData.campaign_id);
+    const pending = (logs || []).find(
+      (entry) =>
+        entry.status === "pendente" &&
+        entry.group_id === jobData.progress_group_id &&
+        (!jobData.video_id || entry.video_id === jobData.video_id)
+    );
+
+    if (!pending || typeof dispatchLogs.cancelIfPending !== "function") {
+      return null;
+    }
+
+    return await dispatchLogs.cancelIfPending(pending.id, reason);
+  } catch (error) {
+    logger.error &&
+      logger.error(
+        JSON.stringify({
+          event: "dispatch.cancel_blocked_log_failed",
+          campaign_id: jobData.campaign_id,
+          group_id: jobData.progress_group_id,
+          video_id: jobData.video_id,
+          error_message: error.message,
+        })
+      );
+
+    return null;
+  }
+}
+
 function createDispatchProcessor(options = {}) {
   const {
     sender: explicitSender,
@@ -930,16 +979,98 @@ function createDispatchProcessor(options = {}) {
     notificationsService = defaultNotificationsService,
     trilhasRepository = defaultTrilhasRepository,
     inAppNotificationsService = defaultInAppNotificationsService,
+    dispatchLogs = defaultDispatchLogsRepository,
+    now = () => new Date(),
     logger = console,
   } = options;
 
   return async function dispatchWorker(job) {
     const startedAt = new Date().toISOString();
 
-    // A checagem de campanha pausada fica dentro de dispatch-consistency.js
-    // (reaproveita o fetch que ensureDispatchEntities ja faz, sem round-trip
-    // extra) - colocar aqui tambem serializava essa consulta antes do download
-    // do video e da resolucao da legenda, que precisam comecar em paralelo.
+    // PORTAO DE ENTRADA (falha fechado) - nada acima disto faz I/O de envio.
+    //
+    // Trava de atraso no nivel do job, antes de qualquer download ou legenda.
+    // Antes ela existia SO dentro de dispatch-consistency.js, comparada contra
+    // log.horario_envio_planejado - que e nulo em todo log criado por
+    // createAttemptLog. Resultado: o caminho de video ficava sem nenhuma trava
+    // de atraso efetiva, e cada `docker compose up` reenviava para os grupos os
+    // jobs que a BullMQ promovia de uma vez do estado `delayed`/`active`
+    // (o Redis da infra persiste as filas). Aqui a checagem usa
+    // job.data.scheduled_at, que TODO job desta fila tem preenchido.
+    const staleReason = resolveJobStaleReason(job.data.scheduled_at, {
+      maxDelayMs: resolveMaxVideoDispatchDelayMs(),
+      now,
+    });
+
+    if (staleReason) {
+      await cancelPendingLogForBlockedDispatch(job.data, dispatchLogs, staleReason, logger);
+      await job
+        .updateData({
+          ...job.data,
+          status: "cancelado",
+          cancelled_at: new Date().toISOString(),
+          cancel_reason: staleReason,
+        })
+        .catch(() => undefined);
+
+      logger.warn &&
+        logger.warn(
+          JSON.stringify({
+            event: "dispatch.cancelled_stale",
+            job_id: job.id,
+            campaign_id: job.data.campaign_id,
+            group_id: job.data.group_id,
+            progress_group_id: job.data.progress_group_id,
+            video_id: job.data.video_id,
+            scheduled_at: job.data.scheduled_at,
+            reason: staleReason,
+          })
+        );
+
+      return { status: "cancelado", reason: staleReason };
+    }
+
+    // A checagem de campanha pausada/cancelada vive dentro de
+    // dispatch-consistency.js (reaproveita o fetch que ensureDispatchEntities ja
+    // faz, sem round-trip extra). Mas quando a consistencia nao se aplica
+    // (campaign/group/video que nao sao UUID), aquele caminho inteiro e pulado -
+    // e com ele a checagem de status. Aqui ela e refeita so nesse caso, para que
+    // nao exista caminho de envio sem essa trava.
+    const useDispatchConsistency = canUseDispatchConsistency(job.data, dispatchConsistencyService);
+
+    if (!useDispatchConsistency && UUID_PATTERN.test(String(job.data.campaign_id || ""))) {
+      const campaign = campaignsRepository && typeof campaignsRepository.findById === "function"
+        ? await campaignsRepository.findById(job.data.campaign_id).catch(() => null)
+        : null;
+      const campaignBlockReason = resolveCampaignBlockReason(campaign);
+
+      if (campaignBlockReason) {
+        await cancelPendingLogForBlockedDispatch(job.data, dispatchLogs, campaignBlockReason, logger);
+        await job
+          .updateData({
+            ...job.data,
+            status: "cancelado",
+            cancelled_at: new Date().toISOString(),
+            cancel_reason: campaignBlockReason,
+          })
+          .catch(() => undefined);
+
+        logger.warn &&
+          logger.warn(
+            JSON.stringify({
+              event: "dispatch.skipped_campaign_not_active",
+              job_id: job.id,
+              campaign_id: job.data.campaign_id,
+              group_id: job.data.group_id,
+              campaign_status: campaign && campaign.status,
+              reason: campaignBlockReason,
+            })
+          );
+
+        return { status: "cancelado", reason: campaignBlockReason };
+      }
+    }
+
     try {
       await job.updateData({
         ...job.data,
@@ -974,7 +1105,6 @@ function createDispatchProcessor(options = {}) {
         videoCaptionsService,
         videoDownloader,
       });
-      const useDispatchConsistency = canUseDispatchConsistency(job.data, dispatchConsistencyService);
       let delivery;
       let progress;
 
@@ -986,6 +1116,10 @@ function createDispatchProcessor(options = {}) {
           trilhaId: job.data.trilha_id,
           neverRepeatVideo: job.data.never_repeat_video,
           forcedNextVideoId: job.data.forced_next_video_id,
+          // Fallback da trava de atraso lá dentro: todo log criado por
+          // createAttemptLog nasce sem horario_envio_planejado, e sem este
+          // valor a checagem de atraso ficava cega justamente nos logs novos.
+          scheduledAt: job.data.scheduled_at,
           sender: executeDelivery,
         });
 

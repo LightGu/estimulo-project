@@ -3,8 +3,6 @@ const trilhaDesviosRepository = require("../repositories/trilha-desvios.reposito
 const groupProfilesRepository = require("../repositories/group-profiles.repository");
 const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 
-const MAX_PROFILE_HOPS = 50;
-
 function normalizeComparableText(value) {
   return String(value || "")
     .normalize("NFD")
@@ -31,17 +29,31 @@ function createTrilhaSequenceService(dependencies = {}) {
     };
   }
 
-  // Cursor = maior ordem, na sequencia deste perfil, entre trilhas que o grupo ja
-  // recebeu de verdade (entrega registrada, nao so atribuicao ao vivo em
-  // group.trilha_id). Tratar trilha_id como "o que entregar agora" em vez de "onde
-  // estamos" evita que uma troca manual de trilha pelo operador reinicie o perfil
-  // do zero, e torna corridas de concorrencia no avanco automatico nao-destrutivas.
-  async function findCursorIndex(sequence, groupId) {
+  // Cursor = posicao, na sequencia deste perfil, da trilha atualmente atribuida ao
+  // grupo (group.trilha_id). Ancorar na trilha ao vivo (em vez do maior "ordem" ja
+  // entregue) faz uma troca manual de trilha pelo operador realmente mudar qual e
+  // a "proxima" - se o operador voltou da trilha 4 para a 1, a proxima passa a ser
+  // a 2, mesmo que a 4 e a 5 ja tenham sido entregues antes.
+  //
+  // Se o grupo nao tem trilha_id atribuida (ainda nao comecou), cai de volta no
+  // maior "ordem" ja entregue - preserva o comportamento de retomar de onde parou
+  // apos uma entrega bem-sucedida que ainda nao foi refletida em group.trilha_id.
+  async function findCursorIndex(sequence, group) {
     if (!sequence.length) {
       return -1;
     }
 
-    const deliveries = await progressRepository.listDelivered(groupId);
+    const currentTrilhaId = group?.trilha_id || group?.trilhaId || null;
+
+    if (currentTrilhaId) {
+      const currentIndex = sequence.findIndex((entry) => entry.trilha_id === currentTrilhaId);
+
+      if (currentIndex >= 0) {
+        return currentIndex;
+      }
+    }
+
+    const deliveries = await progressRepository.listDelivered(group?.id);
     const deliveredTrilhaIds = new Set(
       deliveries.filter((delivery) => delivery.trilha_id && delivery.enviado_em).map((delivery) => delivery.trilha_id)
     );
@@ -91,49 +103,15 @@ function createTrilhaSequenceService(dependencies = {}) {
     return candidates[0] || null;
   }
 
-  async function findNextProfile(currentProfileId, profiles) {
-    const resolvedProfiles = profiles || (await profilesRepository.findAll());
-    const current = resolvedProfiles.find((profile) => profile.id === currentProfileId);
-
-    if (!current || current.ordem === null || current.ordem === undefined) {
-      return null;
-    }
-
-    return resolvedProfiles.find((profile) => Number(profile.ordem) === Number(current.ordem) + 1) || null;
-  }
-
-  // Encadeia perfis seguintes ate achar um com sequencia cadastrada, ou esgotar os
-  // perfis (retorna null - jornada concluida). O laco e defensivo: como
-  // group_profiles.ordem tem UNIQUE constraint e cada passo exige ordem+1 exato,
-  // nao ha como formar um ciclo; o teto so existe para nunca travar caso os dados
-  // fiquem em um estado inesperado.
-  async function resolveCheckpoint(currentProfileId, excludeTrilhaIds) {
-    const profiles = await profilesRepository.findAll();
-    let cursorProfileId = currentProfileId;
-
-    for (let hops = 0; hops < MAX_PROFILE_HOPS; hops += 1) {
-      const nextProfile = await findNextProfile(cursorProfileId, profiles);
-
-      if (!nextProfile) {
-        return null;
-      }
-
-      const { sequence } = await loadProfileContext(nextProfile.id);
-      const firstAvailable = firstNonExcluded(sequence, 0, excludeTrilhaIds);
-
-      if (firstAvailable) {
-        return { trilha_id: firstAvailable.trilha_id, profile_id: nextProfile.id, checkpoint: true, reason: "checkpoint_perfil" };
-      }
-
-      cursorProfileId = nextProfile.id;
-    }
-
-    return null;
-  }
-
   // Resolve a trilha que o grupo deveria estar recebendo agora, segundo a ordem
-  // pre-definida do seu perfil (mais desvios por setor e checkpoints de perfil).
-  // Nao persiste nada - quem chama decide se/como grava o resultado.
+  // pre-definida do seu perfil (mais desvios por setor). Nao persiste nada - quem
+  // chama decide se/como grava o resultado.
+  //
+  // Nunca avanca para o proximo perfil sozinho: ao esgotar a sequencia do perfil
+  // atual, devolve null (jornada deste perfil parada) mesmo que o proximo perfil
+  // ja tenha trilhas cadastradas - a troca de perfil e sempre uma decisao manual
+  // do operador (ver applyTrilhaChange / atualizar trilhas finalizadas na tela de
+  // envio automatizado).
   //
   // options.excludeTrilhaIds (Set, opcional): trilhas que o chamador ja tentou
   // nesta mesma passada de avanco e sabe que estao sem video aprovado agora -
@@ -150,10 +128,10 @@ function createTrilhaSequenceService(dependencies = {}) {
     const { sequence, desvios } = await loadProfileContext(profileId);
 
     if (!sequence.length) {
-      return resolveCheckpoint(profileId, excludeTrilhaIds);
+      return null;
     }
 
-    const cursor = await findCursorIndex(sequence, group.id);
+    const cursor = await findCursorIndex(sequence, group);
 
     if (cursor >= 0) {
       const anchor = sequence[cursor];
@@ -174,13 +152,14 @@ function createTrilhaSequenceService(dependencies = {}) {
       return { trilha_id: next.trilha_id, profile_id: profileId, checkpoint: false, reason: "sequencia" };
     }
 
-    return resolveCheckpoint(profileId, excludeTrilhaIds);
+    return null;
   }
 
   // Limite de iteracao real para o laco de "pular trilha vazia" em
   // group-video-flow.js, em vez de uma constante arbitraria: soma os passos ainda
-  // alcancaveis a partir do cursor atual (resto da sequencia do perfil corrente +
-  // sequencias completas dos perfis seguintes + desvios de cada um).
+  // alcancaveis a partir do cursor atual, dentro do perfil corrente apenas - o
+  // motor nunca avanca de perfil sozinho (ver resolveNextTrilhaForGroup), entao
+  // perfis seguintes nunca sao alcancaveis pelo avanco automatico.
   async function countReachableSteps(group) {
     const profileId = group?.profile_id;
 
@@ -188,34 +167,10 @@ function createTrilhaSequenceService(dependencies = {}) {
       return 0;
     }
 
-    const profiles = await profilesRepository.findAll();
-    const current = profiles.find((profile) => profile.id === profileId);
+    const { sequence, desvios } = await loadProfileContext(profileId);
+    const cursor = await findCursorIndex(sequence, group);
 
-    if (!current) {
-      return 0;
-    }
-
-    const relevantProfiles =
-      current.ordem === null || current.ordem === undefined
-        ? [current]
-        : profiles.filter((profile) => Number(profile.ordem) >= Number(current.ordem));
-
-    let total = 0;
-
-    for (const profile of relevantProfiles) {
-      const { sequence, desvios } = await loadProfileContext(profile.id);
-
-      if (profile.id === profileId) {
-        const cursor = await findCursorIndex(sequence, group.id);
-        total += Math.max(sequence.length - (cursor + 1), 0);
-      } else {
-        total += sequence.length;
-      }
-
-      total += desvios.length;
-    }
-
-    return total;
+    return Math.max(sequence.length - (cursor + 1), 0) + desvios.length;
   }
 
   async function listDesviosByProfile(profileId) {

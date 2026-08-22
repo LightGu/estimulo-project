@@ -502,6 +502,7 @@
                 ${escapeHtml(t.trilha)} <span class="count">(${t.videos.length})</span>
               </button>
               <button class="icon-btn-edit" data-edit-trilha="${escapeHtml(key)}" type="button" title="Editar nome" aria-label="Editar nome da trilha">✎</button>
+              <button class="icon-btn-edit" data-remove-trilha="${escapeHtml(key)}" type="button" title="Remover trilha" aria-label="Remover trilha ${escapeHtml(t.trilha)}">🗑</button>
             </span>`;
           })
           .join("");
@@ -515,6 +516,13 @@
 
         document.querySelectorAll("[data-edit-trilha]").forEach((btn) => {
           btn.addEventListener("click", () => openRenameTrilha(btn.dataset.editTrilha));
+        });
+
+        document.querySelectorAll("[data-remove-trilha]").forEach((btn) => {
+          btn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            confirmRemoveTrilha(btn.dataset.removeTrilha);
+          });
         });
 
         const trail = macrotema.trails.find((t) => trilhaKey(t) === selectedTrilhaKey) || macrotema.trails[0];
@@ -555,6 +563,7 @@
                 <button class="btn btn-secondary btn-sm" data-move="${escapeHtml(v.id)}">Adicionar a outra trilha</button>
                 <button class="btn btn-secondary btn-sm" data-remove="${escapeHtml(v.id)}">Remover desta trilha</button>
                 <button class="btn btn-ghost btn-sm" data-review-caption="${escapeHtml(v.id)}">Revisar legenda</button>
+                <button class="icon-btn-edit" data-rename-video="${escapeHtml(v.id)}" type="button" title="Renomear vídeo" aria-label="Renomear vídeo ${escapeHtml(v.nome_do_arquivo)}">✎</button>
               </td>
             </tr>`
           )
@@ -563,6 +572,7 @@
         document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(trail, btn.dataset.move)));
         document.querySelectorAll("[data-remove]").forEach((btn) => btn.addEventListener("click", () => removeVideoFromCurrentTrail(trail, btn.dataset.remove)));
         document.querySelectorAll("[data-review-caption]").forEach((btn) => btn.addEventListener("click", () => openCaptionReview(trail, btn.dataset.reviewCaption)));
+        document.querySelectorAll("[data-rename-video]").forEach((btn) => btn.addEventListener("click", () => openRenameVideo(trail, btn.dataset.renameVideo)));
         document.querySelectorAll("[data-reorder-video-up]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoUp, -1)));
         document.querySelectorAll("[data-reorder-video-down]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoDown, 1)));
         attachDragAndDrop(trail);
@@ -1959,6 +1969,39 @@
         renameReleaseTrap = window.estimuloTrapFocus(renameOverlay);
       }
 
+      async function confirmRemoveTrilha(trilhaId) {
+        const trail = state.trails.find((t) => t.id === trilhaId);
+        if (!trail) return;
+
+        let groupsCount = 0;
+        try {
+          const usage = await requestJson(`/trilhas/${encodeURIComponent(trilhaId)}/usage`);
+          groupsCount = usage?.groups_count || 0;
+        } catch (error) {
+          // segue sem o aviso de grupos afetados caso a checagem falhe
+        }
+
+        const warning =
+          groupsCount > 0
+            ? `\n\nAtenção: ${groupsCount} grupo(s) estão atualmente nesta trilha e ficarão sem trilha selecionada.`
+            : "";
+
+        const confirmed = await window.estimuloConfirm(
+          `Remover a trilha "${trail.trilha}" (${trail.macrotema})? Os vídeos vinculados a ela deixarão de fazer parte desta trilha.${warning}`,
+          { title: "Remover trilha", confirmLabel: "Remover" }
+        );
+
+        if (!confirmed) return;
+
+        try {
+          await requestJson(`/trilhas/${encodeURIComponent(trilhaId)}`, { method: "DELETE" });
+          selectedTrilhaKey = null;
+          await initialize();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+        }
+      }
+
       function openRenameTrilha(trilhaId) {
         const trail = state.trails.find((t) => t.id === trilhaId);
         if (!trail) return;
@@ -1966,6 +2009,19 @@
         renameContext = { type: "trilha", trilhaId, trilha: trail.trilha };
         document.getElementById("renameModalTitle").textContent = "Editar nome da trilha";
         document.getElementById("renameNome").value = trail.trilha;
+        document.getElementById("renameStatus").textContent = "";
+        document.getElementById("renameStatus").className = "status-line";
+        renameOverlay.hidden = false;
+        renameReleaseTrap = window.estimuloTrapFocus(renameOverlay);
+      }
+
+      function openRenameVideo(trail, videoId) {
+        const video = trail.videos.find((v) => v.id === videoId);
+        if (!video) return;
+
+        renameContext = { type: "video", videoId, nome_do_arquivo: video.nome_do_arquivo };
+        document.getElementById("renameModalTitle").textContent = "Renomear vídeo";
+        document.getElementById("renameNome").value = video.nome_do_arquivo;
         document.getElementById("renameStatus").textContent = "";
         document.getElementById("renameStatus").className = "status-line";
         renameOverlay.hidden = false;
@@ -2019,6 +2075,12 @@
 
             selectedMacrotemaKey = novoNome;
             selectedTrilhaKey = null;
+          } else if (renameContext.type === "video") {
+            await requestJson(`/video-catalog/${encodeURIComponent(renameContext.videoId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ nome_do_arquivo: novoNome }),
+            });
           } else {
             await requestJson(`/trilhas/${encodeURIComponent(renameContext.trilhaId)}`, {
               method: "PATCH",
@@ -2039,34 +2101,39 @@
       });
 
       async function initialize() {
+        window.estimuloShowLoading();
         try {
-          const profiles = await requestJson("/group-profiles");
-          state.groupProfiles = Array.isArray(profiles) ? profiles : [];
-          state.profiles = state.groupProfiles.map((p) => p.nome);
-        } catch (error) {
-          state.groupProfiles = [];
-          state.profiles = [];
-        }
-
-        try {
-          const trails = await requestJson("/trilhas/overview");
-          state.trails = Array.isArray(trails) ? trails : [];
-
-          if (!selectedMacrotemaKey) {
-            const macrotemas = macrotemasForActivePerfil();
-            selectedMacrotemaKey = macrotemas.length ? macrotemaKey(macrotemas[0]) : null;
-            selectedTrilhaKey = macrotemas.length && macrotemas[0].trails.length ? trilhaKey(macrotemas[0].trails[0]) : null;
+          try {
+            const profiles = await requestJson("/group-profiles");
+            state.groupProfiles = Array.isArray(profiles) ? profiles : [];
+            state.profiles = state.groupProfiles.map((p) => p.nome);
+          } catch (error) {
+            state.groupProfiles = [];
+            state.profiles = [];
           }
 
-          renderPerfilTabs();
-          renderMacrotemaGrid();
-          renderTrailDetail();
+          try {
+            const trails = await requestJson("/trilhas/overview");
+            state.trails = Array.isArray(trails) ? trails : [];
 
-          if (activeView === "sequencia") {
-            await loadSequenceView();
+            if (!selectedMacrotemaKey) {
+              const macrotemas = macrotemasForActivePerfil();
+              selectedMacrotemaKey = macrotemas.length ? macrotemaKey(macrotemas[0]) : null;
+              selectedTrilhaKey = macrotemas.length && macrotemas[0].trails.length ? trilhaKey(macrotemas[0].trails[0]) : null;
+            }
+
+            renderPerfilTabs();
+            renderMacrotemaGrid();
+            renderTrailDetail();
+
+            if (activeView === "sequencia") {
+              await loadSequenceView();
+            }
+          } catch (error) {
+            renderLoadError(error);
           }
-        } catch (error) {
-          renderLoadError(error);
+        } finally {
+          window.estimuloHideLoading();
         }
       }
 

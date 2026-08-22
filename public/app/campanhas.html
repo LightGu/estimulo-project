@@ -693,8 +693,13 @@
       });
 
       async function initialize() {
-        updateSortToggleButton();
-        await reloadCampaignsList();
+        window.estimuloShowLoading();
+        try {
+          updateSortToggleButton();
+          await reloadCampaignsList();
+        } finally {
+          window.estimuloHideLoading();
+        }
       }
 
       initialize();
