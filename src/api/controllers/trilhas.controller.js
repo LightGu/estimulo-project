@@ -177,6 +177,16 @@ function createTrilhasController(dependencies = {}) {
     }
   }
 
+  async function getTrilhaUsage(req, res) {
+    try {
+      const usage = await trilhasService.getTrilhaUsage(req.params.id);
+
+      return res.status(200).json(usage);
+    } catch (error) {
+      return handleError(error, res);
+    }
+  }
+
   async function updateTrailPerfis(req, res) {
     try {
       const perfis = await trilhasService.updateTrailPerfis(req.params.id, req.body?.perfis);
@@ -279,6 +289,7 @@ function createTrilhasController(dependencies = {}) {
     createTrilha,
     renameTrilha,
     removeTrilha,
+    getTrilhaUsage,
     updateTrailPerfis,
     addVideoToTrilha,
     removeVideoFromTrilha,

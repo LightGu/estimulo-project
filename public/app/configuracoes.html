@@ -327,6 +327,9 @@
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
+      window.estimuloShowLoading();
+      const initialLoadPromises = [];
+
       function simulateAction(buttonId, statusId, runningText, doneText) {
         const button = document.getElementById(buttonId);
         const status = document.getElementById(statusId);
@@ -379,7 +382,7 @@
         setTimeout(() => (profileSaveStatus.textContent = ""), 2500);
       });
 
-      loadProfileSettings();
+      initialLoadPromises.push(loadProfileSettings());
 
       // ---------- 2. Google Drive ----------
       const driveStatus = document.getElementById("driveActionStatus");
@@ -492,7 +495,7 @@
         setTimeout(() => setDriveStatus(""), 3000);
       });
 
-      loadDriveSettings();
+      initialLoadPromises.push(loadDriveSettings());
 
       // ---------- 3. Evolution API (WhatsApp) ----------
       let whatsappInstances = [];
@@ -824,8 +827,8 @@
         }
       });
 
-      loadWhatsappInstances();
-      loadRotationSettings();
+      initialLoadPromises.push(loadWhatsappInstances());
+      initialLoadPromises.push(loadRotationSettings());
 
       // ---------- 4. IA ----------
       // Mantido em sincronia com ALLOWED_GEMINI_MODELS em
@@ -1043,7 +1046,7 @@
         setTimeout(() => (aiSaveStatus.textContent = ""), 2500);
       });
 
-      loadAiSettings();
+      initialLoadPromises.push(loadAiSettings());
 
       // ---------- 5. Agendamento padrão ----------
       const timezoneSelect = document.getElementById("timezoneSelect");
@@ -1124,11 +1127,11 @@
         setTimeout(() => (scheduleSaveStatus.textContent = ""), 2500);
       });
 
-      loadScheduleSettings();
+      initialLoadPromises.push(loadScheduleSettings());
 
       // ---------- 6. Regras de envio ----------
       const DISPATCH_RULES = [
-        { id: "auto_advance_trilha", label: "Avançar automaticamente para a próxima trilha", hint: "Quando a trilha atual de um grupo terminar, escolhe a próxima automaticamente segundo a ordem definida para o perfil (com desvios por setor e troca de perfil quando a jornada avança). Se desativado, o grupo fica pausado até alguém escolher a trilha manualmente.", checked: true },
+        { id: "auto_advance_trilha", label: "Avançar automaticamente para a próxima trilha", hint: "Quando a trilha atual de um grupo terminar, escolhe a próxima automaticamente dentro da ordem definida para o perfil (com desvios por setor). Nunca troca de perfil sozinho — ao esgotar a sequência do perfil, o grupo fica pausado até alguém atribuir uma nova trilha manualmente.", checked: true },
         { id: "notify_on_trail_advanced", label: "Notificar quando o avanço automático trocar a trilha de um grupo", hint: "Envia uma notificação quando o motor de sequenciamento reatribui a trilha de um grupo sozinho.", checked: true },
         { id: "never_repeat_video", label: "Nunca repetir vídeo", hint: "Impede que o mesmo vídeo seja enviado duas vezes ao mesmo grupo. Quando desativado, você pode forçar o reenvio de um vídeo específico na tela de Envio automatizado.", checked: true },
         { id: "notify_on_trail_finished", label: "Notificar quando uma trilha em um grupo terminar", hint: "Envia uma notificação (conforme configurado na seção Notificações) quando não houver mais vídeos aprovados pendentes na trilha do grupo.", checked: true },
@@ -1235,7 +1238,7 @@
         renderDispatchRules();
       }
 
-      loadDispatchRules();
+      initialLoadPromises.push(loadDispatchRules());
 
       // ---------- 7. Notificações ----------
       const NOTIFY_EVENTS = [
@@ -1327,7 +1330,7 @@
         }
       });
 
-      loadNotificationSettings();
+      initialLoadPromises.push(loadNotificationSettings());
 
       // ---------- 8. Banco de dados ----------
       const dbActionStatus = document.getElementById("dbActionStatus");
@@ -1686,7 +1689,7 @@
         setTimeout(() => setProfilesStatus(""), 3000);
       });
 
-      loadProfiles();
+      initialLoadPromises.push(loadProfiles());
 
       // ---------- 9. Usuários do painel ----------
       const appUsersStatus = document.getElementById("appUsersStatus");
@@ -1792,7 +1795,9 @@
         setTimeout(() => setAppUsersStatus(""), 3000);
       });
 
-      loadAppUsers();
+      initialLoadPromises.push(loadAppUsers());
+
+      Promise.allSettled(initialLoadPromises).finally(() => window.estimuloHideLoading());
     </script>
   </body>
 </html>

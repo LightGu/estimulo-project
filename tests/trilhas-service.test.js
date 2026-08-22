@@ -325,6 +325,19 @@ async function testRemoveTrilhaFromSequenceRemovesAndReturnsRemainingDisplayData
   );
 }
 
+async function testGetTrilhaUsageReturnsGroupsCount() {
+  const { repository, videoCatalogRepository, groupProfilesService } = buildFixtures();
+  const groupsRepository = {
+    countByTrilhaId: async (trilhaId) => (trilhaId === "trilha-1" ? 3 : 0),
+  };
+  const service = createTrilhasService({ repository, videoCatalogRepository, groupProfilesService, groupsRepository });
+
+  const usage = await service.getTrilhaUsage("trilha-1");
+
+  assert.deepEqual(usage, { groups_count: 3 });
+  await assert.rejects(() => service.getTrilhaUsage("trilha-inexistente"), /Trilha not found/);
+}
+
 async function main() {
   await testCreateTrilhaBuildsOverviewAndValidates();
   await testUpdateTrailPerfisValidatesAndPersists();
@@ -336,6 +349,7 @@ async function main() {
   await testAddTrilhaToSequenceAppendsAtEndByDefault();
   await testAddTrilhaToSequenceInsertsAfterAnchor();
   await testRemoveTrilhaFromSequenceRemovesAndReturnsRemainingDisplayData();
+  await testGetTrilhaUsageReturnsGroupsCount();
 
   console.log("trilhas-service tests OK");
 }

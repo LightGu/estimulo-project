@@ -91,10 +91,25 @@ async function testResolveBlockReturnsNullWhenClear() {
   assert.equal(block, null);
 }
 
+// scheduled_at alinhado com o relogio congelado dos testes (`now` injetado).
+//
+// Em producao buildMensagensJobData SEMPRE preenche scheduled_at, e o worker tem
+// uma trava de atraso que falha fechado: job sem horario e cancelado sem enviar
+// (resolveJobStaleReason em src/services/dispatch-staleness.js). Um fixture sem
+// esse campo nao representa nenhum job real e cancelaria antes de chegar na
+// regra de adiamento que estes testes querem exercitar.
+const FROZEN_NOW_ISO = "2026-08-03T22:00:00.000Z";
+
 function buildJob(data = {}) {
   return {
     id: "job-1",
-    data: { group_id: "120@g.us", message: "oi", dispatch_log_id: "log-1", ...data },
+    data: {
+      group_id: "120@g.us",
+      message: "oi",
+      dispatch_log_id: "log-1",
+      scheduled_at: FROZEN_NOW_ISO,
+      ...data,
+    },
     async updateData(next) {
       this.data = next;
     },
@@ -186,6 +201,10 @@ async function testProcessorSendsWhenNoVideoCampaignInFlight() {
     dispatchLogs: { async updateStatus() {}, async updateProviderDelivery() {} },
     campaignsRepository: buildCampaignsRepository([]),
     confirmDelivery: CONFIRMED_DELIVERY,
+    // Relogio congelado igual ao dos outros casos: sem ele o job do fixture
+    // (FROZEN_NOW_ISO) e comparado com a data real e a trava de atraso cancela
+    // o envio, tornando o teste dependente do calendario.
+    now: () => new Date(FROZEN_NOW_ISO),
     logger: { info() {}, warn() {}, error() {} },
   });
 

@@ -525,17 +525,22 @@
       }
 
       async function init() {
+        window.estimuloShowLoading();
         try {
-          const groups = await requestJson("/groups/search");
-          state.groups = groups.filter((g) => Boolean(g.segmento));
-        } catch (error) {
-          document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(error.message)}</span>`;
+          try {
+            const groups = await requestJson("/groups/search");
+            state.groups = groups.filter((g) => Boolean(g.segmento));
+          } catch (error) {
+            document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(error.message)}</span>`;
+          }
+          await loadScheduleDefaults();
+          populateGroupCheckboxes();
+          populateTestGroupSelect();
+          updatePreview();
+          renderMessages();
+        } finally {
+          window.estimuloHideLoading();
         }
-        await loadScheduleDefaults();
-        populateGroupCheckboxes();
-        populateTestGroupSelect();
-        updatePreview();
-        renderMessages();
       }
 
       init();

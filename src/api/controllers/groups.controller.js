@@ -154,7 +154,6 @@ function createGroupsController(dependencies = {}) {
         [
           "Group id is required",
           "Video id is required",
-          "A regra 'Nunca repetir vídeo' precisa estar desativada para forçar o reenvio",
           "Group has no trilha selected",
           "Video does not belong to the group's current trilha",
         ].includes(message)

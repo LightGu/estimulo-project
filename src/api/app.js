@@ -214,6 +214,7 @@ function createApp(dependencies = {}) {
   app.post("/trilhas", trilhasController.createTrilha);
   app.patch("/trilhas/:id", trilhasController.renameTrilha);
   app.delete("/trilhas/:id", trilhasController.removeTrilha);
+  app.get("/trilhas/:id/usage", trilhasController.getTrilhaUsage);
   app.patch("/trilhas/:id/perfis", trilhasController.updateTrailPerfis);
   app.post("/trilhas/:id/videos", trilhasController.addVideoToTrilha);
   app.delete("/trilhas/:id/videos/:videoId", trilhasController.removeVideoFromTrilha);
@@ -221,6 +222,7 @@ function createApp(dependencies = {}) {
   app.post("/trilhas/:id/reorder", trilhasController.reorderTrilhaVideos);
   app.post("/video-catalog/transcript", videoCatalogController.transcribeByDriveFileId);
   app.post("/video-catalog/:id/transcript", videoCatalogController.transcribeById);
+  app.patch("/video-catalog/:id", videoCatalogController.renameVideo);
   app.get("/video-catalog/:id/captions", videoCatalogController.listCaptions);
   app.patch("/video-catalog/:id/captions/:captionId", videoCatalogController.updateCaption);
   app.get("/groups/search", groupsController.search);

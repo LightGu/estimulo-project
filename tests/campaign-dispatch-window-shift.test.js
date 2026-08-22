@@ -6,6 +6,8 @@ const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 
 const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
+// Dentro da janela usada pelos fixtures do processor (10:00 -> 13:00).
+const FROZEN_NOW_ISO = "2026-07-30T10:05:00.000Z";
 
 function createConfirmDispatchHarness(plannedSchedule = []) {
   const scheduleParams = [];
@@ -119,6 +121,12 @@ async function testProcessorReusesPrecomputedScheduleInsteadOfDrawingAgain() {
   let jitteredCalls = 0;
   const processor = createCampaignTriggerProcessor({
     logger: {},
+    // Relogio congelado dentro da janela do fixture. O processor cancela trigger
+    // vencido (resolveTriggerStaleReason) - a trava que impede uma campanha
+    // antiga parada no Redis de virar uma rajada de envios no boot do Docker.
+    // Sem injetar `now`, estes casos de horario exato quebrariam sozinhos
+    // conforme o calendario avanca.
+    now: () => new Date(FROZEN_NOW_ISO),
     campaigns: { findById: async (id) => ({ id, nome: "Pre infancia" }) },
     campaignVideoCaptionsRepository: { listByCampaign: async () => [] },
     dispatchLogs: null,
@@ -186,6 +194,12 @@ async function testProcessorFallsBackToJitterWhenPrecomputedScheduleIsIncomplete
   let jitteredCalls = 0;
   const processor = createCampaignTriggerProcessor({
     logger: {},
+    // Relogio congelado dentro da janela do fixture. O processor cancela trigger
+    // vencido (resolveTriggerStaleReason) - a trava que impede uma campanha
+    // antiga parada no Redis de virar uma rajada de envios no boot do Docker.
+    // Sem injetar `now`, estes casos de horario exato quebrariam sozinhos
+    // conforme o calendario avanca.
+    now: () => new Date(FROZEN_NOW_ISO),
     campaigns: { findById: async (id) => ({ id, nome: "Pre infancia" }) },
     campaignVideoCaptionsRepository: { listByCampaign: async () => [] },
     dispatchLogs: null,

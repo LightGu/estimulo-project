@@ -51,6 +51,26 @@ function createVideoCatalogController(dependencies = {}) {
     }
   }
 
+  async function renameVideo(req, res) {
+    try {
+      const video = await videoCatalogService.renameVideo(req.params.id, req.body || {});
+
+      return res.status(200).json(video);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (["Video id is required", "Nome do arquivo is required"].includes(message)) {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Video not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: message });
+    }
+  }
+
   async function listCaptions(req, res) {
     try {
       const captions = await videoCaptionsService.listCaptionsByVideoId(req.params.id);
@@ -93,6 +113,7 @@ function createVideoCatalogController(dependencies = {}) {
 
   return {
     listCaptions,
+    renameVideo,
     transcribeByDriveFileId,
     transcribeById,
     updateCaption,

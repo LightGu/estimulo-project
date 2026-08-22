@@ -8,6 +8,17 @@ const {
   prepareDispatchCaptionBeforeQueue,
 } = require("../src/queues/dispatch");
 
+// Horario relativo ao "agora" do teste, nunca uma data fixa no codigo.
+//
+// O worker de dispatch cancela sem enviar todo job cujo scheduled_at passou do
+// teto de atraso (resolveJobStaleReason em src/services/dispatch-staleness.js) -
+// a trava que impede o reenvio de jobs antigos quando a infra do Docker sobe.
+// Datas fixas envelhecem e fariam estes testes de download/envio cancelarem o
+// envio em vez de exercitar o fluxo que pretendem.
+function minutesAgoIso(minutes) {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
 // Nenhum teste daqui pode alcancar o notifications.service real: os casos de
 // falha abaixo ("Falha simulada no envio", "Legenda reprovada: conteudo
 // inventado") chegariam ao grupo de avisos configurado como mensagem de verdade.
@@ -64,7 +75,7 @@ async function testDispatchDownloadsVideoAndSendsBase64Payload() {
       mime_type: "video/mp4",
     },
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const job = createFakeJob(jobData);
   const processor = createProcessor({
@@ -124,7 +135,7 @@ async function testDispatchSelectsUnusedCaptionForVideo() {
       drive_file_id: "drive-file-1",
     },
     legenda: "Legenda fallback",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     videoDownloader: async () => ({
@@ -183,7 +194,7 @@ async function testDispatchReusesCaptionGeneratedInCaptionsStepEvenWithoutCaptio
     legenda: "Legenda revisada na etapa 2",
     caption_id: null,
     caption_generated: true,
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     videoDownloader: async () => ({
@@ -225,7 +236,7 @@ async function testDispatchStartsDownloadAndCaptionResolutionInParallel() {
       drive_file_id: "drive-file-1",
     },
     legenda: "Legenda fallback",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     videoDownloader: async () => {
@@ -284,7 +295,7 @@ async function testDispatchDoesNotMarkCaptionUsedWhenSendFails() {
       drive_file_id: "drive-file-1",
     },
     legenda: "Legenda fallback",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     videoDownloader: async () => ({
@@ -325,7 +336,7 @@ async function testDispatchRegistersProgressAfterConfirmedSend() {
       drive_file_id: "drive-file-1",
     },
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     videoDownloader: async () => ({
@@ -372,7 +383,7 @@ async function testManualDispatchBypassesCampaignConsistency() {
       drive_file_id: "drive-file-1",
     },
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     dispatchConsistencyService: {
@@ -431,7 +442,7 @@ async function testDispatchDoesNotRegisterProgressWhenSendFails() {
       drive_file_id: "drive-file-1",
     },
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     videoDownloader: async () => ({
@@ -465,7 +476,7 @@ async function testDispatchStillAcceptsLegacyVideoUrl() {
     campaign_id: "campaign-1",
     link_video: "https://example.com/video.mp4",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const payload = [];
   const processor = createProcessor({
@@ -488,7 +499,7 @@ async function testDispatchAcceptsMissingCaption() {
     group_id: "120363000000000000@g.us",
     campaign_id: "campaign-1",
     link_video: "https://example.com/video.mp4",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const payload = [];
   const processor = createProcessor({
@@ -510,7 +521,7 @@ async function testDispatchDoesNotSendWhenDownloadReturnsEmptyVideo() {
     campaign_id: "campaign-1",
     video_id: "video-1",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const sentPayloads = [];
   const processor = createProcessor({
@@ -537,7 +548,7 @@ async function testDispatchDoesNotSendWhenDownloadFails() {
     campaign_id: "campaign-1",
     video_id: "video-1",
     legenda: "Legenda de teste",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const sentPayloads = [];
   const processor = createProcessor({
@@ -562,7 +573,7 @@ async function testDispatchRejectsDisabledVideoGroupBeforeJobData() {
       link_video: "https://example.com/video.mp4",
       legenda: "Legenda de teste",
       envia_video: false,
-      scheduled_at: "2026-07-14T10:00:00.000Z",
+      scheduled_at: minutesAgoIso(1),
     }),
     /envia_video=false/
   );
@@ -579,7 +590,7 @@ async function testPreparesReviewedCaptionBeforeQueueCreation() {
       transcript: "Transcricao do video sobre planejamento financeiro",
     },
     legenda: "Legenda fallback",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
 
   const caption = await prepareDispatchCaptionBeforeQueue(jobData, {
@@ -615,7 +626,7 @@ async function testRejectedCaptionDoesNotReachSender() {
       transcript: "Transcricao real",
     },
     legenda: "Legenda inventada",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     captionReviewService: {
@@ -658,7 +669,7 @@ async function testDispatchDoesNotReviewCaptionAlreadyApprovedInCaptionsStep() {
     legenda: "Legenda revisada na etapa 2",
     caption_id: null,
     caption_generated: true,
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     captionReviewService: {
@@ -708,7 +719,7 @@ async function testDispatchStillSendsWhenCaptionReviewProviderIsUnavailable() {
       transcript: "Transcricao real",
     },
     legenda: "Legenda pronta",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const { createCaptionReviewService } = require("../src/services/caption-review.service");
   const { SkippableModelError } = require("../src/services/ai/http-utils");
@@ -760,7 +771,7 @@ async function testDispatchFallsBackToManualCaptionWhenGenerationFails() {
       drive_file_id: "drive-file-1",
     },
     legenda: "Legenda escrita manualmente",
-    scheduled_at: "2026-07-14T10:00:00.000Z",
+    scheduled_at: minutesAgoIso(1),
   });
   const processor = createProcessor({
     videoDownloader: async () => ({

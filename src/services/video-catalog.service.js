@@ -104,6 +104,26 @@ function createVideoCatalogService(dependencies = {}) {
     return repository.update(id, nextPayload);
   }
 
+  async function renameVideo(id, payload) {
+    if (!id) {
+      throw new Error("Video id is required");
+    }
+
+    const nomeDoArquivo = String(payload?.nome_do_arquivo || "").trim();
+
+    if (!nomeDoArquivo) {
+      throw new Error("Nome do arquivo is required");
+    }
+
+    const current = await repository.findById(id);
+
+    if (!current) {
+      throw new Error("Video not found");
+    }
+
+    return repository.update(id, { nome_do_arquivo: nomeDoArquivo });
+  }
+
   async function remove(id) {
     if (!id) {
       throw new Error("Video id is required");
@@ -174,6 +194,7 @@ function createVideoCatalogService(dependencies = {}) {
     list,
     listApproved,
     listByStatus,
+    renameVideo,
     transcribeByDriveFileId,
     transcribeById,
     update,
