@@ -43,28 +43,47 @@ function createApp(dependencies = {}) {
     .map((origin) => origin.trim())
     .filter(Boolean);
   app.set("trust proxy", dependencies.trustProxy || process.env.EXPRESS_TRUST_PROXY || "loopback");
+  // Em producao o painel e' servido pela propria API (mesma origem), entao a
+  // politica cross-origin so precisa ser permissiva durante o desenvolvimento.
+  const isProduction = process.env.NODE_ENV === "production";
+
   app.use(
     cors({
       origin(origin, callback) {
-        if (!origin || origin === "null") {
+        // Sem cabecalho Origin nao e' uma request cross-origin de navegador
+        // (navegacao same-origin, curl, healthcheck do Docker): liberar aqui nao
+        // amplia superficie e bloquear quebraria esses casos.
+        if (!origin) {
           callback(null, true);
+          return;
+        }
+
+        // "null" e' a Origin que o navegador manda de contexto opaco: pagina
+        // aberta via file:// e, principalmente, <iframe sandbox>. Como a
+        // resposta vai com credentials, aceitar "null" permitiria a qualquer
+        // site embutir um iframe sandboxed e ler os dados autenticados da API.
+        // O fallback file:// do nav.js/access.html nao e' usado na pratica.
+        if (origin === "null") {
+          callback(null, false);
           return;
         }
 
         try {
           const url = new URL(origin);
-          callback(
-            null,
-            ["localhost", "127.0.0.1", "::1"].includes(url.hostname) || allowedOrigins.includes(origin)
-          );
+          // localhost so em desenvolvimento: cobre servir o painel por um static
+          // server separado (ex.: Live Server) apontando para a API em :3000.
+          // Em producao isso deixaria qualquer processo local ler a API.
+          const isLocalDevOrigin =
+            !isProduction && ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+
+          callback(null, isLocalDevOrigin || allowedOrigins.includes(origin));
         } catch (error) {
           callback(null, false);
         }
       },
-      // Necessario para o cookie de sessao (estimulo_session) ser aceito quando o
-      // painel e' aberto fora da porta da API (ex.: direto do file://, cenario que
-      // o fallback do nav.js/access.html cobre) - sem isso o navegador descarta o
-      // Set-Cookie de respostas cross-origin mesmo com fetch({ credentials: "include" }).
+      // Necessario para o cookie de sessao (estimulo_session) viajar quando o
+      // painel roda fora da porta da API - sem isso o navegador descarta o
+      // Set-Cookie de respostas cross-origin mesmo com credentials: "include".
       credentials: true,
     })
   );
@@ -82,7 +101,9 @@ function createApp(dependencies = {}) {
   // (ESTIMULO_ADMIN_MASTER_PASSWORD) consegue criar seu proprio login sem
   // precisar de uma sessao previa - resolve o problema de "ninguem loga para
   // criar o primeiro usuario" e permite autoatendimento para novas pessoas.
-  app.post("/access/register", appUsersController.create);
+  // masterPasswordGuard: sem ele a senha mestra ficava exposta a forca bruta
+  // ilimitada, ja que esta rota nao passa pelo authGate.
+  app.post("/access/register", authGate.masterPasswordGuard, appUsersController.create);
   app.use(authGate.middleware);
   // Nao existe public/index.html (so public/app/*) - sem isso, "/" com
   // sessao valida caia em "Cannot GET /" porque o static nao acha arquivo
@@ -260,7 +281,7 @@ function createApp(dependencies = {}) {
   app.get("/settings/whatsapp/rotation", whatsappInstancesController.getRotation);
   app.patch("/settings/whatsapp/rotation", whatsappInstancesController.updateRotation);
   app.get("/settings/app-users", appUsersController.list);
-  app.patch("/settings/app-users/:id", appUsersController.setActive);
+  app.patch("/settings/app-users/:id", authGate.masterPasswordGuard, appUsersController.setActive);
   app.get("/group-profiles", groupProfilesController.list);
   app.post("/group-profiles", groupProfilesController.create);
   app.get("/group-profiles/merges", groupProfilesController.listMerges);

@@ -26,11 +26,11 @@
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
       .checkbox-list { display:flex; flex-direction:column; gap:2px; max-height:220px; overflow-y:auto; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px; }
-      .checkbox-list label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer; }
+      .checkbox-list label { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; font-size: var(--fs-md); cursor:pointer; }
       .checkbox-list label:hover { background: var(--surface-strong); }
       .preview-bubble { background: var(--surface-strong); border:1px solid var(--line); border-radius: var(--radius-lg); padding:16px; max-width:340px; }
-      .preview-bubble .ptitle { font-weight:700; font-size:13px; margin-bottom:6px; }
-      .preview-bubble .pattach { font-size:12px; color:var(--text-muted); margin-top:8px; padding:6px 8px; background:var(--surface); border-radius:6px; border:1px solid var(--line); }
+      .preview-bubble .ptitle { font-weight:700; font-size: var(--fs-md); margin-bottom:6px; }
+      .preview-bubble .pattach { font-size: var(--fs-sm); color:var(--text-muted); margin-top:8px; padding:6px 8px; background:var(--surface); border-radius:6px; border:1px solid var(--line); }
       .two-col { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; align-items:start; }
       @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
     </style>
@@ -81,7 +81,7 @@
                   <div class="field">
                     <label for="msgMidia">Imagem ou vídeo (opcional)</label>
                     <input id="msgMidia" type="file" accept="image/*,video/*">
-                    <p class="text-faint" style="font-size:11px;margin:4px 0 0;">O arquivo é enviado direto para os grupos e não fica salvo no sistema — só o texto e os metadados do disparo ficam registrados.</p>
+                    <p class="text-faint" style="font-size: var(--fs-xs);margin:4px 0 0;">O arquivo é enviado direto para os grupos e não fica salvo no sistema — só o texto e os metadados do disparo ficam registrados.</p>
                   </div>
 
                   <div class="field">
@@ -119,7 +119,7 @@
                       <input id="msgDelayMaxMin" type="number" min="0" value="8">
                     </div>
                   </div>
-                  <p class="text-faint" style="font-size:11px;margin:-8px 0 4px;">Os envios são espalhados aleatoriamente dentro da janela acima — mesmo mecanismo do Envio automatizado — pra não disparar tudo no mesmo instante. Data e horário de início precisam ser posteriores ao momento atual. Os valores de delay já vêm preenchidos com o padrão definido em Configurações, mas podem ser ajustados aqui. Delays abaixo de ~15s podem não ser respeitados com precisão: o envio anterior ainda pode estar aguardando confirmação de entrega do grupo.</p>
+                  <p class="text-faint" style="font-size: var(--fs-xs);margin:-8px 0 4px;">Os envios são espalhados aleatoriamente dentro da janela acima — mesmo mecanismo do Envio automatizado — pra não disparar tudo no mesmo instante. Data e horário de início precisam ser posteriores ao momento atual. Os valores de delay já vêm preenchidos com o padrão definido em Configurações, mas podem ser ajustados aqui. Delays abaixo de ~15s podem não ser respeitados com precisão: o envio anterior ainda pode estar aguardando confirmação de entrega do grupo.</p>
 
                   <div class="field-row" style="grid-template-columns:1fr 1fr;">
                     <div class="field">
@@ -139,7 +139,7 @@
               </div>
 
               <div>
-                <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size:14px;">Prévia</h2></div>
+                <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size: var(--fs-md);">Prévia</h2></div>
                 <div class="preview-bubble" id="previewBubble"></div>
               </div>
             </div>
@@ -148,7 +148,7 @@
           <section class="page-section">
             <div class="section-head">
               <h2>Disparos desta sessão</h2>
-              <p class="text-faint" style="font-size:12px;">Refletem apenas os envios feitos desde que esta página foi carregada — o registro definitivo fica na tela de Campanhas.</p>
+              <p class="text-faint" style="font-size: var(--fs-sm);">Refletem apenas os envios feitos desde que esta página foi carregada — o registro definitivo fica na tela de Campanhas.</p>
             </div>
             <div class="table-wrap">
               <table>
@@ -169,6 +169,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -179,14 +180,6 @@
       const state = { groups: [] };
       const sentMessages = [];
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -297,7 +290,7 @@
 
         document.getElementById("previewBubble").innerHTML = `
           <div class="ptitle">${escapeHtml(titulo)}</div>
-          <div style="font-size:13px;white-space:pre-wrap;">${escapeHtml(texto)}</div>
+          <div style="font-size: var(--fs-md);white-space:pre-wrap;">${escapeHtml(texto)}</div>
           ${mediaHtml}
           <div class="pattach">👥 ${grupos.length ? escapeHtml(grupos.join(", ")) : "nenhum grupo selecionado"}</div>
           <div class="pattach">🕒 ${envioHtml}</div>

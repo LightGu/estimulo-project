@@ -30,52 +30,10 @@
       tr.group-row { cursor: pointer; }
       tr.group-row:hover { background: var(--surface-strong); }
       .modal-wide { width: min(920px, calc(100% - 32px)); }
-      .table-wrap--fluid { overflow-x: visible; }
-      table.table-fluid { min-width: 0; table-layout: fixed; width: 100%; }
-      table.table-fluid th,
-      table.table-fluid td { white-space: normal; word-break: break-word; }
+      /* min-width:0, quebra de cabecalho e overflow-wrap agora sao padrao global
+         (components.css). Aqui resta so a opcao por colunas de largura igual. */
+      table.table-fluid { table-layout: fixed; }
 
-      #toastContainer {
-        position: fixed;
-        top: 16px;
-        right: 16px;
-        z-index: 2000;
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        max-width: 360px;
-      }
-      .toast {
-        display: flex;
-        align-items: flex-start;
-        gap: 10px;
-        padding: 12px 14px;
-        border-radius: var(--radius-sm);
-        background: var(--surface);
-        border: 1px solid var(--line);
-        box-shadow: var(--shadow-md);
-        font-size: 13.5px;
-        line-height: 1.4;
-        animation: toast-in 0.15s ease;
-      }
-      .toast strong { display: block; margin-bottom: 2px; }
-      .toast.toast-danger { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); }
-      .toast.toast-success { border-color: var(--success); background: var(--success-bg); color: var(--success); }
-      .toast-close {
-        margin-left: auto;
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: inherit;
-        opacity: 0.7;
-        font-size: 14px;
-        line-height: 1;
-      }
-      .toast-close:hover { opacity: 1; }
-      @keyframes toast-in {
-        from { opacity: 0; transform: translateY(-6px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
     </style>
   </head>
   <body data-page="campanhas">
@@ -169,24 +127,9 @@
       </div>
     </div>
 
-    <div class="overlay" id="confirmActionOverlay" hidden>
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirmActionTitle">
-        <div class="modal-header">
-          <h3 id="confirmActionTitle">Confirmar ação</h3>
-          <button class="icon-btn-close" id="closeConfirmActionModal" type="button" aria-label="Fechar">✕</button>
-        </div>
-        <div class="modal-body">
-          <p id="confirmActionMessage"></p>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" id="confirmActionCancelBtn" type="button">Cancelar</button>
-          <button class="btn btn-danger" id="confirmActionConfirmBtn" type="button">Confirmar</button>
-        </div>
-      </div>
-    </div>
-
     <div id="toastContainer" aria-live="polite"></div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -197,76 +140,10 @@
         sortDirection: localStorage.getItem("estimulo-campanhas-sort") === "desc" ? "desc" : "asc",
       };
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       // Caixinha na propria tela em vez de window.alert(): some sozinha depois
       // de um tempo, mas tambem pode ser fechada na hora.
-      function showToast(message, options = {}) {
-        const tone = options.tone === "success" ? "success" : "danger";
-        const title = options.title || (tone === "success" ? "Sucesso" : "Não foi possível concluir a ação");
-        const container = document.getElementById("toastContainer");
-        const toast = document.createElement("div");
 
-        toast.className = `toast toast-${tone}`;
-        toast.innerHTML = `
-          <div><strong>${escapeHtml(title)}</strong>${escapeHtml(message)}</div>
-          <button class="toast-close" type="button" aria-label="Fechar aviso">✕</button>
-        `;
-
-        const remove = () => toast.remove();
-        toast.querySelector(".toast-close").addEventListener("click", remove);
-        container.appendChild(toast);
-        setTimeout(remove, 8000);
-      }
-
-      // Substitui window.confirm() por um modal no mesmo estilo do resto do app.
-      function confirmAction(message, { title = "Confirmar ação", confirmLabel = "Confirmar" } = {}) {
-        const overlay = document.getElementById("confirmActionOverlay");
-        const confirmBtn = document.getElementById("confirmActionConfirmBtn");
-        const cancelBtn = document.getElementById("confirmActionCancelBtn");
-        const closeBtn = document.getElementById("closeConfirmActionModal");
-
-        document.getElementById("confirmActionTitle").textContent = title;
-        document.getElementById("confirmActionMessage").textContent = message;
-        confirmBtn.textContent = confirmLabel;
-        overlay.hidden = false;
-        const releaseTrap = window.estimuloTrapFocus(overlay);
-
-        return new Promise((resolve) => {
-          function finish(result) {
-            overlay.hidden = true;
-            releaseTrap();
-            confirmBtn.removeEventListener("click", onConfirm);
-            cancelBtn.removeEventListener("click", onCancel);
-            closeBtn.removeEventListener("click", onCancel);
-            overlay.removeEventListener("click", onOverlayClick);
-            document.removeEventListener("keydown", onKeydown);
-            resolve(result);
-          }
-
-          function onConfirm() { finish(true); }
-          function onCancel() { finish(false); }
-          function onOverlayClick(e) {
-            if (e.target === overlay) finish(false);
-          }
-          function onKeydown(e) {
-            if (e.key === "Escape") finish(false);
-          }
-
-          confirmBtn.addEventListener("click", onConfirm);
-          cancelBtn.addEventListener("click", onCancel);
-          closeBtn.addEventListener("click", onCancel);
-          overlay.addEventListener("click", onOverlayClick);
-          document.addEventListener("keydown", onKeydown);
-        });
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -461,7 +338,7 @@
 
       async function runCampaignAction(button, url, { confirmMessage } = {}) {
         if (confirmMessage) {
-          const confirmed = await confirmAction(confirmMessage, { confirmLabel: "Cancelar campanha" });
+          const confirmed = await window.estimuloConfirm(confirmMessage, { confirmLabel: "Cancelar campanha" });
           if (!confirmed) return;
         }
 
@@ -477,7 +354,7 @@
             await openCampaignDetail(state.currentCampaignId);
           }
         } catch (error) {
-          showToast(error.message || "Não foi possível concluir a ação.");
+          window.estimuloToast(error.message || "Não foi possível concluir a ação.");
           button.disabled = false;
           button.textContent = originalText;
         }

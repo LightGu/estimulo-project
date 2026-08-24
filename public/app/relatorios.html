@@ -116,6 +116,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -154,15 +155,6 @@
         currentPage: 1,
       };
 
-      function escapeHtml(value) {
-        return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;",
-        }[char]));
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);

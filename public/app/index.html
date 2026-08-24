@@ -134,6 +134,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -145,14 +146,6 @@
         allDispatches: [],
       };
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -358,7 +351,7 @@
           (s) => `
             <span style="display:inline-flex;align-items:center;gap:6px;">
               <span style="width:10px;height:10px;border-radius:50%;background:${s.color};display:inline-block;"></span>
-              <span class="text-muted" style="font-size:12.5px;">${s.label}</span>
+              <span class="text-muted" style="font-size: var(--fs-sm);">${s.label}</span>
             </span>`
         ).join("");
 
@@ -366,7 +359,7 @@
           <div style="display:flex;gap:18px;margin-bottom:12px;">${legend}</div>
           <div class="chart-hover-wrap" style="position:relative;">
             <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Vídeos e mensagens de texto enviados por dia, últimos ${VIDEOS_CHART_DAYS} dias" style="width:100%;height:auto;display:block;">
-              <style>.chart-axis-label { font-size: 10.5px; fill: var(--text-faint); font-family: var(--font-sans); }</style>
+              <style>.chart-axis-label { font-size: var(--fs-2xs); fill: var(--text-faint); font-family: var(--font-sans); }</style>
               ${gridLines}
               ${linesAndDots}
               <line class="chart-crosshair" x1="0" y1="${margin.top}" x2="0" y2="${height - margin.bottom}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,3" opacity="0" />

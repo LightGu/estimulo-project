@@ -7,7 +7,10 @@ function buildGroupSyncRepeatOptions(params = {}) {
     params.cronExpression ||
     process.env.GROUP_SYNC_CRON ||
     DEFAULT_GROUP_SYNC_CRON;
-  const timezone = params.timezone || params.tz || process.env.GROUP_SYNC_TIMEZONE || undefined;
+  // Cai em CAMPAIGN_TIMEZONE antes de desistir: sem `tz`, a BullMQ resolve o
+  // cron no fuso do processo, que em container sem tzdata e' UTC.
+  const timezone =
+    params.timezone || params.tz || process.env.GROUP_SYNC_TIMEZONE || process.env.CAMPAIGN_TIMEZONE || undefined;
 
   if (!cronExpression) {
     throw new Error("GROUP_SYNC_CRON e obrigatorio para agendar sincronizacao de grupos");

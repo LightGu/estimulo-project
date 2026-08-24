@@ -71,9 +71,36 @@ function createAuthGate(options = {}) {
         ? process.env.ESTIMULO_COOKIE_SECURE === "true"
         : process.env.NODE_ENV === "production"
       : Boolean(options.secureCookie);
-  const sameSite = String(process.env.ESTIMULO_COOKIE_SAME_SITE || "Lax").trim();
+  // SameSite so aceita valores validos. "None" e' o unico que expoe o cookie a
+  // requests cross-site, e o navegador ja o rejeita sem Secure; aceitar um
+  // "None" sem Secure produziria um painel silenciosamente sem login. Qualquer
+  // valor invalido cai em Lax, que e' o padrao seguro.
+  const requestedSameSite = String(process.env.ESTIMULO_COOKIE_SAME_SITE || "Lax").trim();
+  const sameSite = (() => {
+    const normalized = requestedSameSite.toLowerCase();
+
+    if (normalized === "strict") return "Strict";
+    if (normalized === "none") {
+      if (secureCookie) return "None";
+      console.warn(
+        "ESTIMULO_COOKIE_SAME_SITE=None exige cookie Secure (HTTPS); usando Lax para o cookie nao ser descartado."
+      );
+      return "Lax";
+    }
+    if (normalized !== "lax") {
+      console.warn(`ESTIMULO_COOKIE_SAME_SITE invalido ("${requestedSameSite}"); usando Lax.`);
+    }
+
+    return "Lax";
+  })();
   const sessionStore = options.sessionStore || createSessionStore(options.sessionStoreOptions || {});
   const rateLimiter = options.rateLimiter || createLoginRateLimiter(options.rateLimiterOptions || {});
+  // Limitador separado do de login: as rotas de senha mestra tem sua propria
+  // contagem, para uma tentativa de login errada nao bloquear o cadastro (e
+  // vice-versa) e para os testes poderem afinar um sem mexer no outro.
+  const masterPasswordLimiter =
+    options.masterPasswordRateLimiter ||
+    createLoginRateLimiter(options.masterPasswordRateLimiterOptions || {});
 
   function getClientIp(req) {
     const forwardedFor = req.headers["x-forwarded-for"];
@@ -250,11 +277,50 @@ function createAuthGate(options = {}) {
     });
   }
 
+  // POST /access/register e' publico de proposito (auto-cadastro sabendo a senha
+  // mestra), mas sem limite de tentativas a senha mestra - um unico segredo
+  // compartilhado - podia ser varrida por forca bruta na velocidade da rede, e
+  // acertar da acesso total ao painel, inclusive ao disparo para os grupos.
+  // Este guard aplica ao endpoint a mesma politica exponencial do login.
+  function masterPasswordGuard(req, res, next) {
+    if (!enabled) {
+      next();
+      return;
+    }
+
+    const key = `master:${getClientIp(req)}`;
+    const status = masterPasswordLimiter.check(key);
+
+    if (status.blocked) {
+      const retryAfterSeconds = Math.ceil((status.retryAfterMs || 0) / 1000);
+      res.set("Retry-After", String(retryAfterSeconds));
+      res.status(429).json({
+        error: "Muitas tentativas. Aguarde antes de tentar novamente.",
+        code: "TOO_MANY_ATTEMPTS",
+        retry_after_seconds: retryAfterSeconds,
+      });
+      return;
+    }
+
+    // O acerto/erro da senha mestra so e' conhecido depois que o controller
+    // responde (403 = senha errada), dai a contagem acontecer no finish.
+    res.on("finish", () => {
+      if (res.statusCode === 403) {
+        masterPasswordLimiter.registerFailure(key);
+      } else if (res.statusCode >= 200 && res.statusCode < 300) {
+        masterPasswordLimiter.registerSuccess(key);
+      }
+    });
+
+    next();
+  }
+
   return {
     enabled,
     statusHandler,
     loginHandler,
     logoutHandler,
+    masterPasswordGuard,
     middleware,
   };
 }

@@ -81,6 +81,5 @@ function createInAppNotificationsService(dependencies = {}) {
 }
 
 module.exports = createInAppNotificationsService();
-module.exports.createInAppNotificationsService = createInAppNotificationsService;
 module.exports.TRAIL_ADVANCED_TYPE = TRAIL_ADVANCED_TYPE;
 module.exports.TRAIL_FINISHED_TYPE = TRAIL_FINISHED_TYPE;
