@@ -14,7 +14,7 @@
   color: #ffffff;
   border-radius: var(--radius-sm);
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   text-decoration: none;
 }
 
@@ -78,6 +78,10 @@
 html,
 body {
   height: 100%;
+  /* Rede de seguranca da regra "nada rola horizontalmente": mesmo que uma tela
+     futura introduza um elemento largo demais, a pagina nao ganha barra lateral. */
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {
@@ -85,8 +89,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -100,17 +104,17 @@ h4 {
 }
 
 h1 {
-  font-size: 24px;
+  font-size: var(--fs-4xl);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 h2 {
-  font-size: 18px;
+  font-size: var(--icon-glyph-md);
 }
 
 h3 {
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 p {
@@ -161,7 +165,7 @@ button {
 label {
   display: block;
   margin: 0 0 6px;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;

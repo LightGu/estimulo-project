@@ -77,6 +77,33 @@ function createDispatchConsistencyService(dependencies = {}) {
     }) || null;
   }
 
+  // LIMITACAO CONHECIDA (segura na configuracao atual, perigosa se escalar).
+  //
+  // As tres etapas abaixo - buscar log "processando", buscar "pendente", criar -
+  // sao round-trips separados, sem atomicidade. Com DOIS workers de dispatch
+  // rodando, ambos podem passar pelas buscas antes de qualquer um criar, e cada
+  // um cria a SUA linha em `logs`. Como o claimForSend seguinte e' um
+  // compare-and-set por `id` de linha, os dois claims tem sucesso: o CAS protege
+  // uma linha, nao o trio logico campanha/grupo/video. Resultado: o mesmo video
+  // postado duas vezes no grupo.
+  //
+  // Por que e' seguro hoje: infra/docker-compose.yml declara UMA instancia de
+  // dispatch-worker (sem deploy.replicas) e a BullMQ usa concurrency 1 por
+  // padrao - nenhum dos dois e' sobrescrito no projeto. A serializacao e'
+  // operacional, nao estrutural.
+  //
+  // ANTES DE ESCALAR (`--scale dispatch-worker=N` ou concurrency > 1) e preciso:
+  //   1. auditar duplicatas historicas em `logs` para o trio
+  //      (campaign_id, group_id, video_id) - o indice abaixo falha se existirem;
+  //   2. criar o indice unico parcial:
+  //      CREATE UNIQUE INDEX CONCURRENTLY idx_logs_trio_ativo
+  //        ON public.logs (campaign_id, group_id, video_id)
+  //        WHERE status IN ('pendente','processando','enviado');
+  //   3. tratar a violacao aqui, relendo o log vencedor em vez de propagar o erro;
+  //   4. reverificar requeuePendingDispatchJobsForCampaign (campaign-trigger.js),
+  //      que reenfileira para o mesmo trio.
+  // O retry (markRetrying em dispatch-logs.repository.js) reutiliza o log
+  // existente, entao ja e' compativel com o indice.
   async function createAttemptLog(payload) {
     const existing = await findExistingLog(payload.campaignId, payload.groupId, payload.videoId, ["processando"]);
 
@@ -180,7 +207,19 @@ function createDispatchConsistencyService(dependencies = {}) {
       const dispatchRules = await settingsService.getDispatchRulesSettings();
       autoRetryFailures = Boolean(dispatchRules.auto_retry_failures);
     } catch (error) {
-      autoRetryFailures = false;
+      // Antes assumia `false` em silencio, e `false` e' justamente o valor que
+      // DESATIVA a campanha logo abaixo. Ou seja: uma falha de leitura das
+      // settings derrubava a campanha inteira e o sweep de retry parava de
+      // reprocessa-la, sem log nenhum. Assumir `true` mantem a campanha viva e
+      // deixa a decisao com o worker de retry, que e' o comportamento
+      // recuperavel; a falha agora aparece no log.
+      autoRetryFailures = true;
+
+      writeStageLog(logger, "error", "dispatch_consistency.dispatch_rules_unavailable", {
+        campaign_id: campaignId,
+        assumed_auto_retry_failures: true,
+        error_message: error && error.message,
+      });
     }
 
     // Quando o reprocessamento automatico de falhas esta ativo, o worker de retry

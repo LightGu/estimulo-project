@@ -1,21 +1,29 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
+const { UUID_PATTERN } = require("../utils/uuid");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { resolveInstanceSender } = require("../services/evolution-instance-sender");
 const { assertDeliveryConfirmed, confirmProviderDelivery } = require("../services/delivery-confirmation");
-const { evolutionConfig } = require("../config/evolution");
+const { compressVideoToFitBase64Budget } = require("../services/video-compression");
 const { downloadFromDrive } = require("../services/google-drive-video-download");
 const {
-  base64Length,
-  compressVideoToFitBase64Budget,
-  isMp4Container,
-  normalizeVideoContainerToMp4,
-} = require("../services/video-compression");
+  markDispatchCaptionUsed,
+  prepareDispatchCaptionBeforeQueue,
+  resolveDispatchCaption,
+  resolveVideoTranscript,
+} = require("./dispatch-caption");
 const defaultCaptionReviewService = require("../services/caption-review.service");
-const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
 const defaultVideoCaptionsService = require("../services/video-captions.service");
-const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const defaultVideoCatalogRepository = require("../repositories/video-catalog.repository");
+const {
+  assertDownloadedVideoForDispatch,
+  buildDispatchDeliveryPayload,
+  fitDownloadedVideoToEvolutionLimit,
+  releaseTemporaryDispatchMedia,
+  resolveDispatchMediaBase64Budget,
+} = require("./dispatch-media");
+const defaultDispatchConsistencyService = require("../services/dispatch-consistency.service");
+const groupVideoProgressRepository = require("../repositories/group-video-progress.repository");
 const defaultGroupsRepository = require("../repositories/groups.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 const defaultCampaignGroupsRepository = require("../repositories/campaign-groups.repository");
@@ -36,7 +44,6 @@ const DISPATCH_PROCESSING_STATUS = "processing";
 const DISPATCH_SUCCESS_STATUS = "sent";
 const DISPATCH_FAILED_STATUS = "failed";
 const DEFAULT_DISPATCH_JOB_TIMEOUT_MS = 25 * 60 * 1000;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 let dispatchQueueInstance;
 
@@ -113,7 +120,72 @@ function buildDispatchJobData(params) {
     forced_next_video_id: params.forced_next_video_id || (params.group && params.group.forced_next_video_id) || undefined,
     never_repeat_video: params.never_repeat_video,
     auto_generate_caption: params.auto_generate_caption,
+    // buildRetryJobData (dispatch-failure-retry.js) monta este campo e o
+    // comentario de la diz que ele e "propagado ate o dispatch worker", mas ele
+    // era descartado aqui. Duas consequencias reais: (1) a checagem de
+    // `!job.data.retry_count` mais abaixo, que existe para notificar a falha
+    // so na primeira tentativa, via sempre undefined e renotificava a cada
+    // sweep; (2) o jobId deterministico nao conseguiria distinguir um retry do
+    // envio original - que preserva o mesmo scheduled_at de proposito - e a
+    // BullMQ descartaria o retry em silencio.
+    retry_count: Number(params.retry_count) || 0,
   };
+}
+
+// Identidade logica de um envio de video: campanha + grupo + video + horario.
+//
+// Serve de `jobId` na BullMQ, que recusa silenciosamente um add() com jobId ja
+// existente. Isto e a unica protecao contra envio duplicado no ramo SEM
+// dispatch-consistency (campanha legada por link_video, ou retry sem video_id
+// resolvivel): la nao existe log de tentativa, nem claimForSend, e
+// registerDispatchProgress retorna null cedo por falta de video_id - nem o
+// UNIQUE (group_id, video_id) de group_video_progress se aplica. Uma reentrega
+// por job travado (a BullMQ recupera jobs `active` de um processo que morreu,
+// com maxStalledCount padrao 1, independente de attempts) postava o video duas
+// vezes no grupo.
+//
+// `scheduled_at` entra na chave de proposito: dois envios do mesmo trio em
+// horarios diferentes sao legitimos (reagendamento, campanha recorrente) e
+// precisam de jobIds distintos. So a duplicata exata - mesmo trio, mesmo
+// horario, mesma tentativa - e' recusada. Como jobs completos saem do Redis em
+// 24h (removeOnComplete em bullmq.js), reenfileirar depois disso volta a ser
+// aceito.
+//
+// `retry_count` e' OBRIGATORIO na chave: o sweep de retry
+// (dispatch-failure-retry.js) reenfileira preservando o scheduled_at ORIGINAL
+// de proposito, para a trava de atraso continuar ancorada no horario real. Sem
+// retry_count aqui, todo retry colidiria com o jobId do envio que falhou e a
+// BullMQ o descartaria em silencio - quebrando o reprocessamento inteiro.
+//
+// O fallback drive_file_id -> link_video cobre o caso sem video_id, que e
+// justamente o ramo desprotegido.
+function buildDispatchJobId(jobData = {}) {
+  const videoKey = jobData.video_id || jobData.drive_file_id || jobData.link_video || "sem-video";
+
+  // A BullMQ so aceita ":" num jobId customizado se o resultado tiver
+  // EXATAMENTE 3 segmentos (reservado para o formato interno de repeatable
+  // jobs - ver Job.validateOptions em bullmq/dist/cjs/classes/job.js). Com 6
+  // componentes e ":" tambem podendo vir de dentro de scheduled_at (data ISO,
+  // sempre tem ":") ou de link_video (URL, pode ter "://"), o join(":")
+  // original violava essa regra em TODO envio de video - o worker de
+  // campaign-trigger falhava com "Custom Id cannot contain :" antes mesmo de
+  // criar o primeiro job da campanha, e nenhum grupo recebia nada.
+  //
+  // A regra olha o ID inteiro, nao separador por separador: um "://" dentro
+  // de link_video (fallback de videoKey) continua sendo ":" ali dentro mesmo
+  // trocando o separador externo para "|". Por isso todo componente passa por
+  // replace(/:/g, "_") antes de juntar - custa nada, e' so identidade de
+  // deduplicacao, nunca exibido nem usado para parsear de volta.
+  const sanitize = (value) => String(value).replace(/:/g, "_");
+
+  return [
+    "dispatch",
+    sanitize(jobData.campaign_id),
+    sanitize(jobData.progress_group_id || jobData.group_id),
+    sanitize(videoKey),
+    sanitize(jobData.scheduled_at),
+    `r${Number(jobData.retry_count) || 0}`,
+  ].join("|");
 }
 
 function buildDispatchJobOptions(jobData, options = {}) {
@@ -121,437 +193,10 @@ function buildDispatchJobOptions(jobData, options = {}) {
   const delay = Math.max(scheduledTime - Date.now(), 0);
 
   return {
+    jobId: buildDispatchJobId(jobData),
     ...options,
     delay: options.delay ?? delay,
   };
-}
-
-function assertDownloadedVideoForDispatch(downloadedVideo) {
-  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes)) {
-    throw new Error("Download do Google Drive nao retornou bytes de video validos");
-  }
-
-  if (downloadedVideo.bytes.length === 0) {
-    throw new Error("Download do Google Drive retornou video vazio");
-  }
-
-  if (!downloadedVideo.mime_type || !downloadedVideo.mime_type.toLowerCase().startsWith("video/")) {
-    throw new Error(`Tipo MIME invalido para envio de video: ${downloadedVideo.mime_type || "indefinido"}`);
-  }
-}
-
-function buildDispatchDeliveryPayload(jobData, downloadedVideo) {
-  if (downloadedVideo) {
-    assertDownloadedVideoForDispatch(downloadedVideo);
-
-    return {
-      groupId: jobData.group_id,
-      message: jobData.legenda || "",
-      content: {
-        base64: downloadedVideo.bytes.toString("base64"),
-        fileName: downloadedVideo.name,
-        mimeType: downloadedVideo.mime_type,
-        type: "video",
-      },
-    };
-  }
-
-  return {
-    groupId: jobData.group_id,
-    message: jobData.legenda || "",
-    content: {
-      url: jobData.link_video,
-      fileName: "campaign-video.mp4",
-      mimeType: "video/mp4",
-      type: "video",
-    },
-  };
-}
-
-async function resolveDispatchCaption(jobData, captionSelector, logger = console, options = {}) {
-  const fallbackCaption = jobData.legenda || "";
-
-  // caption_generated=true indica que a legenda ja foi gerada/revisada na Etapa 2
-  // (tela envio-automatizado, tabela campaign_video_captions) e o usuario ja viu
-  // esse texto especifico. Nesse caso ela e definitiva e nao deve ser trocada por
-  // outra no dispatch — mesmo quando caption_id vem nulo (legenda de teste inserida
-  // manualmente, ou linha sem video_captions.id associado). Sem essa checagem por
-  // caption_generated, o dispatch chamava a IA de novo para "sortear" uma legenda
-  // diferente, gerando texto novo e consumindo cota desnecessariamente.
-  if ((jobData.caption_id || jobData.caption_generated) && fallbackCaption) {
-    return {
-      caption: jobData.caption_id ? { id: jobData.caption_id } : null,
-      generated: Boolean(jobData.caption_generated),
-      // Ja passou pela revisao factual na Etapa 2 (campaign-video-captions.service
-      // chama selectCaptionForVideo com requireCaptionReview). Revisar de novo aqui
-      // era uma segunda chamada ao Gemini por grupo sobre exatamente o mesmo par
-      // legenda/transcricao — o que dobrava o consumo da cota diaria e fazia o envio
-      // falhar por 429 justamente com a legenda pronta.
-      reviewed: true,
-      text: fallbackCaption,
-    };
-  }
-
-  if (!jobData.video_id || !captionSelector || typeof captionSelector.selectCaptionForVideo !== "function") {
-    return {
-      caption: null,
-      generated: false,
-      reviewed: false,
-      text: fallbackCaption,
-    };
-  }
-
-  let selected;
-
-  try {
-    selected = await captionSelector.selectCaptionForVideo(jobData.video_id, options);
-  } catch (error) {
-    logger.warn &&
-      logger.warn(
-        JSON.stringify({
-          event: "dispatch.caption.selection_failed",
-          campaign_id: jobData.campaign_id,
-          group_id: jobData.group_id,
-          progress_group_id: jobData.progress_group_id,
-          video_id: jobData.video_id,
-          error_message: error.message,
-        })
-      );
-
-    if (options.failOnCaptionError) {
-      throw error;
-    }
-
-    return {
-      caption: null,
-      generated: false,
-      reviewed: false,
-      text: fallbackCaption,
-    };
-  }
-
-  if (!selected || !selected.text) {
-    return {
-      caption: null,
-      generated: false,
-      reviewed: false,
-      text: fallbackCaption,
-    };
-  }
-
-  logger.info &&
-    logger.info(
-      JSON.stringify({
-        event: "dispatch.caption.selected",
-        campaign_id: jobData.campaign_id,
-        group_id: jobData.group_id,
-        progress_group_id: jobData.progress_group_id,
-        video_id: jobData.video_id,
-        caption_id: selected.caption && selected.caption.id,
-        generated: Boolean(selected.generated),
-      })
-    );
-
-  // selectCaptionForVideo ja revisou a legenda quando requireCaptionReview estava
-  // ligado (tanto a reaproveitada do banco quanto a gerada agora).
-  return { ...selected, reviewed: Boolean(options.requireCaptionReview) };
-}
-
-async function resolveVideoTranscript(jobData, videoCatalogRepository = defaultVideoCatalogRepository) {
-  const catalogTranscript = jobData.video_catalog && (jobData.video_catalog.transcript || jobData.video_catalog.transcricao);
-
-  if (catalogTranscript) {
-    return String(catalogTranscript).trim();
-  }
-
-  if (!jobData.video_id || !videoCatalogRepository || typeof videoCatalogRepository.findById !== "function") {
-    return "";
-  }
-
-  const video = await videoCatalogRepository.findById(jobData.video_id);
-
-  return String((video && (video.transcript || video.transcricao)) || "").trim();
-}
-
-async function prepareDispatchCaptionBeforeQueue(jobData, dependencies = {}) {
-  const {
-    captionReviewService = defaultCaptionReviewService,
-    logger = console,
-    videoCaptionsService = defaultVideoCaptionsService,
-    videoCatalogRepository = defaultVideoCatalogRepository,
-  } = dependencies;
-  const transcript = await resolveVideoTranscript(jobData, videoCatalogRepository);
-
-  if (!jobData.video_id) {
-    return {
-      caption: null,
-      generated: false,
-      text: jobData.legenda || "",
-    };
-  }
-
-  if (!jobData.video_id || !videoCaptionsService || typeof videoCaptionsService.selectCaptionForVideo !== "function") {
-    if (captionReviewService && typeof captionReviewService.assertCaptionApproved === "function") {
-      await captionReviewService.assertCaptionApproved({
-        caption: jobData.legenda,
-        transcript,
-        campaign_id: jobData.campaign_id,
-        group_id: jobData.group_id,
-        progress_group_id: jobData.progress_group_id,
-        video_id: jobData.video_id,
-      });
-    }
-
-    return {
-      caption: jobData.caption_id ? { id: jobData.caption_id } : null,
-      generated: Boolean(jobData.caption_generated),
-      text: jobData.legenda || "",
-    };
-  }
-
-  const selected = await videoCaptionsService.selectCaptionForVideo(jobData.video_id, {
-    transcript,
-    requireCaptionReview: true,
-    campaign_id: jobData.campaign_id,
-    group_id: jobData.group_id,
-    progress_group_id: jobData.progress_group_id,
-  });
-
-  if (selected && selected.text) {
-    logger.info &&
-      logger.info(
-        JSON.stringify({
-          event: "dispatch.caption.prepared",
-          campaign_id: jobData.campaign_id,
-          group_id: jobData.group_id,
-          progress_group_id: jobData.progress_group_id,
-          video_id: jobData.video_id,
-          caption_id: selected.caption && selected.caption.id,
-          generated: Boolean(selected.generated),
-        })
-      );
-
-    return selected;
-  }
-
-  if (captionReviewService && typeof captionReviewService.assertCaptionApproved === "function") {
-    await captionReviewService.assertCaptionApproved({
-      caption: jobData.legenda,
-      transcript,
-      campaign_id: jobData.campaign_id,
-      group_id: jobData.group_id,
-      progress_group_id: jobData.progress_group_id,
-      video_id: jobData.video_id,
-    });
-  }
-
-  return {
-    caption: jobData.caption_id ? { id: jobData.caption_id } : null,
-    generated: Boolean(jobData.caption_generated),
-    text: jobData.legenda || "",
-  };
-}
-
-async function markDispatchCaptionUsed(params = {}) {
-  const { captionSelection, jobData, logger = console, usedAt = new Date(), videoCaptionsService } = params;
-  const captionId = captionSelection?.caption?.id || jobData?.caption_id;
-
-  if (!captionId || !videoCaptionsService || typeof videoCaptionsService.markCaptionUsed !== "function") {
-    return null;
-  }
-
-  const marked = await videoCaptionsService.markCaptionUsed(captionId, { usedAt });
-
-  logger.info &&
-    logger.info(
-      JSON.stringify({
-        event: "dispatch.caption.marked_used",
-        campaign_id: jobData && jobData.campaign_id,
-        group_id: jobData && jobData.group_id,
-        progress_group_id: jobData && jobData.progress_group_id,
-        video_id: jobData && jobData.video_id,
-        caption_id: captionId,
-        used_at: usedAt.toISOString(),
-      })
-    );
-
-  return marked;
-}
-
-// Sobra reservada para o resto do JSON do sendMedia (number, mediatype, mimetype,
-// fileName e a legenda) alem do campo `media` em base64.
-const DISPATCH_PAYLOAD_ENVELOPE_RESERVE_BYTES = 64 * 1024;
-
-function isDispatchVideoCompressionEnabled() {
-  return String(process.env.EVOLUTION_MEDIA_COMPRESSION_ENABLED || "true").toLowerCase() !== "false";
-}
-
-function resolveDispatchMediaBase64Budget(config = evolutionConfig) {
-  const limitBytes = Number(config.maxMediaPayloadBytes);
-
-  if (!Number.isFinite(limitBytes) || limitBytes <= 0) {
-    return null;
-  }
-
-  return limitBytes - DISPATCH_PAYLOAD_ENVELOPE_RESERVE_BYTES;
-}
-
-// O WhatsApp so exibe video de container mp4 de forma confiavel; .mov, .mkv,
-// .avi etc sao aceitos pela Evolution API (HTTP 200) mas o destinatario nao
-// recebe nada visivel, sem erro do nosso lado — descoberto apos um disparo em
-// campanha onde grupos que receberiam .mov simplesmente nao viram o video,
-// enquanto o mesmo arquivo enviado individualmente funcionou. Normaliza para
-// mp4 (remux rapido, com fallback para recompressao) antes do envio.
-async function normalizeDownloadedVideoContainer(downloadedVideo, options = {}) {
-  const { config = evolutionConfig, jobData = {}, logger = console, normalizeContainer = normalizeVideoContainerToMp4 } =
-    options;
-
-  if (!downloadedVideo || !Buffer.isBuffer(downloadedVideo.bytes) || isMp4Container(downloadedVideo)) {
-    return downloadedVideo;
-  }
-
-  if (!isDispatchVideoCompressionEnabled()) {
-    logger.warn &&
-      logger.warn(
-        JSON.stringify({
-          event: "dispatch.video_container_normalization.skipped",
-          campaign_id: jobData.campaign_id,
-          group_id: jobData.group_id,
-          video_id: jobData.video_id,
-          source_mime_type: downloadedVideo.mime_type,
-          reason: "EVOLUTION_MEDIA_COMPRESSION_ENABLED=false",
-        })
-      );
-
-    return downloadedVideo;
-  }
-
-  logger.info &&
-    logger.info(
-      JSON.stringify({
-        event: "dispatch.video_container_normalization.started",
-        campaign_id: jobData.campaign_id,
-        group_id: jobData.group_id,
-        progress_group_id: jobData.progress_group_id,
-        video_id: jobData.video_id,
-        source_mime_type: downloadedVideo.mime_type,
-        bytes: downloadedVideo.bytes.length,
-      })
-    );
-
-  const maxBase64Bytes = resolveDispatchMediaBase64Budget(config);
-  const normalized = await normalizeContainer(downloadedVideo, {
-    logger,
-    maxBase64Bytes: maxBase64Bytes || base64Length(downloadedVideo.bytes.length),
-  });
-
-  if (normalized !== downloadedVideo) {
-    // Libera os bytes originais assim que a versao mp4 existe, para nao manter
-    // as duas versoes na memoria do worker durante o upload.
-    downloadedVideo.bytes = undefined;
-  }
-
-  logger.info &&
-    logger.info(
-      JSON.stringify({
-        event: "dispatch.video_container_normalization.completed",
-        campaign_id: jobData.campaign_id,
-        group_id: jobData.group_id,
-        progress_group_id: jobData.progress_group_id,
-        video_id: jobData.video_id,
-        remuxed: Boolean(normalized.remuxed),
-        compressed: Boolean(normalized.compressed),
-        bytes: normalized.bytes.length,
-      })
-    );
-
-  return normalized;
-}
-
-// A Evolution API recusa com HTTP 413 qualquer corpo acima do limite do
-// body-parser dela (136 MB, fixo no bundle). Como a midia viaja em base64
-// (+33% sobre o arquivo), video a partir de ~102 MB nunca era entregue: o job
-// baixava o arquivo do Drive, montava o payload e tomava 413. Aqui o video e
-// reduzido para caber antes do envio.
-async function fitDownloadedVideoToEvolutionLimit(downloadedVideo, options = {}) {
-  const { compressVideo = compressVideoToFitBase64Budget, config = evolutionConfig, jobData = {}, logger = console } =
-    options;
-
-  const containerNormalized = await normalizeDownloadedVideoContainer(downloadedVideo, options);
-
-  if (!containerNormalized || !Buffer.isBuffer(containerNormalized.bytes)) {
-    return containerNormalized;
-  }
-
-  const maxBase64Bytes = resolveDispatchMediaBase64Budget(config);
-
-  if (!maxBase64Bytes || base64Length(containerNormalized.bytes.length) <= maxBase64Bytes) {
-    return containerNormalized;
-  }
-
-  if (!isDispatchVideoCompressionEnabled()) {
-    logger.warn &&
-      logger.warn(
-        JSON.stringify({
-          event: "dispatch.video_compression.skipped",
-          campaign_id: jobData.campaign_id,
-          group_id: jobData.group_id,
-          video_id: jobData.video_id,
-          bytes: containerNormalized.bytes.length,
-          max_base64_bytes: maxBase64Bytes,
-          reason: "EVOLUTION_MEDIA_COMPRESSION_ENABLED=false",
-        })
-      );
-
-    return containerNormalized;
-  }
-
-  logger.info &&
-    logger.info(
-      JSON.stringify({
-        event: "dispatch.video_compression.started",
-        campaign_id: jobData.campaign_id,
-        group_id: jobData.group_id,
-        progress_group_id: jobData.progress_group_id,
-        video_id: jobData.video_id,
-        bytes: containerNormalized.bytes.length,
-        base64_bytes: base64Length(containerNormalized.bytes.length),
-        max_base64_bytes: maxBase64Bytes,
-      })
-    );
-
-  const compressed = await compressVideo(containerNormalized, { logger, maxBase64Bytes });
-
-  if (compressed !== containerNormalized) {
-    // Libera os bytes originais (~125 MB) assim que o video reduzido existe, para
-    // nao manter as duas versoes na memoria do worker durante o upload.
-    containerNormalized.bytes = undefined;
-  }
-
-  logger.info &&
-    logger.info(
-      JSON.stringify({
-        event: "dispatch.video_compression.completed",
-        campaign_id: jobData.campaign_id,
-        group_id: jobData.group_id,
-        progress_group_id: jobData.progress_group_id,
-        video_id: jobData.video_id,
-        bytes: compressed.bytes.length,
-        base64_bytes: base64Length(compressed.bytes.length),
-      })
-    );
-
-  return compressed;
-}
-
-function releaseTemporaryDispatchMedia(downloadedVideo, deliveryPayload) {
-  if (downloadedVideo) {
-    downloadedVideo.bytes = undefined;
-  }
-
-  if (deliveryPayload && deliveryPayload.content) {
-    deliveryPayload.content.base64 = undefined;
-  }
 }
 
 function canUseDispatchConsistency(jobData = {}, dispatchConsistencyService) {
@@ -1039,9 +684,38 @@ function createDispatchProcessor(options = {}) {
     const useDispatchConsistency = canUseDispatchConsistency(job.data, dispatchConsistencyService);
 
     if (!useDispatchConsistency && UUID_PATTERN.test(String(job.data.campaign_id || ""))) {
-      const campaign = campaignsRepository && typeof campaignsRepository.findById === "function"
-        ? await campaignsRepository.findById(job.data.campaign_id).catch(() => null)
-        : null;
+      // Antes esta consulta terminava em `.catch(() => null)`, o que anulava a
+      // propria trava que o comentario acima descreve: um erro transitorio do
+      // Supabase virava `campaign = null`, resolveCampaignBlockReason devolvia
+      // null e o video de uma campanha PAUSADA ou CANCELADA era enviado ao
+      // grupo, sem nenhuma linha de log explicando o porque.
+      //
+      // Agora a falha de consulta e' distinguida de "campanha nao encontrada":
+      // relanca-se o erro para o job falhar em vez de enviar. Falhar e'
+      // recuperavel (o sweep de dispatch-failure-retry reprocessa, e o erro nao
+      // casa com PERMANENT_FAILURE_PATTERNS); enviar por engano nao e'.
+      let campaign = null;
+
+      if (campaignsRepository && typeof campaignsRepository.findById === "function") {
+        try {
+          campaign = await campaignsRepository.findById(job.data.campaign_id);
+        } catch (error) {
+          logger.error &&
+            logger.error(
+              JSON.stringify({
+                event: "dispatch.campaign_status_check_failed",
+                job_id: job.id,
+                campaign_id: job.data.campaign_id,
+                error_message: error && error.message,
+              })
+            );
+
+          throw new Error(
+            `Nao foi possivel verificar o status da campanha antes do envio: ${error && error.message}`
+          );
+        }
+      }
+
       const campaignBlockReason = resolveCampaignBlockReason(campaign);
 
       if (campaignBlockReason) {
@@ -1327,6 +1001,7 @@ module.exports = {
   assertDownloadedVideoForDispatch,
   buildDispatchDeliveryPayload,
   buildDispatchJobData,
+  buildDispatchJobId,
   buildJitteredDispatchSchedule,
   createDispatchProcessor,
   createDispatchEvents,

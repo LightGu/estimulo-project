@@ -7,8 +7,13 @@ function buildGoogleDriveVideoIndexRepeatOptions(params = {}) {
     params.cronExpression ||
     process.env.GOOGLE_DRIVE_VIDEO_INDEX_CRON ||
     DEFAULT_GOOGLE_DRIVE_VIDEO_INDEX_CRON;
+  // Mesmo motivo do group-sync: sem `tz` o cron resolve no fuso do processo.
   const timezone =
-    params.timezone || params.tz || process.env.GOOGLE_DRIVE_VIDEO_INDEX_TIMEZONE || undefined;
+    params.timezone ||
+    params.tz ||
+    process.env.GOOGLE_DRIVE_VIDEO_INDEX_TIMEZONE ||
+    process.env.CAMPAIGN_TIMEZONE ||
+    undefined;
 
   if (!cronExpression) {
     throw new Error("GOOGLE_DRIVE_VIDEO_INDEX_CRON e obrigatorio para agendar indexacao do Google Drive");

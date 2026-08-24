@@ -1,5 +1,84 @@
 const DISPATCH_INITIAL_STATUS = "pending";
 const TIME_ONLY_PATTERN = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
+const DEFAULT_DISPATCH_TIMEZONE = "America/Bahia";
+
+// Mesma cadeia de resolucao de campaign-trigger.js (getCampaignTimezone): sem
+// isto, um HH:mm de janela virava instante via `Date#setHours`, que resolve no
+// fuso do PROCESSO Node, nao no fuso da campanha. Funciona hoje so porque TZ e
+// CAMPAIGN_TIMEZONE coincidem no ambiente configurado - mudar so uma delas (ou
+// rodar numa imagem sem tzdata) desloca todo horario sorteado sem erro nem log.
+function resolveDispatchTimezone(params = {}) {
+  return (
+    params.timezone ||
+    params.timeZone ||
+    process.env.CAMPAIGN_TIMEZONE ||
+    process.env.TZ ||
+    DEFAULT_DISPATCH_TIMEZONE
+  );
+}
+
+// Extrai ano/mes/dia no fuso alvo para um instante UTC - mesma tecnica de
+// formatScheduledDateTime (campaign-trigger.js), usando Intl.DateTimeFormat em
+// vez de getFullYear/getMonth/getDate, que leem o fuso do processo.
+function dateKeyInTimezone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  })
+    .formatToParts(date)
+    .reduce((accumulator, part) => {
+      accumulator[part.type] = part.value;
+      return accumulator;
+    }, {});
+
+  return { year: parts.year, month: parts.month, day: parts.day };
+}
+
+// Constroi o instante UTC correspondente a uma hora local (HH:mm:ss) num fuso
+// e "dia calendario" dados. new Date(Date.UTC(...)) com o offset do fuso soma
+// zero deslocamento quando o fuso e' UTC e o valor correto quando nao e',
+// porque o offset e' medido comparando a mesma leitura em UTC e no fuso alvo.
+function zonedTimeToUtc(year, month, day, hours, minutes, seconds, timeZone) {
+  const asIfUtc = Date.UTC(Number(year), Number(month) - 1, Number(day), hours, minutes, seconds);
+  const offsetMs = asIfUtc - new Date(asIfUtc).getTime() + getTimezoneOffsetMs(asIfUtc, timeZone);
+
+  return new Date(asIfUtc - getTimezoneOffsetMs(asIfUtc, timeZone));
+}
+
+// Offset (em ms) que timeZone esta de UTC no instante `atMs`: diferenca entre
+// como Intl.DateTimeFormat le o instante no fuso alvo e o mesmo instante lido
+// como se fosse UTC.
+function getTimezoneOffsetMs(atMs, timeZone) {
+  const date = new Date(atMs);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+    .formatToParts(date)
+    .reduce((accumulator, part) => {
+      accumulator[part.type] = part.value;
+      return accumulator;
+    }, {});
+
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+
+  return asUtc - atMs;
+}
 
 function normalizeScheduledDate(scheduledAt = new Date()) {
   const date = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
@@ -59,7 +138,7 @@ function normalizeJitterRange(params = {}) {
   };
 }
 
-function normalizeTimePoint(value, baseDate, fieldName) {
+function normalizeTimePoint(value, baseDate, fieldName, timeZone) {
   if (!value) {
     throw new Error(`${fieldName} e obrigatorio`);
   }
@@ -84,9 +163,12 @@ function normalizeTimePoint(value, baseDate, fieldName) {
       throw new Error(`${fieldName} deve usar o formato HH:mm ou HH:mm:ss`);
     }
 
-    const date = new Date(baseDate);
-    date.setHours(hours, minutes, seconds, 0);
-    return date;
+    // O "dia calendario" da janela e' o dia que baseDate cai QUANDO OBSERVADO no
+    // fuso da campanha - antes isto vinha de baseDate.getDate() (fuso do
+    // processo). Uma confirmacao feita as 21:30 em Bahia (00:30 UTC do dia
+    // seguinte) ancorava a janela no dia errado se o processo rodasse em UTC.
+    const { year, month, day } = dateKeyInTimezone(baseDate, timeZone);
+    return zonedTimeToUtc(year, month, day, hours, minutes, seconds, timeZone);
   }
 
   return normalizeScheduledDate(rawValue);
@@ -97,6 +179,7 @@ function normalizeDispatchWindow(params = {}) {
   const baseDate = normalizeScheduledDate(
     params.execution_at || params.executionAt || params.scheduled_at || params.scheduledAt || new Date()
   );
+  const timeZone = resolveDispatchTimezone(params);
   const startValue = params.window_start || params.windowStart || timeWindow.start || timeWindow.start_at;
   const endValue = params.window_end || params.windowEnd || timeWindow.end || timeWindow.end_at;
 
@@ -104,11 +187,24 @@ function normalizeDispatchWindow(params = {}) {
     throw new Error("window_start e window_end sao obrigatorios para calcular jitter");
   }
 
-  const start = normalizeTimePoint(startValue, baseDate, "window_start");
-  const end = normalizeTimePoint(endValue, baseDate, "window_end");
+  const start = normalizeTimePoint(startValue, baseDate, "window_start", timeZone);
+  const end = normalizeTimePoint(endValue, baseDate, "window_end", timeZone);
 
   if (end.getTime() <= start.getTime()) {
-    end.setDate(end.getDate() + 1);
+    // Janela cruzando meia-noite (ex.: "22:00"-"02:00"): antes isto era
+    // end.setDate(end.getDate() + 1), que avanca o dia no fuso do PROCESSO.
+    // Somar 24h em milissegundos ao instante UTC ja resolvido evita o problema
+    // por construcao: um instante e' um instante, "mais 24h" e' o mesmo ponto
+    // no relogio um dia depois em QUALQUER fuso (America/Bahia nao observa
+    // horario de verao desde 2019, entao nao ha dia de 23h/25h a considerar
+    // aqui). Perto da fronteira de dia entre TZ e CAMPAIGN_TIMEZONE, a versao
+    // antiga podia avancar o dia errado e deslocar a janela inteira 24h - a
+    // trava de atraso cancelava a campanha inteira, com o relatorio mostrando
+    // tudo "cancelado".
+    return {
+      start,
+      end: new Date(end.getTime() + 24 * 60 * 60 * 1000),
+    };
   }
 
   return {

@@ -70,12 +70,6 @@ function normalizeEvolutionGroup(group) {
   };
 }
 
-function normalizeEvolutionGroups(payload) {
-  return extractEvolutionGroups(payload)
-    .map(normalizeEvolutionGroup)
-    .filter(Boolean);
-}
-
 function matchesNameFilter(group, filter) {
   const normalizedFilter = String(filter || "").trim().toLowerCase();
 
@@ -725,4 +719,3 @@ function createGroupsService(dependencies = {}) {
 
 module.exports = createGroupsService();
 module.exports.createGroupsService = createGroupsService;
-module.exports.normalizeEvolutionGroups = normalizeEvolutionGroups;

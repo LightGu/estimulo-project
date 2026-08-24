@@ -42,19 +42,6 @@ async function unlinkGroupsNotIn(whatsappInstanceId, groupIdsStillPresent, clien
   }
 }
 
-async function listInstancesForGroup(groupId, client) {
-  const { data, error } = await getClient(client)
-    .from("group_whatsapp_instances")
-    .select("whatsapp_instance_id")
-    .eq("group_id", groupId);
-
-  if (error) {
-    throw error;
-  }
-
-  return (data || []).map((row) => row.whatsapp_instance_id);
-}
-
 async function listGroupIdsForInstance(whatsappInstanceId, client) {
   const { data, error } = await getClient(client)
     .from("group_whatsapp_instances")
@@ -101,6 +88,5 @@ module.exports = {
   linkGroupToInstance,
   listGroupIdsForInstance,
   listInstanceIdsByGroupIds,
-  listInstancesForGroup,
   unlinkGroupsNotIn,
 };

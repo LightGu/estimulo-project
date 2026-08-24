@@ -42,14 +42,6 @@ function normalizeScheduledDate(value = new Date()) {
   return date;
 }
 
-function formatDateOnly(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function formatTimeOnly(date) {
-  return date.toISOString().slice(11, 19);
-}
-
 function normalizeNumber(value, defaultValue) {
   const number = Number(value ?? defaultValue);
 

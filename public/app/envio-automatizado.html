@@ -27,17 +27,16 @@
     <style>
       .ico { width: 14px; height: 14px; vertical-align: -2px; display: inline-block; }
 
-      /* Tables embedded inside a card/panel: no min-width floor, no duplicated border. */
-      .table-compact { min-width: 0; }
+      /* Tabela dentro de card/painel: sem borda duplicada. O piso de min-width e o
+         .table-fixed agora vem do global (components.css). */
       .table-flat { border: 0; border-radius: 0; }
-      .table-fixed { table-layout: fixed; width: 100%; }
 
       .dispatch-config-body { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end; }
       .dispatch-config-body .field { margin-bottom: 0; }
       .dispatch-config-body .field-date { width: 210px; }
       .dispatch-config-body .field-periods { flex: 1; min-width: 260px; }
       .dispatch-config-body .field-delay { width: 200px; }
-      .dispatch-config-body .field-hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+      .dispatch-config-body .field-hint { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 5px; }
       .dispatch-config-body .field-action { display: flex; flex-direction: column; }
       .dispatch-config-body .field-action label { visibility: hidden; }
       .dispatch-config-body .field-action .field-hint { visibility: hidden; }
@@ -49,17 +48,17 @@
       .dispatch-card-header { display: flex; align-items: center; gap: 12px; }
       .dispatch-header-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(78, 121, 255, 0.12); color: var(--brand-blue); display: flex; align-items: center; justify-content: center; flex: none; }
       .dispatch-header-icon .ico { width: 19px; height: 19px; }
-      .dispatch-card-header h3 { font-size: 16px; }
-      .dispatch-card-header p { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; font-weight: 400; }
+      .dispatch-card-header h3 { font-size: var(--icon-glyph-sm); }
+      .dispatch-card-header p { font-size: var(--fs-sm); color: var(--text-faint); margin-top: 2px; font-weight: 400; }
 
-      .field-label-icon { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+      .field-label-icon { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-size: var(--fs-md); font-weight: 600; color: var(--text); margin-bottom: 8px; }
       .field-label-icon .ico { width: 15px; height: 15px; color: var(--text-faint); flex: none; }
 
       .time-picker { position: relative; }
       .time-picker-trigger { appearance: none; -webkit-appearance: none; display: flex; align-items: center; gap: 8px; width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; font: inherit; color: var(--text); }
       .time-picker-trigger:hover, .time-picker-trigger.is-open { border-color: var(--brand-blue); }
       .time-picker-trigger .ico { width: 15px; height: 15px; color: var(--text-faint); flex: none; }
-      .time-picker-value { flex: 1; text-align: left; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13.5px; letter-spacing: 0.02em; }
+      .time-picker-value { flex: 1; text-align: left; font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-md); letter-spacing: 0.02em; }
       .time-picker-toggle { flex: none; color: var(--text-faint); }
       .time-picker-toggle .ico { width: 14px; height: 14px; }
 
@@ -69,7 +68,7 @@
       .time-picker-list { width: 52px; height: 160px; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: thin; }
       .time-picker-list::-webkit-scrollbar { width: 4px; }
       .time-picker-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; }
-      .time-picker-opt { height: 32px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-muted); scroll-snap-align: start; cursor: pointer; border-radius: var(--radius-sm); }
+      .time-picker-opt { height: 32px; display: flex; align-items: center; justify-content: center; font-size: var(--fs-md); font-variant-numeric: tabular-nums; color: var(--text-muted); scroll-snap-align: start; cursor: pointer; border-radius: var(--radius-sm); }
       .time-picker-opt:hover { background: var(--surface-sunken); }
       .time-picker-opt.is-selected { background: rgba(78, 121, 255, 0.14); color: var(--brand-blue); font-weight: 700; }
 
@@ -92,7 +91,7 @@
       .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chevron-cell { width: 20px; color: var(--text-faint); text-align: right; }
 
-      .trail-history-toggle { font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+      .trail-history-toggle { font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 0; }
       .trail-history-toggle:hover { color: var(--primary); }
       details.trail-history[open] .trail-history-toggle .ico { transform: rotate(90deg); }
 
@@ -103,44 +102,44 @@
 
       /* Selo "T" na coluna Status da trilha selecionada: indica se o video ja tem
          transcricao no catalogo. Fica ao lado do badge Enviado/Proximo/Pendente. */
-      .transcript-flag { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 5px; font-size: 11px; font-weight: 700; line-height: 1; vertical-align: -4px; cursor: help; }
+      .transcript-flag { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 5px; font-size: var(--fs-xs); font-weight: 700; line-height: 1; vertical-align: -4px; cursor: help; }
       .transcript-flag-on { background: var(--success-bg); color: var(--success); }
       .transcript-flag-off { background: var(--neutral-bg); color: var(--text-faint); }
 
       .stepper { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px; }
-      .step { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
-      .step .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: 11.5px; flex: none; }
+      .step { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+      .step .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: var(--fs-xs); flex: none; }
       .step.done .step-num { background: var(--success); color: #fff; }
       .step.active { color: var(--text); }
       .step.active .step-num { background: var(--brand-blue); color: #fff; }
       .step-sep { flex: 1; height: 2px; background: var(--line); min-width: 24px; }
 
-      .breadcrumb { font-size: 12px; color: var(--text-faint); }
+      .breadcrumb { font-size: var(--fs-sm); color: var(--text-faint); }
 
       .stat-ring { position: relative; width: 58px; height: 58px; flex: none; }
       .stat-ring .ring-bg { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--brand-blue) calc(var(--pct) * 1%), var(--surface-sunken) 0); }
-      .stat-ring .ring-hole { position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12.5px; color: var(--text); }
+      .stat-ring .ring-hole { position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: var(--fs-sm); color: var(--text); }
       .kpi-inline-row { display: flex; align-items: center; gap: 22px; flex: none; }
       .kpi-inline-row .kpi-item { text-align: center; }
-      .kpi-inline-row .stat-label { display: block; font-size: 11px; }
-      .kpi-inline-row .stat-value { font-size: 20px; }
-      .kpi-inline-row .kpi-item-ring { text-align: center; font-size: 10.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+      .kpi-inline-row .stat-label { display: block; font-size: var(--fs-xs); }
+      .kpi-inline-row .stat-value { font-size: var(--icon-glyph-lg); }
+      .kpi-inline-row .kpi-item-ring { text-align: center; font-size: var(--fs-2xs); color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
       .kpi-inline-row .kpi-item-ring .stat-ring { margin: 0 auto 4px; }
 
       .journey-panel { margin-top: 4px; }
       .journey-recommend-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-strong); margin-top: 6px; }
-      .journey-next-hint { font-size: 12px; color: var(--text-faint); margin-top: 10px; }
+      .journey-next-hint { font-size: var(--fs-sm); color: var(--text-faint); margin-top: 10px; }
       .journey-timeline-list { display: flex; flex-direction: column; margin-top: 8px; }
       .timeline-step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
       .timeline-step:first-child { border-top: 0; }
-      .timeline-step-index { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex: none; color: var(--text-muted); }
+      .timeline-step-index { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: var(--fs-xs); font-weight: 700; flex: none; color: var(--text-muted); }
       .timeline-step.is-concluida .timeline-step-index { background: var(--success); color: #fff; }
       .timeline-step.is-atual .timeline-step-index { background: var(--brand-blue); color: #fff; }
       .timeline-step-body { flex: 1; min-width: 0; }
-      .timeline-step-title { font-size: 13px; font-weight: 600; }
-      .timeline-step-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
-      .timeline-desvio-line { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; padding-left: 10px; border-left: 2px dashed var(--line); }
-      .timeline-footer-note { font-size: 12px; color: var(--text-faint); margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+      .timeline-step-title { font-size: var(--fs-md); font-weight: 600; }
+      .timeline-step-meta { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 2px; }
+      .timeline-desvio-line { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 6px; padding-left: 10px; border-left: 2px dashed var(--line); }
+      .timeline-footer-note { font-size: var(--fs-sm); color: var(--text-faint); margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
       .timeline-step-clickable { cursor: pointer; border-radius: var(--radius-md); }
       .timeline-step-clickable:hover { background: var(--surface-sunken); }
       .timeline-step-clickable:hover .timeline-step-title { color: var(--brand-blue); }
@@ -261,7 +260,7 @@
               <div class="section-head">
                 <div>
                   <h2>Acompanhamento de Geração de Legendas</h2>
-                  <p class="text-faint" style="font-size:12.5px;margin-top:4px;">Todas as legendas estão sendo geradas antes do envio, para sua revisão.</p>
+                  <p class="text-faint" style="font-size: var(--fs-sm);margin-top:4px;">Todas as legendas estão sendo geradas antes do envio, para sua revisão.</p>
                 </div>
                 <div class="kpi-inline-row">
                   <div class="kpi-item">
@@ -337,7 +336,7 @@
               <div class="callout" id="sendWarningCallout" style="display:none;margin-top:12px;"></div>
               <div class="callout callout-success" id="sendSuccessCallout" style="display:none;margin-top:12px;"></div>
               <div class="modal-footer" style="border:0;padding:16px 0 0;">
-                <span class="text-faint" style="margin-right:auto;font-size:12px;">Depois de revisar todas as legendas, clique no botão abaixo para iniciar o envio dos vídeos para os grupos.</span>
+                <span class="text-faint" style="margin-right:auto;font-size: var(--fs-sm);">Depois de revisar todas as legendas, clique no botão abaixo para iniciar o envio dos vídeos para os grupos.</span>
                 <button class="btn" id="startSendButton" type="button">Iniciar envio dos vídeos</button>
               </div>
             </section>
@@ -386,6 +385,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -560,14 +560,6 @@
       let captionItems = [];
       let captionFilter = "todos";
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       // new Date("YYYY-MM-DDTHH:mm:00") sem fuso e interpretado no horario local do
       // navegador; convertemos para ISO UTC aqui para o backend (que roda em outro
@@ -822,7 +814,7 @@
         if (!hasCurrentTrilha) {
           recommendHtml = nextTrilha
             ? `
-              <span class="text-muted" style="font-size:12.5px;font-weight:600;">Trilha recomendada pela jornada automática</span>
+              <span class="text-muted" style="font-size: var(--fs-sm);font-weight:600;">Trilha recomendada pela jornada automática</span>
               <div class="journey-recommend-card">
                 ${journeyReasonBadgeHtml(nextTrilha.reason)}
                 <strong>${escapeHtml(formatTrilhaLabel(nextTrilha))}</strong>
@@ -839,7 +831,7 @@
           ? buildTimelineSteps(sequence, history, group, nextTrilha)
               .map((step, index) => timelineStepHtml(step, index, desvios, group, history))
               .join("")
-          : `<p class="text-faint" style="font-size:12.5px;">Nenhuma trilha na sequência deste perfil.</p>`;
+          : `<p class="text-faint" style="font-size: var(--fs-sm);">Nenhuma trilha na sequência deste perfil.</p>`;
 
         return `
           <div class="journey-panel">
@@ -884,7 +876,7 @@
               <span class="chip">${p.inicio} - ${p.fim}<span class="chip-remove" data-remove-period="${i}">✕</span></span>`
               )
               .join("")
-          : '<span class="text-faint" style="font-size:12px;">Nenhum período adicionado</span>';
+          : '<span class="text-faint" style="font-size: var(--fs-sm);">Nenhum período adicionado</span>';
 
         document.querySelectorAll("[data-remove-period]").forEach((el) =>
           el.addEventListener("click", () => {
@@ -952,7 +944,7 @@
             <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}" aria-label="Selecionar grupo ${escapeHtml(g.nome)}">
               <td class="strong group-name-cell">
                 <div class="ellipsis" title="${escapeHtml(g.nome)}">${escapeHtml(g.nome)}${blockReason ? `<span class="block-flag has-tip" data-tip="${escapeHtml(blockReason)}" data-tip-tone="danger">${icon("warning")}</span>` : ""}</div>
-                <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
+                <div class="ellipsis text-faint" style="font-weight:400;font-size: var(--fs-xs);" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
               </td>
               <td><span class="badge badge-wrap ${SEGMENT_BADGE[g.segmento] || "badge-neutral"}">${wrapSegmento(g.segmento) || "Sem perfil"}</span></td>
               <td class="group-name-cell"><div class="ellipsis" title="${escapeHtml(resolveTrilhaLabel(g) || "")}">${resolveTrilhaLabel(g) ? escapeHtml(resolveTrilhaLabel(g)) : '<span class="text-faint">Sem trilha</span>'}</div></td>
@@ -1090,8 +1082,8 @@
             progressHtml = `
               <div style="margin-top:12px;">
                 <div class="section-head" style="margin-bottom:6px;">
-                  <span class="text-muted" style="font-size:12.5px;font-weight:600;">Progresso da trilha</span>
-                  <span class="text-faint" style="font-size:12px;">${status.enviados}/${status.total} vídeos enviados</span>
+                  <span class="text-muted" style="font-size: var(--fs-sm);font-weight:600;">Progresso da trilha</span>
+                  <span class="text-faint" style="font-size: var(--fs-sm);">${status.enviados}/${status.total} vídeos enviados</span>
                 </div>
                 <div class="progress"><span style="width:${pct}%"></span></div>
               </div>`;
@@ -1129,7 +1121,7 @@
                   </tbody>
                 </table>
               </div>
-              <p class="text-faint" style="font-size:11px;margin-top:6px;">Clique em um vídeo da lista para torná-lo o próximo a ser enviado a este grupo.</p>`;
+              <p class="text-faint" style="font-size: var(--fs-xs);margin-top:6px;">Clique em um vídeo da lista para torná-lo o próximo a ser enviado a este grupo.</p>`;
           }
         }
 
@@ -1141,9 +1133,9 @@
           <div class="card-body">
             ${journeyPanelHtml}
             <div class="divider" style="margin:14px 0;"></div>
-            <span class="text-muted" style="font-size:12.5px;font-weight:600;display:block;margin-bottom:8px;">Trilha selecionada</span>
+            <span class="text-muted" style="font-size: var(--fs-sm);font-weight:600;display:block;margin-bottom:8px;">Trilha selecionada</span>
             <div class="trilha-select-row">
-              <strong style="font-size:14px;">${currentTrilhaLabel ? escapeHtml(currentTrilhaLabel) : "Nenhuma trilha selecionada"}</strong>
+              <strong style="font-size: var(--fs-md);">${currentTrilhaLabel ? escapeHtml(currentTrilhaLabel) : "Nenhuma trilha selecionada"}</strong>
             </div>
             ${progressHtml}
             ${videosTableHtml}
@@ -1518,13 +1510,13 @@ function parseDateOnly(value) {
           .map((item) => {
             const legendaCell =
               item.status === "gerado"
-                ? `${escapeHtml(item.legenda)}<br><span class="text-faint" style="font-size:11px;">${item.legenda.length} caracteres</span>`
+                ? `${escapeHtml(item.legenda)}<br><span class="text-faint" style="font-size: var(--fs-xs);">${item.legenda.length} caracteres</span>`
                 : item.status === "erro"
                 ? `<span class="text-faint" style="font-style:italic;">Falha ao gerar legenda. Tente novamente ou edite manualmente.</span>${
                     // Mostra o motivo guardado em erro_mensagem: sem ele a tela dizia
                     // apenas "falhou" e a causa só existia no log do servidor.
                     item.erro
-                      ? `<br><span class="text-faint" style="font-size:11px;color:var(--danger);">${escapeHtml(item.erro)}</span>`
+                      ? `<br><span class="text-faint" style="font-size: var(--fs-xs);color:var(--danger);">${escapeHtml(item.erro)}</span>`
                       : ""
                   }`
                 : item.status === "pendente"
@@ -1532,7 +1524,7 @@ function parseDateOnly(value) {
                 : `<span class="text-faint" style="font-style:italic;">Processando…</span>`;
             return `
             <tr>
-              <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size:11.5px;">${item.trilha}</span></td>
+              <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size: var(--fs-xs);">${item.trilha}</span></td>
               <td>${
                 item.video.link
                   ? `<a href="${escapeHtml(item.video.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.video.arquivo)}</a>`

@@ -3,6 +3,7 @@ const campaignsRepository = require("../repositories/campaigns.repository");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const { sendToEvolution } = require("./evolution");
+const { resolveInstanceSender } = require("./evolution-instance-sender");
 const { assertDeliveryConfirmed, confirmProviderDelivery, extractProviderDelivery } = require("./delivery-confirmation");
 const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
 const { assertNoVideoCampaignInWindow, resolveAdHocDispatchBlock } = require("./dispatch-exclusivity");
@@ -83,12 +84,23 @@ function createMensagensService(dependencies = {}) {
   const campaigns = dependencies.campaignsRepository || campaignsRepository;
   const campaignGroups = dependencies.campaignGroupsRepository || campaignGroupsRepository;
   const dispatchLogs = dependencies.dispatchLogsRepository || dispatchLogsRepository;
-  const send = dependencies.sendToEvolution || sendToEvolution;
   const buildSchedule = dependencies.buildJitteredDispatchSchedule || buildJitteredDispatchSchedule;
   const enqueue = dependencies.addMensagensDispatchJob || addMensagensDispatchJob;
   const confirmDelivery = dependencies.confirmProviderDelivery || confirmProviderDelivery;
   const settingsService = dependencies.settingsService || defaultSettingsService;
   const whatsappInstances = dependencies.whatsappInstancesRepository || defaultWhatsappInstancesRepository;
+  // Sem sendToEvolution explicito nas dependencias (uso real, fora de teste),
+  // resolve a instancia pelo mesmo caminho do envio agendado/via fila
+  // (resolveInstanceSender): a primeira instancia ativa por prioridade - nunca
+  // o nome fixo em EVOLUTION_INSTANCE_NAME. O disparo imediato (POST
+  // /mensagens/dispatch, usado pelo botao "Enviar teste para este grupo")
+  // chamava sendToEvolution direto e por isso continuava batendo na instancia
+  // removida, mesmo depois da mesma correcao ja ter sido aplicada no caminho
+  // agendado/via fila. O disparo imediato nao associa grupo a instancia (isso
+  // so existe na rotacao do envio agendado, resolveInstanceForOrder).
+  const resolveSender = dependencies.resolveInstanceSender || resolveInstanceSender;
+  const send = dependencies.sendToEvolution
+    || (async (params) => (await resolveSender(undefined, { whatsappInstancesRepository: whatsappInstances }))(params));
   const whatsappInstancesService = dependencies.whatsappInstancesService || defaultWhatsappInstancesService;
   const logger = dependencies.logger || console;
 

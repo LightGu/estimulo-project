@@ -205,12 +205,10 @@ async function downloadFromDrive(params = {}) {
   return downloadedVideo;
 }
 
-const downloadGoogleDriveVideoForDispatch = downloadFromDrive;
 
 module.exports = {
   assertValidDownloadedVideo,
   downloadFromDrive,
-  downloadGoogleDriveVideoForDispatch,
   resolveVideoCatalogRecord,
   selectCatalogFileName,
 };

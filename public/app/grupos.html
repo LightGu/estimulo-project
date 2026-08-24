@@ -25,41 +25,41 @@
     <link rel="stylesheet" href="assets/css/layout.css">
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
-      .video-off-reason { display:block; margin-top:2px; font-size:11.5px; color:var(--text-faint); max-width:220px; }
+      .video-off-reason { display:block; margin-top:2px; font-size: var(--fs-xs); color:var(--text-faint); max-width:220px; }
       .sync-panel { display:none; }
       .sync-panel.open { display:flex; }
-      .status-line { min-height:20px; margin-top:10px; font-size:12.5px; color:var(--text-muted); }
-      .status-line.error { color:var(--danger); }
-      .tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin:4px 0 16px; overflow-x:auto; }
+      /* `var(--border)` nao existe no tokens.css (o token e' `--line`), entao esta
+         borda nunca chegou a renderizar. E `overflow-x:auto` fazia a faixa de abas
+         rolar lateralmente; com flex-wrap ela quebra em duas linhas e nada rola. */
+      .tabs { display:flex; flex-wrap:wrap; gap:4px; border-bottom:1px solid var(--line); margin:4px 0 16px; }
       .tabs .tab-btn {
         appearance:none; border:none; background:none; cursor:pointer;
-        padding:10px 16px; font-size:13.5px; font-weight:600; color:var(--text-muted);
+        padding:10px 16px; font-size: var(--fs-md); font-weight:600; color:var(--text-muted);
         border-bottom:2px solid transparent; white-space:nowrap;
       }
       .tabs .tab-btn:hover { color:var(--text); }
       .tabs .tab-btn.active { color:var(--primary); border-bottom-color:var(--primary); }
       .tabs .tab-btn .tab-count { color:var(--text-faint); font-weight:400; margin-left:4px; }
 
-      /* Tabela de grupos cabe na largura da tela sem scroll horizontal: overrides
-         locais do min-width/padding/font-size globais de .table-wrap/table. */
-      #main-content .table-wrap { overflow-x: hidden; }
+      /* O global (components.css) ja garante ausencia de scroll horizontal.
+         O que sobra aqui e' especifico desta tela: `table-layout: fixed` para o
+         plano de larguras por coluna mais abaixo ser respeitado, e a densidade
+         extra que 9 colunas exigem. */
       #main-content table.groups-table {
-        min-width: 0;
-        width: 100%;
         table-layout: fixed;
       }
       #main-content table.groups-table th,
       #main-content table.groups-table td {
         padding: 8px 8px;
-        font-size: 12px;
+        font-size: var(--fs-sm);
         white-space: normal;
         overflow-wrap: break-word;
         word-break: break-word;
       }
-      #main-content table.groups-table th { font-size: 10px; white-space: normal; }
+      #main-content table.groups-table th { font-size: var(--fs-2xs); white-space: normal; }
       #main-content table.groups-table .badge {
         padding: 2px 7px;
-        font-size: 10px;
+        font-size: var(--fs-2xs);
         white-space: normal;
         word-break: keep-all;
         text-align: center;
@@ -69,10 +69,10 @@
       }
       #main-content table.groups-table .btn-sm {
         padding: 4px 8px;
-        font-size: 11.5px;
+        font-size: var(--fs-xs);
       }
       #main-content table.groups-table td.mono {
-        font-size: 10px;
+        font-size: var(--fs-2xs);
         display: inline-block;
         max-width: 100%;
         overflow: hidden;
@@ -230,8 +230,8 @@
           <div class="field" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
             <label class="switch"><input type="checkbox" id="editEnviaVideo"><span class="track"></span></label>
             <div>
-              <strong style="font-size:13px;">Envia v&iacute;deo</strong>
-              <p class="text-faint" style="font-size:12px;">Define se o grupo entra nos fluxos operacionais de envio de v&iacute;deo.</p>
+              <strong style="font-size: var(--fs-md);">Envia v&iacute;deo</strong>
+              <p class="text-faint" style="font-size: var(--fs-sm);">Define se o grupo entra nos fluxos operacionais de envio de v&iacute;deo.</p>
             </div>
           </div>
           <div id="editStatus" class="status-line"></div>
@@ -243,6 +243,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -261,14 +262,6 @@
         return String(value);
       }
 
-      function escapeHtml(value) {
-        return text(value, "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -739,7 +732,7 @@
           status.innerHTML = `${badge} ${Number(result.inserted || 0)} inserido(s), ${Number(result.updated || 0)} atualizado(s), ${Number(result.ignored || 0)} ignorado(s).`;
 
           if (failedInstances.length) {
-            status.innerHTML += `<br><span class="text-muted" style="font-size:12px;">Falhou em: ${failedInstances
+            status.innerHTML += `<br><span class="text-muted" style="font-size: var(--fs-sm);">Falhou em: ${failedInstances
               .map((entry) => `${escapeHtml(entry.instance_name)} (${escapeHtml(entry.error_message)})`)
               .join("; ")}</span>`;
           }
@@ -748,7 +741,7 @@
           if (processedGroups.length) {
             processedWrap.innerHTML = `
               <div class="chip-list" style="margin-bottom:8px;">
-                <strong style="font-size:12.5px;color:var(--text-muted);">Grupos processados:</strong>
+                <strong style="font-size: var(--fs-sm);color:var(--text-muted);">Grupos processados:</strong>
               </div>
               <div class="table-wrap">
                 <table>

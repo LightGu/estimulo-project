@@ -289,11 +289,39 @@ function createMensagensDispatchProcessor(options = {}) {
     // retomar), entao so o claim atomico mais abaixo nao bastaria para impedir
     // o envio - esta checagem antecipada e o que de fato para.
     if (job.data.dispatch_log_id && typeof dispatchLogs.findById === "function") {
-      const pausedLog = await dispatchLogs.findById(job.data.dispatch_log_id).catch(() => null);
-      const pausedCampaign =
-        pausedLog && pausedLog.campaign_id
-          ? await campaignsRepository.findById(pausedLog.campaign_id).catch(() => null)
-          : null;
+      // Estas duas consultas terminavam em `.catch(() => null)`. Como o proprio
+      // comentario acima diz que esta e' a checagem "que de fato para" o envio,
+      // falhar aberto aqui significava: erro transitorio no Supabase => mensagem
+      // de campanha pausada/cancelada sai para o grupo, em silencio. E o claim
+      // atomico mais abaixo nao salva, justamente porque numa pausa o log
+      // continua "pendente" de proposito.
+      //
+      // Relancar faz o job falhar em vez de enviar - recuperavel pelo sweep de
+      // retry, ao contrario de uma mensagem ja entregue.
+      let pausedLog = null;
+      let pausedCampaign = null;
+
+      try {
+        pausedLog = await dispatchLogs.findById(job.data.dispatch_log_id);
+
+        if (pausedLog && pausedLog.campaign_id) {
+          pausedCampaign = await campaignsRepository.findById(pausedLog.campaign_id);
+        }
+      } catch (error) {
+        logger.error &&
+          logger.error(
+            JSON.stringify({
+              event: "mensagens_dispatch.pause_check_failed",
+              job_id: job.id,
+              dispatch_log_id: job.data.dispatch_log_id,
+              error_message: error && error.message,
+            })
+          );
+
+        throw new Error(
+          `Nao foi possivel verificar se a campanha esta pausada antes do envio: ${error && error.message}`
+        );
+      }
 
       if (pausedCampaign && (pausedCampaign.status === "pausado" || pausedCampaign.status === "cancelado")) {
         return { status: pausedCampaign.status === "cancelado" ? "skipped_cancelled" : "skipped_paused" };

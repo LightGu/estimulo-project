@@ -39,12 +39,6 @@ function buildGroupSyncJobData(params = {}) {
   };
 }
 
-async function addGroupSyncJob(params = {}, options = {}) {
-  const jobData = buildGroupSyncJobData(params);
-
-  return getGroupSyncQueue().add(GROUP_SYNC_JOB_NAME, jobData, options);
-}
-
 function buildGroupSyncScheduleJobData(params = {}, repeatOptions) {
   return buildScheduleJobData(params, repeatOptions, buildGroupSyncJobData);
 }
@@ -160,7 +154,6 @@ module.exports = {
   GROUP_SYNC_PROCESSING_STATUS,
   GROUP_SYNC_SCHEDULE_KEY,
   GROUP_SYNC_SUCCESS_STATUS,
-  addGroupSyncJob,
   buildGroupSyncJobData,
   buildGroupSyncRepeatOptions,
   buildGroupSyncScheduleJobData,
