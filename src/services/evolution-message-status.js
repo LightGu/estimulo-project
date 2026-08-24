@@ -104,19 +104,8 @@ async function findMessageAckStatus(messageId, options = {}) {
   }
 }
 
-// Usado pelos testes para nao carregar estado entre casos.
-function resetMessageStatusPool() {
-  const pool = cachedPool;
-
-  cachedPool = undefined;
-  cachedPoolFailed = false;
-
-  return pool && typeof pool.end === "function" ? pool.end().catch(() => {}) : Promise.resolve();
-}
-
 module.exports = {
   MESSAGE_STATUS_QUERY,
   findMessageAckStatus,
   isDatabaseConfigured,
-  resetMessageStatusPool,
 };

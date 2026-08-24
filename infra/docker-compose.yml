@@ -17,12 +17,21 @@ x-app: &app
     REDIS_PORT: 6379
     ESTIMULO_SESSION_STATE_FILE: /app/storage/sessions.json
     GOOGLE_DRIVE_VIDEO_INDEX_STATE_FILE: /app/storage/google-drive-video-index-state.json
+    # Dentro da rede do compose, "localhost" e' o PROPRIO container - o
+    # EVOLUTION_API_URL=http://localhost:8080 do .env (correto para rodar a API
+    # fora do Docker, com `npm run api`) fazia a aplicacao tentar falar consigo
+    # mesma. Toda chamada a Evolution falhava, e como removeInstance apaga a
+    # instancia la ANTES de remover do banco, ate o botao Remover devolvia 500.
+    # Aqui o hostname vira o nome do servico; o .env segue valido fora do Docker.
+    EVOLUTION_API_URL: ${EVOLUTION_API_URL_INTERNAL:-http://evolution-api:8080}
   volumes:
     - app-storage:/app/storage
-    # ./credentials fica fora da imagem (.dockerignore) de proposito - o JSON
-    # da service account do Google Drive so existe no host, nunca commitado
-    # nem embutido no build. GOOGLE_DRIVE_CREDENTIALS no .env aponta pro
-    # caminho dentro do container (./credentials/<arquivo>.json).
+    # `credentials/` fica fora da imagem de proposito (esta no .dockerignore),
+    # entao o JSON da conta de servico do Google precisa entrar como volume.
+    # Sem isto, GOOGLE_DRIVE_CREDENTIALS=./credentials/... resolve para
+    # /app/credentials/... , que nao existe dentro do container, e toda chamada
+    # ao Drive falha com "Arquivo de credenciais nao encontrado" (indexador de
+    # video, testar conexao e reindexar). Read-only: o app so precisa ler.
     - ../credentials:/app/credentials:ro
   logging:
     driver: local

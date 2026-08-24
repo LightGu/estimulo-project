@@ -155,7 +155,6 @@
         <span>estímulo</span>
       </a>
       ${groupsHtml}
-      <div class="sidebar-footer">Estímulo &middot; Painel de Conteúdo<br>São Paulo</div>
     `;
   }
 
@@ -584,6 +583,64 @@
     });
   };
 
+  // ---------- Toast ----------
+  // Aviso nao-bloqueante que some sozinho. Vivia so em campanhas.html; movido
+  // para ca para as 11 telas poderem usar, em vez de cada uma reinventar o
+  // feedback (hoje ha estimuloAlert bloqueante e .status-line inline tambem).
+  // Usage: window.estimuloToast("Campanha cancelada.", { tone: "success" });
+  const TOAST_TIMEOUT_MS = 8000;
+  let toastContainer = null;
+
+  function ensureToastContainer() {
+    if (toastContainer && document.body.contains(toastContainer)) return toastContainer;
+
+    // Reaproveita um container ja presente no HTML da pagina, se houver.
+    toastContainer = document.getElementById("toastContainer");
+
+    if (!toastContainer) {
+      toastContainer = document.createElement("div");
+      toastContainer.id = "toastContainer";
+      toastContainer.setAttribute("aria-live", "polite");
+      document.body.appendChild(toastContainer);
+    }
+
+    return toastContainer;
+  }
+
+  window.estimuloToast = function estimuloToast(message, options) {
+    const opts = options || {};
+    const tone = opts.tone === "success" ? "success" : "danger";
+    const title = opts.title || (tone === "success" ? "Sucesso" : "Nao foi possivel concluir a acao");
+    const container = ensureToastContainer();
+
+    const toast = document.createElement("div");
+    toast.className = `toast toast-${tone}`;
+
+    // Texto entra por textContent, nunca por innerHTML: a mensagem costuma vir
+    // de error.message, que pode carregar conteudo vindo do servidor.
+    const body = document.createElement("div");
+    const strong = document.createElement("strong");
+    strong.textContent = title;
+    body.appendChild(strong);
+    body.appendChild(document.createTextNode(message == null ? "" : String(message)));
+
+    const close = document.createElement("button");
+    close.className = "toast-close";
+    close.type = "button";
+    close.setAttribute("aria-label", "Fechar aviso");
+    close.textContent = "✕";
+
+    toast.appendChild(body);
+    toast.appendChild(close);
+
+    const remove = () => toast.remove();
+    close.addEventListener("click", remove);
+    container.appendChild(toast);
+    setTimeout(remove, TOAST_TIMEOUT_MS);
+
+    return remove;
+  };
+
   // ---------- Alert modal ----------
   // Replaces window.alert() so informational/error messages also render as an
   // in-app modal instead of the browser's own popup.
@@ -730,6 +787,43 @@
       input.focus();
       promptReleaseTrap = window.estimuloTrapFocus(overlay);
     });
+  };
+
+  // ---------- Global loading overlay ----------
+  // Full-screen blur + spinner shown while a page's data hasn't finished loading.
+  // Reference-counted so overlapping calls (e.g. several Promise.all fetches, or a
+  // nested save-while-loading) only hide once every caller has called hide.
+  // Usage: window.estimuloShowLoading(); ...; window.estimuloHideLoading();
+  let loadingOverlayEl = null;
+  let loadingOverlayCount = 0;
+
+  function ensureLoadingOverlay() {
+    if (loadingOverlayEl) return loadingOverlayEl;
+
+    loadingOverlayEl = document.createElement("div");
+    loadingOverlayEl.className = "loading-overlay";
+    loadingOverlayEl.id = "estimuloLoadingOverlay";
+    loadingOverlayEl.setAttribute("role", "status");
+    loadingOverlayEl.setAttribute("aria-live", "polite");
+    loadingOverlayEl.innerHTML = `
+      <div class="loading-overlay-spinner"></div>
+      <span class="loading-overlay-text">Carregando...</span>
+    `;
+    document.body.appendChild(loadingOverlayEl);
+
+    return loadingOverlayEl;
+  }
+
+  window.estimuloShowLoading = function estimuloShowLoading() {
+    loadingOverlayCount += 1;
+    ensureLoadingOverlay().classList.add("visible");
+  };
+
+  window.estimuloHideLoading = function estimuloHideLoading() {
+    loadingOverlayCount = Math.max(0, loadingOverlayCount - 1);
+    if (loadingOverlayCount === 0 && loadingOverlayEl) {
+      loadingOverlayEl.classList.remove("visible");
+    }
   };
 
   // ---------- Modal focus trap ----------

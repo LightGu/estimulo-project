@@ -8,7 +8,13 @@ function extractVideoFromDelivery(delivery) {
   return delivery.video_catalog || delivery.video || {};
 }
 
-async function buildTrailStatusById(trilhaId, deliveries, trilhasRepositoryDependency, videoCatalogRepositoryDependency) {
+async function buildTrailStatusById(
+  trilhaId,
+  deliveries,
+  trilhasRepositoryDependency,
+  videoCatalogRepositoryDependency,
+  forcedNextVideoId
+) {
   const [trilha, links] = await Promise.all([
     trilhasRepositoryDependency.findById(trilhaId),
     trilhasRepositoryDependency.listVideoLinksByTrilha(trilhaId),
@@ -24,7 +30,7 @@ async function buildTrailStatusById(trilhaId, deliveries, trilhasRepositoryDepen
   const deliveredByVideoId = new Map(deliveries.map((delivery) => [delivery.video_id, delivery.enviado_em]));
   const sentVideoIds = deliveries.map((delivery) => delivery.video_id);
   const nextVideo = selectNextApprovedUnsentVideo({
-    group: { trilha_id: trilhaId },
+    group: { trilha_id: trilhaId, forced_next_video_id: forcedNextVideoId },
     sentVideoIds,
     videos: trailVideos,
   });
@@ -190,7 +196,13 @@ function createGroupVideoProgressService(dependencies = {}) {
 
     if (currentTrailId) {
       const currentDeliveries = deliveriesWithTrail.filter((d) => d.trilha_id === currentTrailId);
-      current = await buildTrailStatusById(currentTrailId, currentDeliveries, trilhasRepositoryDependency, videoCatalogRepositoryDependency);
+      current = await buildTrailStatusById(
+        currentTrailId,
+        currentDeliveries,
+        trilhasRepositoryDependency,
+        videoCatalogRepositoryDependency,
+        resolvedGroup.forced_next_video_id || resolvedGroup.forcedNextVideoId || null
+      );
     }
 
     return { current, history };

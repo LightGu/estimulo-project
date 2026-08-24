@@ -33,12 +33,10 @@
       .org-item.open .chev { transform: rotate(90deg); }
       .chev { transition: transform 0.15s ease; color: var(--text-faint); }
       .org-meta { display:flex; gap:6px; align-items:center; }
-      .org-info-label { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); margin-bottom:4px; }
+      .org-info-label { font-size: var(--fs-xs); text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); margin-bottom:4px; }
       .org-info-label:not(:first-child) { margin-top:12px; }
-      .kebab-btn { border:0; background:transparent; cursor:pointer; padding:4px 10px; border-radius:6px; color:var(--text-muted); font-size:18px; line-height:1; letter-spacing:2px; }
+      .kebab-btn { border:0; background:transparent; cursor:pointer; padding:4px 10px; border-radius:6px; color:var(--text-muted); font-size: var(--icon-glyph-md); line-height:1; letter-spacing:2px; }
       .kebab-btn:hover { background:var(--surface-strong); }
-      .status-line { min-height:20px; margin-top:10px; font-size:12.5px; color:var(--text-muted); }
-      .status-line.error { color:var(--danger); }
     </style>
   </head>
   <body data-page="organizacoes">
@@ -124,6 +122,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -136,14 +135,6 @@
       let orgModalReleaseTrap = null;
       let orgInfoModalReleaseTrap = null;
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -178,7 +169,7 @@
                 <div class="org-item-head" data-toggle="${escapeHtml(org.id)}" aria-expanded="${index === 0 ? "true" : "false"}" aria-label="Organização ${escapeHtml(org.nome)}">
                   <div>
                     <strong>${escapeHtml(org.nome)}</strong>
-                    <div class="text-faint" style="font-size:12.5px;margin-top:2px;">${groups.length} grupo(s) sincronizado(s)</div>
+                    <div class="text-faint" style="font-size: var(--fs-sm);margin-top:2px;">${groups.length} grupo(s) sincronizado(s)</div>
                   </div>
                   <div class="org-meta">
                     <button class="kebab-btn" data-info-toggle="${escapeHtml(org.id)}" type="button" aria-label="Mais opções">&#8942;</button>
@@ -387,6 +378,7 @@
       }
 
       async function initialize() {
+        window.estimuloShowLoading();
         document.getElementById("orgList").innerHTML = `
           <div class="empty-state"><strong>Carregando organizações</strong><span>Buscando dados reais no Supabase.</span></div>`;
 
@@ -401,6 +393,8 @@
           render();
         } catch (error) {
           renderLoadError(error);
+        } finally {
+          window.estimuloHideLoading();
         }
       }
 

@@ -36,7 +36,7 @@
       .cal-fill { flex: 1 1 auto; min-height: 280px; display: flex; flex-direction: column; gap: 8px; }
       .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
       #calendarGrid { flex: 1 1 auto; min-height: 0; grid-auto-rows: 1fr; }
-      .cal-weekday { text-align:center; font-size:11.5px; font-weight:700; color:var(--text-faint); text-transform:uppercase; padding-bottom:4px; }
+      .cal-weekday { text-align:center; font-size: var(--fs-xs); font-weight:700; color:var(--text-faint); text-transform:uppercase; padding-bottom:4px; }
       .cal-cell {
         min-height:56px; border:1px solid var(--line); border-radius:var(--radius-md); padding:8px;
         background:var(--surface); display:flex; flex-direction:column; gap:6px; overflow:hidden; min-width:0;
@@ -45,16 +45,16 @@
       .cal-cell.today { border-color: var(--brand-blue); box-shadow: 0 0 0 2px rgba(78,121,255,0.15); }
       .cal-cell.has-items { cursor: pointer; }
       .cal-cell.has-items:hover { background: var(--surface-strong); }
-      .cal-daynum { font-size:12px; font-weight:700; color:var(--text-muted); }
+      .cal-daynum { font-size: var(--fs-sm); font-weight:700; color:var(--text-muted); }
       .cal-cell-body { flex:1; display:flex; align-items:center; justify-content:center; }
       .cal-count-pill {
         display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:999px;
-        background: rgba(78,121,255,0.12); color: var(--brand-blue); font-size:12px; font-weight:700;
+        background: rgba(78,121,255,0.12); color: var(--brand-blue); font-size: var(--fs-sm); font-weight:700;
         white-space: nowrap;
       }
       .cal-count-pill .dot { width:6px; height:6px; border-radius:50%; background:currentColor; flex:none; }
       .cal-nav { display:flex; align-items:center; gap:10px; }
-      .cal-nav button { border:1px solid var(--line); background:var(--surface); border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:14px; }
+      .cal-nav button { border:1px solid var(--line); background:var(--surface); border-radius:8px; width:32px; height:32px; cursor:pointer; font-size: var(--fs-md); }
       .cal-nav button:hover { background: var(--surface-strong); }
 
       /* Day drawer list items — lightly detailed, click through to the campaigns page */
@@ -71,8 +71,8 @@
       }
       .day-item:hover { background: var(--surface-strong); border-color: var(--line-strong); }
       .day-item-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-      .day-item-main strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .day-item-main span { font-size: 11.5px; color: var(--text-faint); }
+      .day-item-main strong { font-size: var(--fs-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .day-item-main span { font-size: var(--fs-xs); color: var(--text-faint); }
       .day-item .badge { flex: none; }
 
       /* Drawer header back button + panel switching */
@@ -81,7 +81,7 @@
       .drawer-header-titles h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .icon-btn-back {
         border: 1px solid var(--line); background: var(--surface); border-radius: 8px;
-        width: 30px; height: 30px; cursor: pointer; font-size: 15px; flex: none;
+        width: 30px; height: 30px; cursor: pointer; font-size: var(--fs-lg); flex: none;
       }
       .icon-btn-back:hover { background: var(--surface-strong); }
       .group-row { cursor: pointer; }
@@ -89,7 +89,7 @@
 
       @media (max-width: 720px) {
         .cal-cell { min-height: 46px; padding: 6px; }
-        .cal-count-pill { font-size: 11px; padding: 3px 7px; }
+        .cal-count-pill { font-size: var(--fs-xs); padding: 3px 7px; }
       }
     </style>
   </head>
@@ -122,7 +122,7 @@
                 <input id="nameFilter" type="search" placeholder="Nome da campanha…">
               </div>
               <div class="toolbar-spacer"></div>
-              <span class="text-faint" style="font-size:12px;">Clique em um dia para ver os detalhes</span>
+              <span class="text-faint" style="font-size: var(--fs-sm);">Clique em um dia para ver os detalhes</span>
             </div>
           </section>
 
@@ -146,6 +146,7 @@
       <div class="drawer-body" id="dayDrawerBody"></div>
     </aside>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -167,14 +168,6 @@
         captionsByGroup: new Map(),
       };
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -265,6 +258,16 @@
         return String(n).padStart(2, "0");
       }
 
+      // Mesmo padrao de erro das demais telas (.empty-state com a mensagem do
+      // erro), adaptado para cobrir a grade do calendario.
+      function renderLoadError(error) {
+        document.getElementById("calendarGrid").innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <strong>Nao foi possivel carregar as campanhas</strong>
+            <p>${escapeHtml(error && error.message ? error.message : String(error))}</p>
+          </div>`;
+      }
+
       function renderCalendar() {
         document.getElementById("monthLabel").textContent = `${MONTH_NAMES[viewMonth]} ${viewYear}`;
 
@@ -291,10 +294,10 @@
             }
             const count = campaignsForDate(cell.dateStr).length;
             return `
-              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}${count ? " has-items" : ""}" data-date="${cell.dateStr}"${count ? ` aria-label="${count} programação${count > 1 ? "ões" : ""} em ${cell.day}"` : ""}>
+              <div class="cal-cell${cell.dateStr === TODAY ? " today" : ""}${count ? " has-items" : ""}" data-date="${cell.dateStr}"${count ? ` aria-label="${count} programaç${count > 1 ? "ões" : "ão"} em ${cell.day}"` : ""}>
                 <span class="cal-daynum">${cell.day}</span>
                 <div class="cal-cell-body">
-                  ${count ? `<span class="cal-count-pill"><span class="dot"></span>${count} programação${count > 1 ? "ões" : ""}</span>` : ""}
+                  ${count ? `<span class="cal-count-pill"><span class="dot"></span>${count} programaç${count > 1 ? "ões" : "ão"}</span>` : ""}
                 </div>
               </div>`;
           })
@@ -486,15 +489,28 @@
       async function initialize() {
         renderWeekdaysRow();
 
+        window.estimuloShowLoading();
+        let loadError = null;
         try {
           const campaigns = await requestJson("/campaigns");
           state.campaigns = Array.isArray(campaigns) ? campaigns : [];
         } catch (error) {
+          // Antes isto so fazia console.error e zerava state.campaigns: a tela
+          // pintava um calendario vazio e perfeito, que o usuario nao tem como
+          // distinguir de "nao ha campanhas neste mes". As outras telas que
+          // carregam lista ja avisam a falha; esta era a unica que mentia.
           console.error("Falha ao carregar campanhas", error);
           state.campaigns = [];
+          loadError = error;
+        } finally {
+          window.estimuloHideLoading();
         }
 
         renderCalendar();
+
+        if (loadError) {
+          renderLoadError(loadError);
+        }
       }
 
       initialize();

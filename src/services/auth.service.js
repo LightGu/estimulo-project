@@ -86,17 +86,10 @@ async function setActive(id, active, deps = {}) {
   return sanitizeUser(user);
 }
 
-async function removeUser(id, deps = {}) {
-  const repository = deps.appUsersRepository || appUsersRepositoryDefault;
-  const user = await repository.remove(id);
-  return sanitizeUser(user);
-}
-
 module.exports = {
   authenticate,
   createUser,
   listUsers,
-  removeUser,
   setActive,
   updatePassword,
 };

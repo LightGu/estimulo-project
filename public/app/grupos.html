@@ -25,41 +25,41 @@
     <link rel="stylesheet" href="assets/css/layout.css">
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
-      .video-off-reason { display:block; margin-top:2px; font-size:11.5px; color:var(--text-faint); max-width:220px; }
+      .video-off-reason { display:block; margin-top:2px; font-size: var(--fs-xs); color:var(--text-faint); max-width:220px; }
       .sync-panel { display:none; }
       .sync-panel.open { display:flex; }
-      .status-line { min-height:20px; margin-top:10px; font-size:12.5px; color:var(--text-muted); }
-      .status-line.error { color:var(--danger); }
-      .tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin:4px 0 16px; overflow-x:auto; }
+      /* `var(--border)` nao existe no tokens.css (o token e' `--line`), entao esta
+         borda nunca chegou a renderizar. E `overflow-x:auto` fazia a faixa de abas
+         rolar lateralmente; com flex-wrap ela quebra em duas linhas e nada rola. */
+      .tabs { display:flex; flex-wrap:wrap; gap:4px; border-bottom:1px solid var(--line); margin:4px 0 16px; }
       .tabs .tab-btn {
         appearance:none; border:none; background:none; cursor:pointer;
-        padding:10px 16px; font-size:13.5px; font-weight:600; color:var(--text-muted);
+        padding:10px 16px; font-size: var(--fs-md); font-weight:600; color:var(--text-muted);
         border-bottom:2px solid transparent; white-space:nowrap;
       }
       .tabs .tab-btn:hover { color:var(--text); }
       .tabs .tab-btn.active { color:var(--primary); border-bottom-color:var(--primary); }
       .tabs .tab-btn .tab-count { color:var(--text-faint); font-weight:400; margin-left:4px; }
 
-      /* Tabela de grupos cabe na largura da tela sem scroll horizontal: overrides
-         locais do min-width/padding/font-size globais de .table-wrap/table. */
-      #main-content .table-wrap { overflow-x: hidden; }
+      /* O global (components.css) ja garante ausencia de scroll horizontal.
+         O que sobra aqui e' especifico desta tela: `table-layout: fixed` para o
+         plano de larguras por coluna mais abaixo ser respeitado, e a densidade
+         extra que 9 colunas exigem. */
       #main-content table.groups-table {
-        min-width: 0;
-        width: 100%;
         table-layout: fixed;
       }
       #main-content table.groups-table th,
       #main-content table.groups-table td {
         padding: 8px 8px;
-        font-size: 12px;
+        font-size: var(--fs-sm);
         white-space: normal;
         overflow-wrap: break-word;
         word-break: break-word;
       }
-      #main-content table.groups-table th { font-size: 10px; white-space: normal; }
+      #main-content table.groups-table th { font-size: var(--fs-2xs); white-space: normal; }
       #main-content table.groups-table .badge {
         padding: 2px 7px;
-        font-size: 10px;
+        font-size: var(--fs-2xs);
         white-space: normal;
         word-break: keep-all;
         text-align: center;
@@ -69,10 +69,10 @@
       }
       #main-content table.groups-table .btn-sm {
         padding: 4px 8px;
-        font-size: 11.5px;
+        font-size: var(--fs-xs);
       }
       #main-content table.groups-table td.mono {
-        font-size: 10px;
+        font-size: var(--fs-2xs);
         display: inline-block;
         max-width: 100%;
         overflow: hidden;
@@ -131,6 +131,32 @@
                   <option value="nao-classificados">N&atilde;o classificados</option>
                 </select>
               </div>
+              <div class="field">
+                <label for="organizationFilter">Organiza&ccedil;&atilde;o</label>
+                <select id="organizationFilter">
+                  <option value="todos">Todas</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="profileFilter">Perfil</label>
+                <select id="profileFilter">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
+              <div class="field" id="setorFilterField" hidden>
+                <label for="setorFilter">Setor</label>
+                <select id="setorFilter">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="videoFilter">Envia v&iacute;deo</label>
+                <select id="videoFilter">
+                  <option value="todos">Todos</option>
+                  <option value="sim">Envia v&iacute;deo</option>
+                  <option value="nao">N&atilde;o envia v&iacute;deo</option>
+                </select>
+              </div>
               <div class="toolbar-spacer"></div>
               <button class="btn btn-secondary" id="syncButton" type="button">Sincronizar com Evolution API</button>
             </div>
@@ -159,7 +185,6 @@
                     <th>Setor</th>
                     <th>Classifica&ccedil;&atilde;o</th>
                     <th>Envia v&iacute;deo</th>
-                    <th>Trilha</th>
                     <th id="instanceColumnHeader" hidden>N&uacute;mero</th>
                     <th>A&ccedil;&otilde;es</th>
                   </tr>
@@ -205,8 +230,8 @@
           <div class="field" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
             <label class="switch"><input type="checkbox" id="editEnviaVideo"><span class="track"></span></label>
             <div>
-              <strong style="font-size:13px;">Envia v&iacute;deo</strong>
-              <p class="text-faint" style="font-size:12px;">Define se o grupo entra nos fluxos operacionais de envio de v&iacute;deo.</p>
+              <strong style="font-size: var(--fs-md);">Envia v&iacute;deo</strong>
+              <p class="text-faint" style="font-size: var(--fs-sm);">Define se o grupo entra nos fluxos operacionais de envio de v&iacute;deo.</p>
             </div>
           </div>
           <div id="editStatus" class="status-line"></div>
@@ -218,6 +243,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -225,7 +251,6 @@
         groups: [],
         organizations: [],
         profiles: [],
-        trilhaNameById: new Map(),
         whatsappInstances: [],
         activeInstanceTab: "todos",
       };
@@ -237,14 +262,6 @@
         return String(value);
       }
 
-      function escapeHtml(value) {
-        return text(value, "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -260,14 +277,6 @@
       function orgName(group) {
         const org = state.organizations.find((item) => item.id === group.organization_id);
         return org ? org.nome : text(group.organization_id, "-");
-      }
-
-      function resolveTrilhaLabel(group) {
-        if (group.trilha_id) {
-          return state.trilhaNameById.get(group.trilha_id) || group.trilha_override || null;
-        }
-
-        return group.trilha_override || null;
       }
 
       function classificationBadge(group) {
@@ -336,10 +345,26 @@
       function matchesFilters(group) {
         const q = document.getElementById("searchInput").value.trim().toLowerCase();
         const statusFilter = document.getElementById("statusFilter").value;
+        const organizationFilter = document.getElementById("organizationFilter").value;
+        const profileFilter = document.getElementById("profileFilter").value;
+        const setorFilter = document.getElementById("setorFilter").value;
+        const videoFilter = document.getElementById("videoFilter").value;
 
         if (q && !String(group.nome || "").toLowerCase().includes(q)) return false;
         if (statusFilter === "classificados" && !group.segmento) return false;
         if (statusFilter === "nao-classificados" && group.segmento) return false;
+
+        if (organizationFilter !== "todos" && group.organization_id !== organizationFilter) return false;
+
+        if (profileFilter !== "todos") {
+          const groupProfileId = group.profile_id || resolveProfileIdFromSegmento(group.segmento);
+          if (groupProfileId !== profileFilter) return false;
+        }
+
+        if (setorFilter !== "todos" && normalizeComparable(group.setor) !== normalizeComparable(setorFilter)) return false;
+
+        if (videoFilter === "sim" && group.envia_video !== true) return false;
+        if (videoFilter === "nao" && group.envia_video === true) return false;
 
         if (state.activeInstanceTab !== "todos") {
           const linkedIds = Array.isArray(group.whatsapp_instance_ids) ? group.whatsapp_instance_ids : [];
@@ -400,7 +425,7 @@
 
       function renderGroups() {
         const showInstanceColumn = hasMultipleInstances();
-        const colspan = showInstanceColumn ? 9 : 8;
+        const colspan = showInstanceColumn ? 8 : 7;
         document.getElementById("instanceColumnHeader").hidden = !showInstanceColumn;
         renderInstanceTabs();
 
@@ -437,10 +462,6 @@
                 <td>${group.setor ? escapeHtml(group.setor) : '<span class="text-faint">-</span>'}</td>
                 <td>${classificationBadge(group)}</td>
                 <td>${enviaVideoBadge(group)}</td>
-                <td>${(() => {
-                  const trilhaLabel = resolveTrilhaLabel(group);
-                  return trilhaLabel ? escapeHtml(trilhaLabel) : '<span class="text-faint">Sem trilha</span>';
-                })()}</td>
                 ${showInstanceColumn ? `<td>${instanceCell(group)}</td>` : ""}
                 <td><button class="btn btn-secondary btn-sm" data-edit="${escapeHtml(group.id)}">Editar</button></td>
               </tr>`;
@@ -577,8 +598,52 @@
         }
       }
 
+      function populateToolbarFilters() {
+        const organizationFilter = document.getElementById("organizationFilter");
+        const previousOrganization = organizationFilter.value || "todos";
+        organizationFilter.innerHTML = '<option value="todos">Todas</option>';
+        state.organizations.forEach((organization) => {
+          const option = document.createElement("option");
+          option.value = organization.id;
+          option.textContent = organization.nome;
+          organizationFilter.appendChild(option);
+        });
+        organizationFilter.value = [...organizationFilter.options].some((option) => option.value === previousOrganization)
+          ? previousOrganization
+          : "todos";
+
+        const profileFilter = document.getElementById("profileFilter");
+        const previousProfile = profileFilter.value || "todos";
+        profileFilter.innerHTML = '<option value="todos">Todos</option>';
+        state.profiles.forEach((profile) => {
+          const option = document.createElement("option");
+          option.value = profile.id;
+          option.textContent = profile.nome;
+          profileFilter.appendChild(option);
+        });
+        profileFilter.value = [...profileFilter.options].some((option) => option.value === previousProfile)
+          ? previousProfile
+          : "todos";
+
+        const setores = knownSetores();
+        const setorFilterField = document.getElementById("setorFilterField");
+        const setorFilter = document.getElementById("setorFilter");
+        setorFilterField.hidden = setores.length === 0;
+        const previousSetor = setorFilter.value || "todos";
+        setorFilter.innerHTML = '<option value="todos">Todos</option>';
+        setores.forEach((setor) => {
+          const option = document.createElement("option");
+          option.value = setor;
+          option.textContent = setor;
+          setorFilter.appendChild(option);
+        });
+        setorFilter.value = [...setorFilter.options].some((option) => option.value === previousSetor)
+          ? previousSetor
+          : "todos";
+      }
+
       function renderLoadError(error) {
-        const colspan = hasMultipleInstances() ? 9 : 8;
+        const colspan = hasMultipleInstances() ? 8 : 7;
         document.getElementById("resultCount").textContent = "";
         document.getElementById("groupsBody").innerHTML = `
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
@@ -599,22 +664,15 @@
         state.profiles = Array.isArray(profiles) ? profiles : [];
       }
 
-      async function loadTrilhas() {
-        const trilhas = await requestJson("/trilhas");
-        const list = Array.isArray(trilhas) ? trilhas : [];
-        list.forEach((trail) => {
-          state.trilhaNameById.set(trail.id, `${trail.macrotema} - ${trail.trilha}`);
-        });
-      }
-
       async function loadGroups() {
-        const colspan = hasMultipleInstances() ? 9 : 8;
+        const colspan = hasMultipleInstances() ? 8 : 7;
         document.getElementById("groupsBody").innerHTML = `
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
 
         try {
           const groups = await requestJson("/groups/search");
           state.groups = Array.isArray(groups) ? groups : [];
+          populateToolbarFilters();
           renderGroups();
         } catch (error) {
           renderLoadError(error);
@@ -622,31 +680,30 @@
       }
 
       async function initialize() {
+        window.estimuloShowLoading();
         try {
-          await loadOrganizations();
-        } catch (error) {
-          state.organizations = [];
-        }
+          try {
+            await loadOrganizations();
+          } catch (error) {
+            state.organizations = [];
+          }
 
-        try {
-          await loadProfiles();
-        } catch (error) {
-          state.profiles = [];
-        }
+          try {
+            await loadProfiles();
+          } catch (error) {
+            state.profiles = [];
+          }
 
-        try {
-          await loadTrilhas();
-        } catch (error) {
-          state.trilhaNameById = new Map();
-        }
+          try {
+            await loadWhatsappInstances();
+          } catch (error) {
+            state.whatsappInstances = [];
+          }
 
-        try {
-          await loadWhatsappInstances();
-        } catch (error) {
-          state.whatsappInstances = [];
+          await loadGroups();
+        } finally {
+          window.estimuloHideLoading();
         }
-
-        await loadGroups();
       }
 
       async function syncGroups() {
@@ -675,7 +732,7 @@
           status.innerHTML = `${badge} ${Number(result.inserted || 0)} inserido(s), ${Number(result.updated || 0)} atualizado(s), ${Number(result.ignored || 0)} ignorado(s).`;
 
           if (failedInstances.length) {
-            status.innerHTML += `<br><span class="text-muted" style="font-size:12px;">Falhou em: ${failedInstances
+            status.innerHTML += `<br><span class="text-muted" style="font-size: var(--fs-sm);">Falhou em: ${failedInstances
               .map((entry) => `${escapeHtml(entry.instance_name)} (${escapeHtml(entry.error_message)})`)
               .join("; ")}</span>`;
           }
@@ -684,7 +741,7 @@
           if (processedGroups.length) {
             processedWrap.innerHTML = `
               <div class="chip-list" style="margin-bottom:8px;">
-                <strong style="font-size:12.5px;color:var(--text-muted);">Grupos processados:</strong>
+                <strong style="font-size: var(--fs-sm);color:var(--text-muted);">Grupos processados:</strong>
               </div>
               <div class="table-wrap">
                 <table>
@@ -725,6 +782,10 @@
       });
       document.getElementById("searchInput").addEventListener("input", renderGroups);
       document.getElementById("statusFilter").addEventListener("change", renderGroups);
+      document.getElementById("organizationFilter").addEventListener("change", renderGroups);
+      document.getElementById("profileFilter").addEventListener("change", renderGroups);
+      document.getElementById("setorFilter").addEventListener("change", renderGroups);
+      document.getElementById("videoFilter").addEventListener("change", renderGroups);
       document.getElementById("syncButton").addEventListener("click", syncGroups);
 
       initialize();

@@ -58,6 +58,37 @@ nano .env
 
 Preencha obrigatoriamente `REDIS_PASSWORD`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `EVOLUTION_API_URL` e `EVOLUTION_API_KEY`. Preencha Google Drive/Gemini apenas se esses recursos forem usados.
 
+### Credenciais do Google Drive
+
+O JSON da conta de servico **nao entra na imagem** (`credentials/` esta no
+`.dockerignore`). Ele chega ao container por bind mount read-only, ja declarado
+no `infra/docker-compose.yml`:
+
+```yaml
+volumes:
+  - ../credentials:/app/credentials:ro
+```
+
+Por isso o arquivo precisa existir **no host**, dentro de `credentials/`, antes
+do `docker compose up`, e `GOOGLE_DRIVE_CREDENTIALS` deve apontar para o caminho
+relativo correspondente:
+
+```bash
+mkdir -p credentials
+# copie o JSON da conta de servico para credentials/
+chmod 600 credentials/*.json
+```
+
+```env
+GOOGLE_DRIVE_CREDENTIALS=./credentials/SEU-ARQUIVO.json
+```
+
+Se o diretorio estiver vazio, o bind mount ainda sobe (o Docker cria a pasta),
+mas toda chamada ao Drive falha com `Arquivo de credenciais nao encontrado` -
+indexacao de video, testar conexao e reindexar. Alternativa sem arquivo: colar o
+JSON inteiro em `GOOGLE_DRIVE_CREDENTIALS`; o codigo aceita as duas formas
+(`src/services/google-drive.js` testa se o valor comeca com `{`).
+
 Para frontend Vercel, use a URL final exata, sem `/` no fim:
 
 ```env

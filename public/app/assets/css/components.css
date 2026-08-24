@@ -85,11 +85,11 @@
   right: -2px;
   min-width: 16px;
   height: 16px;
-  padding: 0 4px;
+  padding: 0 var(--space-1);
   border-radius: 999px;
   background: var(--danger);
   color: #ffffff;
-  font-size: 10px;
+  font-size: var(--fs-2xs);
   font-weight: 700;
   line-height: 16px;
   text-align: center;
@@ -129,13 +129,13 @@
 
 .notif-panel-header h4 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-md);
 }
 
 .notif-panel-header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-3);
   flex: none;
 }
 
@@ -144,7 +144,7 @@
   border: 0;
   background: none;
   color: var(--primary);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
   padding: 0;
@@ -169,8 +169,8 @@
 .notif-item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 16px;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--line);
 }
 
@@ -183,13 +183,13 @@
 }
 
 .notif-item-message {
-  font-size: 13px;
+  font-size: var(--fs-md);
   color: var(--text);
   line-height: 1.4;
 }
 
 .notif-item-time {
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   color: var(--text-faint);
 }
 
@@ -197,7 +197,7 @@
   padding: 28px 16px;
   text-align: center;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
 /* Buttons */
@@ -205,15 +205,15 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-2);
   height: 38px;
-  padding: 0 16px;
+  padding: 0 var(--space-4);
   border: 0;
   border-radius: var(--radius-sm);
   background: var(--primary);
   color: #ffffff;
   font-weight: 600;
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   cursor: pointer;
   transition: background 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
   white-space: nowrap;
@@ -245,7 +245,7 @@
 .btn.btn-ghost {
   background: transparent;
   color: var(--primary);
-  padding: 0 8px;
+  padding: 0 var(--space-2);
   height: 32px;
 }
 
@@ -274,7 +274,7 @@
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: var(--space-5);
 }
 
 .access-panel {
@@ -299,7 +299,7 @@
 }
 
 .access-copy h1 {
-  font-size: 24px;
+  font-size: var(--fs-4xl);
 }
 
 .access-copy p {
@@ -308,7 +308,7 @@
 
 .access-form {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .access-form .btn {
@@ -317,17 +317,26 @@
 
 .access-error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--fs-md);
 }
 
-.btn.btn-accent {
-  background: linear-gradient(90deg, var(--brand-purple), var(--brand-blue));
+/* Linha de status abaixo de um formulario/card. Estava duplicada byte a byte
+   em configuracoes.html, grupos.html e organizacoes.html. */
+.status-line {
+  min-height: 20px;
+  margin-top: 10px;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.status-line.error {
+  color: var(--danger);
 }
 
 .btn.btn-sm {
   height: 30px;
-  padding: 0 12px;
-  font-size: 12.5px;
+  padding: 0 var(--space-3);
+  font-size: var(--fs-sm);
 }
 
 .btn-icon {
@@ -353,7 +362,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 16px 20px;
   border-bottom: 1px solid var(--line);
 }
@@ -361,7 +370,7 @@
 .card-header h3 {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .card-body {
@@ -387,7 +396,7 @@
 }
 
 .stat-label {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -395,13 +404,13 @@
 }
 
 .stat-value {
-  font-size: 28px;
+  font-size: var(--fs-5xl);
   font-weight: 700;
   letter-spacing: -0.01em;
 }
 
 .stat-sub {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
 }
 
@@ -412,7 +421,7 @@
   gap: 6px;
   padding: 3px 10px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   background: var(--neutral-bg);
   color: var(--text-muted);
@@ -452,10 +461,6 @@
   color: var(--text-muted);
 }
 
-.badge-dot-only::before {
-  content: none;
-}
-
 /* Custom tooltip: add class="has-tip" + data-tip="..." (+ optional data-tip-tone="success|warning|danger|info|neutral")
    to any element. Rendering is handled by assets/js/tooltip.js — a single element positioned with
    `position: fixed` and appended to <body>, so it always renders above scroll/overflow containers
@@ -469,7 +474,7 @@
   max-width: 240px;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   line-height: 1.4;
   white-space: normal;
@@ -515,9 +520,20 @@
 .tooltip-bubble--neutral { background: var(--tooltip-neutral-bg); color: var(--text-muted); }
 .tooltip-bubble--neutral::after { border-top-color: var(--tooltip-neutral-bg); }
 
-/* Tables */
+/* Tables
+   REGRA DO PRODUTO: nenhuma caixa do sistema rola horizontalmente.
+   Antes, o padrao global era `overflow-x: auto` + `table { min-width: 760px }`,
+   o que fazia toda tabela com mais de ~5 colunas ganhar barra horizontal.
+   campanhas.html, grupos.html e envio-automatizado.html cada uma reescreveu
+   o mesmo override local para fugir disso; este bloco absorve os tres.
+
+   Como a largura fica garantida sem `table-layout: fixed` (que forcaria
+   colunas de largura igual e piora tabelas com coluna de acoes estreita):
+   sem piso de min-width, cabecalho podendo quebrar, e overflow-wrap nas
+   celulas. Com todo conteudo quebravel, a largura minima intrinseca da
+   tabela fica menor que o container e o overflow deixa de existir. */
 .table-wrap {
-  overflow-x: auto;
+  overflow-x: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -526,25 +542,36 @@
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 0;
 }
 
 th,
 td {
-  padding: 13px 16px;
+  padding: var(--table-pad-y) var(--table-pad-x);
   border-bottom: 1px solid var(--line);
   text-align: left;
   vertical-align: middle;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-tight);
+  /* Quebra UUID, ID de grupo (120363...@g.us) e link do Drive, que nao tem
+     espaco em branco e sozinhos esticavam a tabela alem do container. */
+  overflow-wrap: anywhere;
 }
 
 th {
   background: var(--surface-strong);
   color: var(--text-muted);
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  white-space: nowrap;
+  white-space: normal;
+}
+
+/* Utilitario opcional: colunas de largura igual, para tabelas onde a proporcao
+   natural do conteudo fica ruim. Nao e' mais necessario para evitar scroll. */
+table.table-fixed {
+  table-layout: fixed;
 }
 
 tbody tr:last-child td {
@@ -561,7 +588,7 @@ td.strong {
 
 td.mono {
   font-family: Consolas, "Courier New", monospace;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
 }
 
@@ -569,9 +596,9 @@ td.mono {
 .toolbar {
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
-  padding: 16px;
+  padding: var(--space-4);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
@@ -599,7 +626,7 @@ td.mono {
   background: transparent;
   padding: 7px 14px;
   border-radius: 5px;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-muted);
   cursor: pointer;
@@ -675,7 +702,7 @@ td.mono {
 
 .empty-state strong {
   color: var(--text);
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 
 /* Progress bar */
@@ -708,7 +735,7 @@ td.mono {
   border-radius: 999px;
   background: var(--surface-strong);
   border: 1px solid var(--line);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text);
 }
@@ -790,7 +817,7 @@ td.mono {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 18px 20px;
   border-bottom: 1px solid var(--line);
   flex: none;
@@ -801,10 +828,10 @@ td.mono {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 12px;
+  padding: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 /* Modal / drawer */
@@ -815,13 +842,67 @@ td.mono {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: var(--space-5);
   z-index: 50;
   overscroll-behavior: contain;
 }
 
 .overlay[hidden] {
   display: none;
+}
+
+/* Global loading overlay — full-screen blur shown while a page's data is still
+   in flight (see assets/js/nav.js estimuloShowLoading/estimuloHideLoading). Sits
+   above the sidebar (z-index 60/61) and any open modal (z-index 50). */
+.loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(11, 10, 61, 0.28);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.loading-overlay.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.loading-overlay-spinner {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 3.5px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  animation: loading-overlay-spin 0.8s linear infinite;
+}
+
+.loading-overlay-text {
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes loading-overlay-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-overlay-spinner {
+    animation-duration: 1.6s;
+  }
 }
 
 .modal {
@@ -838,7 +919,7 @@ td.mono {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 18px 22px;
   border-bottom: 1px solid var(--line);
 }
@@ -866,7 +947,7 @@ td.mono {
   background: var(--surface-strong);
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 15px;
+  font-size: var(--fs-lg);
   line-height: 1;
 }
 
@@ -880,7 +961,7 @@ td.mono {
   height: 1px;
   background: var(--line);
   border: 0;
-  margin: 4px 0;
+  margin: var(--space-1) 0;
 }
 
 /* Callout / info note */
@@ -891,7 +972,7 @@ td.mono {
   border-radius: var(--radius-md);
   background: var(--info-bg);
   color: var(--callout-info-text);
-  font-size: 13px;
+  font-size: var(--fs-md);
   border: 1px solid rgba(0, 152, 252, 0.2);
 }
 
@@ -911,4 +992,50 @@ td.mono {
   background: var(--danger-bg);
   color: var(--callout-danger-text);
   border-color: rgba(192, 41, 63, 0.25);
+}
+
+/* Toast — aviso nao-bloqueante, some sozinho em 8s.
+   Vivia so em campanhas.html, que era a unica tela com um feedback decente
+   enquanto as outras usavam estimuloAlert (bloqueante) ou .status-line.
+   Promovido para ficar disponivel nas 11 telas via window.estimuloToast. */
+#toastContainer {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 360px;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-md);
+  font-size: var(--fs-md);
+  line-height: 1.4;
+  animation: toast-in 0.15s ease;
+}
+.toast strong { display: block; margin-bottom: 2px; }
+.toast.toast-danger { border-color: var(--danger); background: var(--danger-bg); color: var(--danger); }
+.toast.toast-success { border-color: var(--success); background: var(--success-bg); color: var(--success); }
+.toast-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.7;
+  font-size: var(--fs-md);
+  line-height: 1;
+}
+.toast-close:hover { opacity: 1; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }

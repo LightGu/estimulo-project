@@ -116,6 +116,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -154,15 +155,6 @@
         currentPage: 1,
       };
 
-      function escapeHtml(value) {
-        return String(value ?? "").replace(/[&<>"']/g, (char) => ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;",
-        }[char]));
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -444,6 +436,7 @@
         document.getElementById("dataInicio").max = todayIso;
         document.getElementById("dataFim").max = todayIso;
 
+        window.estimuloShowLoading();
         try {
           const [organizations, groups, scheduleSettings] = await Promise.all([
             requestJson("/organizations"),
@@ -459,6 +452,8 @@
           await renderAll();
         } catch (error) {
           renderLoadError(error);
+        } finally {
+          window.estimuloHideLoading();
         }
       }
 

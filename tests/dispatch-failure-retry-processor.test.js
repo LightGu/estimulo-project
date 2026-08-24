@@ -9,6 +9,10 @@ const {
 
 const silentLogger = { info: () => {}, warn: () => {}, error: () => {} };
 
+function minutesAgoIso(minutes) {
+  return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+}
+
 function buildFailedLog(index, overrides = {}) {
   return {
     id: `log-${index}`,
@@ -16,6 +20,11 @@ function buildFailedLog(index, overrides = {}) {
     group_id: `group-${index}`,
     video_id: `video-${index}`,
     retry_count: 0,
+    // Falha recente: o sweep so reenfileira log com horario original conhecido
+    // (resolveRetryScheduledAt), e o reenvio herda esse horario em vez de ser
+    // reestampado com "agora" - e o que permite a trava de atraso barrar um log
+    // antigo. Sem este campo o log e pulado de proposito.
+    horario_envio_planejado: minutesAgoIso(2),
     groups: { id: `group-${index}`, evolution_group_id: `12036300000000${index}@g.us`, trilha_id: "trilha-1" },
     video_catalog: { id: `video-${index}`, drive_file_id: `drive-${index}` },
     ...overrides,

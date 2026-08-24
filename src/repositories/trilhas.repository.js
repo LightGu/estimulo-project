@@ -156,19 +156,6 @@ async function findVideoLink(trilhaId, videoId, client) {
   return data || null;
 }
 
-async function listTrilhasForVideo(videoId, client) {
-  const { data, error } = await getClient(client)
-    .from("trilha_videos")
-    .select("*")
-    .eq("video_id", videoId);
-
-  if (error) {
-    throw error;
-  }
-
-  return data || [];
-}
-
 async function reorderVideosWithinTrilha(trilhaId, orderedVideoIds, client) {
   const resolvedClient = getClient(client);
   const updates = orderedVideoIds.map((videoId, index) =>
@@ -528,7 +515,6 @@ module.exports = {
   listTrilhasByProfileId,
   reorderTrilhaPerfisForProfile,
   removeTrilhaFromProfileSequence,
-  listTrilhasForVideo,
   listVideoLinksByTrilha,
   remove,
   removeVideo,

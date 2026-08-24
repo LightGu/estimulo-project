@@ -38,16 +38,16 @@
 }
 
 .sidebar-brand span {
-  font-size: 17px;
+  font-size: var(--fs-xl);
   font-weight: 700;
   color: #ffffff;
   letter-spacing: -0.01em;
 }
 
 .nav-group-label {
-  padding: 0 12px;
+  padding: 0 var(--space-3);
   margin: 2px 0 3px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -58,7 +58,7 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .nav-link {
@@ -69,7 +69,7 @@
   border-radius: var(--radius-sm);
   color: var(--sidebar-text);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: var(--fs-md);
   font-weight: 500;
   transition: background 0.12s ease, color 0.12s ease;
 }
@@ -89,18 +89,10 @@
 }
 
 .nav-link.active {
-  background: linear-gradient(90deg, rgba(78, 121, 255, 0.9), rgba(186, 27, 191, 0.55));
+  background: var(--brand-blue);
   color: #ffffff;
   font-weight: 600;
   box-shadow: var(--shadow-sm);
-}
-
-.sidebar-footer {
-  margin-top: auto;
-  padding: 8px 10px 2px;
-  font-size: 11.5px;
-  color: rgba(198, 201, 236, 0.55);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 /* Main column */
@@ -117,7 +109,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--space-4);
   padding: 14px 28px;
   background: var(--topbar-bg);
   backdrop-filter: blur(6px);
@@ -125,13 +117,13 @@
 }
 
 .topbar-titles h1 {
-  font-size: 19px;
+  font-size: var(--fs-2xl);
 }
 
 .topbar-titles p {
   margin-top: 2px;
   color: var(--text-muted);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
 }
 
 .topbar-actions {
@@ -143,12 +135,12 @@
 .user-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   padding: 6px 10px 6px 6px;
   border-radius: 999px;
   background: var(--surface);
   border: 1px solid var(--line);
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text);
 }
@@ -162,7 +154,7 @@
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 700;
 }
 
@@ -178,21 +170,21 @@
 .page-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .section-head {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 
 .section-head h2 {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .actions-bar-end {
@@ -202,11 +194,7 @@
 
 .grid {
   display: grid;
-  gap: 16px;
-}
-
-.grid-cols-2 {
-  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
 }
 
 .grid-cols-3 {
@@ -228,8 +216,7 @@
 
   .sidebar-brand span,
   .nav-link span:not(.nav-ico),
-  .nav-group-label,
-  .sidebar-footer {
+  .nav-group-label {
     display: none;
   }
 
@@ -240,6 +227,16 @@
   .grid-cols-4,
   .grid-cols-5 {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  /* Entre 721px e 1080px a sidebar ja colapsou, mas a toolbar continuava em
+     modo desktop: `.toolbar .field` tem min-width de 180px fixo e telas como
+     grupos.html tem 6 filtros, o que quebrava a barra em 3 linhas e empurrava
+     a tabela para fora da dobra. Aqui os campos passam a encolher e dividir a
+     linha em vez de manter o piso de 180px. */
+  .toolbar .field {
+    min-width: 140px;
+    flex: 1 1 140px;
   }
 
   .grid-cols-3 {
@@ -253,10 +250,9 @@
   }
 
   .topbar {
-    padding: 12px 16px;
+    padding: var(--space-3) var(--space-4);
   }
 
-  .grid-cols-2,
   .grid-cols-3,
   .grid-cols-4,
   .grid-cols-5 {

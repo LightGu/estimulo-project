@@ -27,17 +27,16 @@
     <style>
       .ico { width: 14px; height: 14px; vertical-align: -2px; display: inline-block; }
 
-      /* Tables embedded inside a card/panel: no min-width floor, no duplicated border. */
-      .table-compact { min-width: 0; }
+      /* Tabela dentro de card/painel: sem borda duplicada. O piso de min-width e o
+         .table-fixed agora vem do global (components.css). */
       .table-flat { border: 0; border-radius: 0; }
-      .table-fixed { table-layout: fixed; width: 100%; }
 
       .dispatch-config-body { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-end; }
       .dispatch-config-body .field { margin-bottom: 0; }
       .dispatch-config-body .field-date { width: 210px; }
       .dispatch-config-body .field-periods { flex: 1; min-width: 260px; }
       .dispatch-config-body .field-delay { width: 200px; }
-      .dispatch-config-body .field-hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+      .dispatch-config-body .field-hint { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 5px; }
       .dispatch-config-body .field-action { display: flex; flex-direction: column; }
       .dispatch-config-body .field-action label { visibility: hidden; }
       .dispatch-config-body .field-action .field-hint { visibility: hidden; }
@@ -49,17 +48,17 @@
       .dispatch-card-header { display: flex; align-items: center; gap: 12px; }
       .dispatch-header-icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(78, 121, 255, 0.12); color: var(--brand-blue); display: flex; align-items: center; justify-content: center; flex: none; }
       .dispatch-header-icon .ico { width: 19px; height: 19px; }
-      .dispatch-card-header h3 { font-size: 16px; }
-      .dispatch-card-header p { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; font-weight: 400; }
+      .dispatch-card-header h3 { font-size: var(--icon-glyph-sm); }
+      .dispatch-card-header p { font-size: var(--fs-sm); color: var(--text-faint); margin-top: 2px; font-weight: 400; }
 
-      .field-label-icon { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+      .field-label-icon { display: flex; align-items: center; gap: 6px; text-transform: none; letter-spacing: normal; font-size: var(--fs-md); font-weight: 600; color: var(--text); margin-bottom: 8px; }
       .field-label-icon .ico { width: 15px; height: 15px; color: var(--text-faint); flex: none; }
 
       .time-picker { position: relative; }
       .time-picker-trigger { appearance: none; -webkit-appearance: none; display: flex; align-items: center; gap: 8px; width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; font: inherit; color: var(--text); }
       .time-picker-trigger:hover, .time-picker-trigger.is-open { border-color: var(--brand-blue); }
       .time-picker-trigger .ico { width: 15px; height: 15px; color: var(--text-faint); flex: none; }
-      .time-picker-value { flex: 1; text-align: left; font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13.5px; letter-spacing: 0.02em; }
+      .time-picker-value { flex: 1; text-align: left; font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-md); letter-spacing: 0.02em; }
       .time-picker-toggle { flex: none; color: var(--text-faint); }
       .time-picker-toggle .ico { width: 14px; height: 14px; }
 
@@ -69,7 +68,7 @@
       .time-picker-list { width: 52px; height: 160px; overflow-y: auto; scroll-snap-type: y mandatory; scrollbar-width: thin; }
       .time-picker-list::-webkit-scrollbar { width: 4px; }
       .time-picker-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 99px; }
-      .time-picker-opt { height: 32px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-muted); scroll-snap-align: start; cursor: pointer; border-radius: var(--radius-sm); }
+      .time-picker-opt { height: 32px; display: flex; align-items: center; justify-content: center; font-size: var(--fs-md); font-variant-numeric: tabular-nums; color: var(--text-muted); scroll-snap-align: start; cursor: pointer; border-radius: var(--radius-sm); }
       .time-picker-opt:hover { background: var(--surface-sunken); }
       .time-picker-opt.is-selected { background: rgba(78, 121, 255, 0.14); color: var(--brand-blue); font-weight: 700; }
 
@@ -92,7 +91,7 @@
       .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .chevron-cell { width: 20px; color: var(--text-faint); text-align: right; }
 
-      .trail-history-toggle { font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 0; }
+      .trail-history-toggle { font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 4px 0; }
       .trail-history-toggle:hover { color: var(--primary); }
       details.trail-history[open] .trail-history-toggle .ico { transform: rotate(90deg); }
 
@@ -103,44 +102,44 @@
 
       /* Selo "T" na coluna Status da trilha selecionada: indica se o video ja tem
          transcricao no catalogo. Fica ao lado do badge Enviado/Proximo/Pendente. */
-      .transcript-flag { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 5px; font-size: 11px; font-weight: 700; line-height: 1; vertical-align: -4px; cursor: help; }
+      .transcript-flag { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; margin-left: 6px; border-radius: 5px; font-size: var(--fs-xs); font-weight: 700; line-height: 1; vertical-align: -4px; cursor: help; }
       .transcript-flag-on { background: var(--success-bg); color: var(--success); }
       .transcript-flag-off { background: var(--neutral-bg); color: var(--text-faint); }
 
       .stepper { display: flex; align-items: center; gap: 10px; margin: 4px 0 2px; }
-      .step { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
-      .step .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: 11.5px; flex: none; }
+      .step { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+      .step .step-num { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: var(--fs-xs); flex: none; }
       .step.done .step-num { background: var(--success); color: #fff; }
       .step.active { color: var(--text); }
       .step.active .step-num { background: var(--brand-blue); color: #fff; }
       .step-sep { flex: 1; height: 2px; background: var(--line); min-width: 24px; }
 
-      .breadcrumb { font-size: 12px; color: var(--text-faint); }
+      .breadcrumb { font-size: var(--fs-sm); color: var(--text-faint); }
 
       .stat-ring { position: relative; width: 58px; height: 58px; flex: none; }
       .stat-ring .ring-bg { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(var(--brand-blue) calc(var(--pct) * 1%), var(--surface-sunken) 0); }
-      .stat-ring .ring-hole { position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12.5px; color: var(--text); }
+      .stat-ring .ring-hole { position: absolute; inset: 6px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: var(--fs-sm); color: var(--text); }
       .kpi-inline-row { display: flex; align-items: center; gap: 22px; flex: none; }
       .kpi-inline-row .kpi-item { text-align: center; }
-      .kpi-inline-row .stat-label { display: block; font-size: 11px; }
-      .kpi-inline-row .stat-value { font-size: 20px; }
-      .kpi-inline-row .kpi-item-ring { text-align: center; font-size: 10.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+      .kpi-inline-row .stat-label { display: block; font-size: var(--fs-xs); }
+      .kpi-inline-row .stat-value { font-size: var(--icon-glyph-lg); }
+      .kpi-inline-row .kpi-item-ring { text-align: center; font-size: var(--fs-2xs); color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
       .kpi-inline-row .kpi-item-ring .stat-ring { margin: 0 auto 4px; }
 
       .journey-panel { margin-top: 4px; }
       .journey-recommend-card { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-strong); margin-top: 6px; }
-      .journey-next-hint { font-size: 12px; color: var(--text-faint); margin-top: 10px; }
+      .journey-next-hint { font-size: var(--fs-sm); color: var(--text-faint); margin-top: 10px; }
       .journey-timeline-list { display: flex; flex-direction: column; margin-top: 8px; }
       .timeline-step { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
       .timeline-step:first-child { border-top: 0; }
-      .timeline-step-index { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex: none; color: var(--text-muted); }
+      .timeline-step-index { width: 22px; height: 22px; border-radius: 50%; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; font-size: var(--fs-xs); font-weight: 700; flex: none; color: var(--text-muted); }
       .timeline-step.is-concluida .timeline-step-index { background: var(--success); color: #fff; }
       .timeline-step.is-atual .timeline-step-index { background: var(--brand-blue); color: #fff; }
       .timeline-step-body { flex: 1; min-width: 0; }
-      .timeline-step-title { font-size: 13px; font-weight: 600; }
-      .timeline-step-meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
-      .timeline-desvio-line { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; padding-left: 10px; border-left: 2px dashed var(--line); }
-      .timeline-footer-note { font-size: 12px; color: var(--text-faint); margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
+      .timeline-step-title { font-size: var(--fs-md); font-weight: 600; }
+      .timeline-step-meta { font-size: var(--fs-xs); color: var(--text-faint); margin-top: 2px; }
+      .timeline-desvio-line { font-size: var(--fs-xs); color: var(--text-muted); margin-top: 6px; padding-left: 10px; border-left: 2px dashed var(--line); }
+      .timeline-footer-note { font-size: var(--fs-sm); color: var(--text-faint); margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
       .timeline-step-clickable { cursor: pointer; border-radius: var(--radius-md); }
       .timeline-step-clickable:hover { background: var(--surface-sunken); }
       .timeline-step-clickable:hover .timeline-step-title { color: var(--brand-blue); }
@@ -261,7 +260,7 @@
               <div class="section-head">
                 <div>
                   <h2>Acompanhamento de Geração de Legendas</h2>
-                  <p class="text-faint" style="font-size:12.5px;margin-top:4px;">Todas as legendas estão sendo geradas antes do envio, para sua revisão.</p>
+                  <p class="text-faint" style="font-size: var(--fs-sm);margin-top:4px;">Todas as legendas estão sendo geradas antes do envio, para sua revisão.</p>
                 </div>
                 <div class="kpi-inline-row">
                   <div class="kpi-item">
@@ -337,7 +336,7 @@
               <div class="callout" id="sendWarningCallout" style="display:none;margin-top:12px;"></div>
               <div class="callout callout-success" id="sendSuccessCallout" style="display:none;margin-top:12px;"></div>
               <div class="modal-footer" style="border:0;padding:16px 0 0;">
-                <span class="text-faint" style="margin-right:auto;font-size:12px;">Depois de revisar todas as legendas, clique no botão abaixo para iniciar o envio dos vídeos para os grupos.</span>
+                <span class="text-faint" style="margin-right:auto;font-size: var(--fs-sm);">Depois de revisar todas as legendas, clique no botão abaixo para iniciar o envio dos vídeos para os grupos.</span>
                 <button class="btn" id="startSendButton" type="button">Iniciar envio dos vídeos</button>
               </div>
             </section>
@@ -386,6 +385,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -536,8 +536,6 @@
       const state = {
         groups: [],
         organizations: [],
-        groupProfiles: [],
-        trailsByProfile: new Map(),
         trilhaNameById: new Map(),
         progressByGroup: new Map(),
         nextTrilhaByGroup: new Map(),
@@ -545,18 +543,15 @@
         desviosByProfile: new Map(),
         currentCampaignIds: [],
         timezone: null,
-        dispatchRules: null,
       };
 
       const JOURNEY_REASON_LABEL = {
         sequencia: "Trilha seguinte da jornada",
         setor_desvio: "Desvio por setor",
-        checkpoint_perfil: "Novo perfil da jornada",
       };
       const JOURNEY_REASON_BADGE_CLASS = {
         sequencia: "badge-info",
         setor_desvio: "badge-warning",
-        checkpoint_perfil: "badge-success",
       };
 
       let selectedGroupId = null;
@@ -565,14 +560,6 @@
       let captionItems = [];
       let captionFilter = "todos";
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       // new Date("YYYY-MM-DDTHH:mm:00") sem fuso e interpretado no horario local do
       // navegador; convertemos para ISO UTC aqui para o backend (que roda em outro
@@ -646,26 +633,6 @@
         }
       }
 
-      async function loadTrailsForProfile(profileId) {
-        if (!profileId) return [];
-        if (state.trailsByProfile.has(profileId)) return state.trailsByProfile.get(profileId);
-
-        let list = [];
-        try {
-          const trails = await requestJson(`/trilhas/by-perfil?profile_id=${encodeURIComponent(profileId)}`);
-          list = Array.isArray(trails) ? trails : [];
-        } catch (error) {
-          list = [];
-        }
-
-        list.forEach((trail) => {
-          state.trilhaNameById.set(trail.id, `${trail.macrotema} - ${trail.trilha}`);
-        });
-
-        state.trailsByProfile.set(profileId, list);
-        return list;
-      }
-
       function resolveTrilhaLabel(g) {
         if (g.trilha_id) {
           // Último fallback: /groups/:id/video-progress também devolve o nome da
@@ -724,15 +691,6 @@
         state.sequenceByProfile.set(profileId, sequence);
         state.desviosByProfile.set(profileId, desvios);
         return { sequence, desvios };
-      }
-
-      function nextProfileInfo(profileId) {
-        const current = state.groupProfiles.find((p) => p.id === profileId);
-        if (!current || current.ordem === null || current.ordem === undefined) return null;
-
-        return (
-          state.groupProfiles.find((p) => Number(p.ordem) === Number(current.ordem) + 1) || null
-        );
       }
 
       function journeyReasonBadgeHtml(reason) {
@@ -856,7 +814,7 @@
         if (!hasCurrentTrilha) {
           recommendHtml = nextTrilha
             ? `
-              <span class="text-muted" style="font-size:12.5px;font-weight:600;">Trilha recomendada pela jornada automática</span>
+              <span class="text-muted" style="font-size: var(--fs-sm);font-weight:600;">Trilha recomendada pela jornada automática</span>
               <div class="journey-recommend-card">
                 ${journeyReasonBadgeHtml(nextTrilha.reason)}
                 <strong>${escapeHtml(formatTrilhaLabel(nextTrilha))}</strong>
@@ -867,16 +825,13 @@
           recommendHtml = "";
         }
 
-        const nextProfile = nextProfileInfo(group.profile_id);
-        const footerNoteHtml = nextProfile
-          ? `<div class="timeline-footer-note">Ao concluir esta jornada, o grupo avança automaticamente para o perfil <strong>${escapeHtml(nextProfile.nome)}</strong>.</div>`
-          : `<div class="timeline-footer-note">Este é o último perfil da jornada automática configurada.</div>`;
+        const footerNoteHtml = `<div class="timeline-footer-note">Ao concluir esta jornada, o grupo é notificado e fica pausado até que uma nova trilha seja atribuída — a troca de perfil é sempre manual.</div>`;
 
         const timelineListHtml = sequence.length
           ? buildTimelineSteps(sequence, history, group, nextTrilha)
               .map((step, index) => timelineStepHtml(step, index, desvios, group, history))
               .join("")
-          : `<p class="text-faint" style="font-size:12.5px;">Nenhuma trilha na sequência deste perfil.</p>`;
+          : `<p class="text-faint" style="font-size: var(--fs-sm);">Nenhuma trilha na sequência deste perfil.</p>`;
 
         return `
           <div class="journey-panel">
@@ -921,7 +876,7 @@
               <span class="chip">${p.inicio} - ${p.fim}<span class="chip-remove" data-remove-period="${i}">✕</span></span>`
               )
               .join("")
-          : '<span class="text-faint" style="font-size:12px;">Nenhum período adicionado</span>';
+          : '<span class="text-faint" style="font-size: var(--fs-sm);">Nenhum período adicionado</span>';
 
         document.querySelectorAll("[data-remove-period]").forEach((el) =>
           el.addEventListener("click", () => {
@@ -989,7 +944,7 @@
             <tr class="row-clickable${g.id === selectedGroupId ? " active" : ""}${blockReason ? " row-blocked" : ""}" data-select-group="${g.id}" aria-label="Selecionar grupo ${escapeHtml(g.nome)}">
               <td class="strong group-name-cell">
                 <div class="ellipsis" title="${escapeHtml(g.nome)}">${escapeHtml(g.nome)}${blockReason ? `<span class="block-flag has-tip" data-tip="${escapeHtml(blockReason)}" data-tip-tone="danger">${icon("warning")}</span>` : ""}</div>
-                <div class="ellipsis text-faint" style="font-weight:400;font-size:11.5px;" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
+                <div class="ellipsis text-faint" style="font-weight:400;font-size: var(--fs-xs);" title="${escapeHtml(orgName(g.organization_id))}">${escapeHtml(orgName(g.organization_id))}</div>
               </td>
               <td><span class="badge badge-wrap ${SEGMENT_BADGE[g.segmento] || "badge-neutral"}">${wrapSegmento(g.segmento) || "Sem perfil"}</span></td>
               <td class="group-name-cell"><div class="ellipsis" title="${escapeHtml(resolveTrilhaLabel(g) || "")}">${resolveTrilhaLabel(g) ? escapeHtml(resolveTrilhaLabel(g)) : '<span class="text-faint">Sem trilha</span>'}</div></td>
@@ -1111,24 +1066,10 @@
         const history = progress.history || [];
         const status = progress.current || null;
 
-        const trilhaOptions = group.profile_id ? await loadTrailsForProfile(group.profile_id) : [];
         const currentTrilhaLabel = resolveTrilhaLabel(group);
         const journeyPanelHtml = await renderJourneyPanelHtml(group, history);
 
         if (selectedGroupId !== group.id) return;
-
-        const manualOverrideHtml = `
-          <details class="trail-history">
-            <summary class="trail-history-toggle">${icon("chevron")} Substituir trilha manualmente</summary>
-            <div class="trilha-select-row" style="margin-top:8px;">
-              <select id="trilhaChangeSelect" style="max-width:260px;">
-                <option value="">Selecionar trilha</option>
-                ${trilhaOptions.map((t) => `<option value="${escapeHtml(t.id)}"${t.id === group.trilha_id ? " selected" : ""}>${escapeHtml(t.macrotema)} - ${escapeHtml(t.trilha)}</option>`).join("")}
-              </select>
-              <button class="btn btn-secondary btn-sm" id="confirmTrilhaChange" type="button">Confirmar</button>
-            </div>
-            <p class="text-faint" style="font-size:11px;margin-top:6px;">Uma troca manual não afeta o histórico de entregas — a jornada automática continua de onde realmente parou.</p>
-          </details>`;
 
         let progressHtml = "";
         let videosTableHtml = "";
@@ -1141,23 +1082,25 @@
             progressHtml = `
               <div style="margin-top:12px;">
                 <div class="section-head" style="margin-bottom:6px;">
-                  <span class="text-muted" style="font-size:12.5px;font-weight:600;">Progresso da trilha</span>
-                  <span class="text-faint" style="font-size:12px;">${status.enviados}/${status.total} vídeos enviados</span>
+                  <span class="text-muted" style="font-size: var(--fs-sm);font-weight:600;">Progresso da trilha</span>
+                  <span class="text-faint" style="font-size: var(--fs-sm);">${status.enviados}/${status.total} vídeos enviados</span>
                 </div>
                 <div class="progress"><span style="width:${pct}%"></span></div>
               </div>`;
 
-            const canForceResend = state.dispatchRules && state.dispatchRules.never_repeat_video === false;
-
             videosTableHtml = `
               <div class="table-wrap table-flat" style="margin-top:14px;">
                 <table class="table-compact">
-                  <thead><tr><th>#</th><th>Vídeo</th><th>Status</th><th>Enviado em</th>${canForceResend ? "<th></th>" : ""}</tr></thead>
+                  <thead><tr><th>#</th><th>Vídeo</th><th>Status</th><th>Enviado em</th></tr></thead>
                   <tbody>
                     ${status.rows
                       .map(
                         (v, i) => `
-                      <tr class="${v.status === "proximo" ? "video-row-next" : ""}">
+                      <tr class="${v.status === "proximo" ? "video-row-next" : "row-clickable"}" ${
+                          v.status === "proximo"
+                            ? ""
+                            : `data-select-next-video="${escapeHtml(v.id)}" data-select-next-group="${escapeHtml(group.id)}" data-select-next-already-sent="${v.status === "enviado" ? "1" : "0"}" aria-label="Selecionar ${escapeHtml(v.nome_do_arquivo)} como próximo vídeo a enviar"`
+                        }>
                         <td>${i + 1}</td>
                         <td class="${v.status === "proximo" ? "strong" : ""}">${
                           v.aprovado
@@ -1169,24 +1112,16 @@
                             ? '<span class="badge has-tip badge-success" data-tip="Já foi entregue a este grupo." data-tip-tone="success">Enviado</span>'
                             : v.status === "proximo"
                             ? '<span class="badge has-tip badge-success" data-tip="Próximo vídeo aprovado da trilha a ser enviado a este grupo." data-tip-tone="success">Próximo a enviar</span>'
-                            : '<span class="badge has-tip badge-neutral" data-tip="Ainda não é a vez deste vídeo — está na fila após o próximo a enviar." data-tip-tone="neutral">Pendente</span>'
+                            : '<span class="badge has-tip badge-neutral" data-tip="Ainda não é a vez deste vídeo — clique na linha para torná-lo o próximo a enviar." data-tip-tone="neutral">Pendente</span>'
                         }${transcriptFlag(v)}</td>
                         <td class="mono">${escapeHtml(v.enviado_em || "—")}</td>
-                        ${
-                          canForceResend
-                            ? `<td>${
-                                v.status === "proximo"
-                                  ? '<span class="text-faint" style="font-size:11px;">Já é o próximo</span>'
-                                  : `<button class="btn btn-secondary btn-sm" data-force-next-video="${escapeHtml(v.id)}" data-force-next-group="${escapeHtml(group.id)}">Enviar agora</button>`
-                              }</td>`
-                            : ""
-                        }
                       </tr>`
                       )
                       .join("")}
                   </tbody>
                 </table>
-              </div>`;
+              </div>
+              <p class="text-faint" style="font-size: var(--fs-xs);margin-top:6px;">Clique em um vídeo da lista para torná-lo o próximo a ser enviado a este grupo.</p>`;
           }
         }
 
@@ -1198,19 +1133,38 @@
           <div class="card-body">
             ${journeyPanelHtml}
             <div class="divider" style="margin:14px 0;"></div>
-            <span class="text-muted" style="font-size:12.5px;font-weight:600;display:block;margin-bottom:8px;">Trilha selecionada</span>
+            <span class="text-muted" style="font-size: var(--fs-sm);font-weight:600;display:block;margin-bottom:8px;">Trilha selecionada</span>
             <div class="trilha-select-row">
-              <strong style="font-size:14px;">${currentTrilhaLabel ? escapeHtml(currentTrilhaLabel) : "Nenhuma trilha selecionada"}</strong>
+              <strong style="font-size: var(--fs-md);">${currentTrilhaLabel ? escapeHtml(currentTrilhaLabel) : "Nenhuma trilha selecionada"}</strong>
             </div>
             ${progressHtml}
             ${videosTableHtml}
-            <div class="divider" style="margin:14px 0;"></div>
-            ${manualOverrideHtml}
           </div>`;
 
-        document.querySelectorAll("[data-force-next-video]").forEach((button) =>
-          button.addEventListener("click", () => forceNextVideo(button.dataset.forceNextGroup, button.dataset.forceNextVideo, button))
-        );
+        document.querySelectorAll("[data-select-next-video]").forEach((el) => {
+          const activate = async () => {
+            if (el.dataset.selecting === "1") return;
+
+            if (el.dataset.selectNextAlreadySent === "1") {
+              const confirmed = await window.estimuloConfirm(
+                "Este vídeo já foi enviado a este grupo. Enviar novamente mesmo assim?",
+                { title: "Reenviar vídeo", confirmLabel: "Reenviar" }
+              );
+
+              if (!confirmed) return;
+            }
+
+            el.dataset.selecting = "1";
+
+            try {
+              await forceNextVideo(el.dataset.selectNextGroup, el.dataset.selectNextVideo);
+            } finally {
+              el.dataset.selecting = "0";
+            }
+          };
+          el.addEventListener("click", activate);
+          window.estimuloMakeKeyboardClickable(el, activate);
+        });
 
         async function applyTrilhaChange(novaTrilhaId, profileId) {
           const payload = { trilha_id: novaTrilhaId };
@@ -1232,21 +1186,6 @@
           await loadProgressForGroup(group.id);
           renderGroupList();
           renderDetail();
-        }
-
-        const confirmTrilhaChangeButton = document.getElementById("confirmTrilhaChange");
-        if (confirmTrilhaChangeButton) {
-          confirmTrilhaChangeButton.addEventListener("click", async () => {
-            const novaTrilhaId = document.getElementById("trilhaChangeSelect").value || null;
-            confirmTrilhaChangeButton.disabled = true;
-
-            try {
-              await applyTrilhaChange(novaTrilhaId, group.profile_id);
-            } catch (error) {
-              window.estimuloAlert(error.message);
-              confirmTrilhaChangeButton.disabled = false;
-            }
-          });
         }
 
         const useRecommendedTrilhaButton = document.getElementById("useRecommendedTrilhaButton");
@@ -1285,9 +1224,7 @@
         });
       }
 
-      async function forceNextVideo(groupId, videoId, button) {
-        button.disabled = true;
-
+      async function forceNextVideo(groupId, videoId) {
         try {
           await requestJson(`/groups/${encodeURIComponent(groupId)}/force-next-video`, {
             method: "POST",
@@ -1300,19 +1237,10 @@
           renderDetail();
         } catch (error) {
           window.estimuloAlert(error.message);
-          button.disabled = false;
         }
       }
 
-      async function loadDispatchRules() {
-        try {
-          state.dispatchRules = await requestJson("/settings/dispatch-rules");
-        } catch (error) {
-          state.dispatchRules = null;
-        }
-      }
-
-      function parseDateOnly(value) {
+function parseDateOnly(value) {
         const [year, month, day] = value.split("-").map(Number);
         return new Date(year, (month || 1) - 1, day || 1);
       }
@@ -1582,13 +1510,13 @@
           .map((item) => {
             const legendaCell =
               item.status === "gerado"
-                ? `${escapeHtml(item.legenda)}<br><span class="text-faint" style="font-size:11px;">${item.legenda.length} caracteres</span>`
+                ? `${escapeHtml(item.legenda)}<br><span class="text-faint" style="font-size: var(--fs-xs);">${item.legenda.length} caracteres</span>`
                 : item.status === "erro"
                 ? `<span class="text-faint" style="font-style:italic;">Falha ao gerar legenda. Tente novamente ou edite manualmente.</span>${
                     // Mostra o motivo guardado em erro_mensagem: sem ele a tela dizia
                     // apenas "falhou" e a causa só existia no log do servidor.
                     item.erro
-                      ? `<br><span class="text-faint" style="font-size:11px;color:var(--danger);">${escapeHtml(item.erro)}</span>`
+                      ? `<br><span class="text-faint" style="font-size: var(--fs-xs);color:var(--danger);">${escapeHtml(item.erro)}</span>`
                       : ""
                   }`
                 : item.status === "pendente"
@@ -1596,7 +1524,7 @@
                 : `<span class="text-faint" style="font-style:italic;">Processando…</span>`;
             return `
             <tr>
-              <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size:11.5px;">${item.trilha}</span></td>
+              <td class="strong">${item.groupNome}<br><span class="text-faint" style="font-weight:400;font-size: var(--fs-xs);">${item.trilha}</span></td>
               <td>${
                 item.video.link
                   ? `<a href="${escapeHtml(item.video.link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.video.arquivo)}</a>`
@@ -1935,24 +1863,22 @@
       }
 
       async function initialize() {
+        window.estimuloShowLoading();
         renderPeriodChips();
         loadDefaultScheduleSettings();
-        await loadDispatchRules();
 
         // Antes de montar a etapa 1: se havia um disparo em andamento, volta para a
         // etapa 2. Os grupos continuam carregando abaixo para que "Voltar" funcione.
         await restoreDispatchFlow();
 
         try {
-          const [groups, organizations, groupProfiles] = await Promise.all([
+          const [groups, organizations] = await Promise.all([
             requestJson("/groups/search"),
             requestJson("/organizations"),
-            requestJson("/group-profiles"),
             loadTrilhaNames(),
           ]);
           state.groups = Array.isArray(groups) ? groups : [];
           state.organizations = Array.isArray(organizations) ? organizations : [];
-          state.groupProfiles = Array.isArray(groupProfiles) ? groupProfiles : [];
 
           await preloadProgressForEligibleGroups();
 
@@ -1960,6 +1886,8 @@
           await renderDetail();
         } catch (error) {
           renderLoadError(error);
+        } finally {
+          window.estimuloHideLoading();
         }
       }
 

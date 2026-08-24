@@ -1,6 +1,7 @@
 const trilhasRepository = require("../repositories/trilhas.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 const videoCaptionsRepository = require("../repositories/video-captions.repository");
+const groupsRepository = require("../repositories/groups.repository");
 const groupProfilesService = require("./group-profiles.service");
 const { normalizePerfis } = require("../domain/trail-profiles");
 
@@ -8,6 +9,7 @@ function createTrilhasService(dependencies = {}) {
   const repository = dependencies.repository || trilhasRepository;
   const videoRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
   const captionsRepository = dependencies.videoCaptionsRepository || videoCaptionsRepository;
+  const groupsRepositoryDependency = dependencies.groupsRepository || groupsRepository;
   const profilesService = dependencies.groupProfilesService || groupProfilesService;
 
   async function listValidPerfilNames() {
@@ -487,6 +489,16 @@ function createTrilhasService(dependencies = {}) {
     return repository.remove(trilha.id);
   }
 
+  // Grupos com groups.trilha_id apontando pra esta trilha ficam com trilha_id
+  // zerado (ON DELETE SET NULL) ao remover - usado pelo front pra avisar antes
+  // de confirmar a exclusao, ja que o banco nao bloqueia isso sozinho.
+  async function getTrilhaUsage(trilhaId) {
+    const trilha = await requireTrilha(trilhaId);
+    const groupsCount = await groupsRepositoryDependency.countByTrilhaId(trilha.id);
+
+    return { groups_count: groupsCount };
+  }
+
   async function updateTrailPerfis(trilhaId, perfis) {
     const trilha = await requireTrilha(trilhaId);
     const validPerfis = await listValidPerfilNames();
@@ -526,6 +538,7 @@ function createTrilhasService(dependencies = {}) {
     reorderTrilhaVideos,
     renameTrilha,
     removeTrilha,
+    getTrilhaUsage,
     updateTrailPerfis,
     getFirstApprovedByProfileAndTrilha,
   };

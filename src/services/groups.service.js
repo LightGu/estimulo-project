@@ -9,7 +9,6 @@ const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
 const { evolutionConfig } = require("../config/evolution");
 const whatsappInstancesService = require("./whatsapp-instances.service");
-const defaultSettingsService = require("./settings.service");
 const defaultTrilhaSequenceService = require("./trilha-sequence.service");
 
 function firstDefined(...values) {
@@ -71,12 +70,6 @@ function normalizeEvolutionGroup(group) {
   };
 }
 
-function normalizeEvolutionGroups(payload) {
-  return extractEvolutionGroups(payload)
-    .map(normalizeEvolutionGroup)
-    .filter(Boolean);
-}
-
 function matchesNameFilter(group, filter) {
   const normalizedFilter = String(filter || "").trim().toLowerCase();
 
@@ -112,7 +105,6 @@ function createGroupsService(dependencies = {}) {
   const fetchEvolutionGroups = dependencies.fetchEvolutionGroups || fetchAllGroupsFromEvolution;
   const enqueueDispatch = dependencies.addDispatchJob || addDispatchJob;
   const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
-  const settingsService = dependencies.settingsService || defaultSettingsService;
   const trilhaSequenceServiceDependency = dependencies.trilhaSequenceService || defaultTrilhaSequenceService;
 
   async function create(payload) {
@@ -681,12 +673,6 @@ function createGroupsService(dependencies = {}) {
       throw new Error("Video id is required");
     }
 
-    const dispatchRules = await settingsService.getDispatchRulesSettings();
-
-    if (dispatchRules.never_repeat_video !== false) {
-      throw new Error("A regra 'Nunca repetir vídeo' precisa estar desativada para forçar o reenvio");
-    }
-
     const group = await repository.findById(id);
 
     if (!group) {
@@ -733,4 +719,3 @@ function createGroupsService(dependencies = {}) {
 
 module.exports = createGroupsService();
 module.exports.createGroupsService = createGroupsService;
-module.exports.normalizeEvolutionGroups = normalizeEvolutionGroups;

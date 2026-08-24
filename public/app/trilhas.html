@@ -29,9 +29,9 @@
       .trail-card:hover { box-shadow: var(--shadow-md); }
       .trail-card.selected { border-color: var(--brand-blue); box-shadow: 0 0 0 3px rgba(78,121,255,0.15); }
       .settings-row { display:flex; align-items:center; gap:12px; }
-      .macrotema-path { font-size:12px; color: var(--text-faint); margin-bottom:14px; }
+      .macrotema-path { font-size: var(--fs-sm); color: var(--text-faint); margin-bottom:14px; }
       .trilha-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-      .trilha-tab { border:1px solid var(--line); background:var(--surface); border-radius:999px; padding:7px 14px; font-size:12.5px; font-weight:600; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px; }
+      .trilha-tab { border:1px solid var(--line); background:var(--surface); border-radius:999px; padding:7px 14px; font-size: var(--fs-sm); font-weight:600; color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px; }
       .trilha-tab:hover { background: var(--surface-strong); }
       .trilha-tab.active { background: var(--brand-blue); border-color: var(--brand-blue); color:#fff; }
       .trilha-tab .count { font-weight:400; opacity:0.85; }
@@ -40,21 +40,21 @@
       tr.video-row.drag-over { box-shadow: inset 0 2px 0 var(--brand-blue); }
       .drag-handle { cursor: grab; color: var(--text-faint); padding-right: 6px; }
       .unclassified-list { max-height: 260px; overflow-y: auto; border:1px solid var(--line); border-radius: var(--radius-md); }
-      .unclassified-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); font-size:12.5px; }
+      .unclassified-item { display:flex; align-items:center; gap:8px; padding:8px 12px; border-bottom:1px solid var(--line); font-size: var(--fs-sm); }
       .unclassified-item:last-child { border-bottom: 0; }
-      .videos-group-title { font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-faint); padding:8px 12px 4px; }
+      .videos-group-title { font-size: var(--fs-xs); font-weight:700; text-transform:uppercase; letter-spacing:0.03em; color:var(--text-faint); padding:8px 12px 4px; }
       .videos-group-title:not(:first-child) { border-top:1px solid var(--line); margin-top:4px; }
-      .icon-btn-edit { border:0; background:transparent; cursor:pointer; color:var(--text-faint); padding:2px 4px; line-height:1; font-size:13px; }
+      .icon-btn-edit { border:0; background:transparent; cursor:pointer; color:var(--text-faint); padding:2px 4px; line-height:1; font-size: var(--fs-md); }
       .icon-btn-edit:hover { color: var(--brand-blue); }
       .trilha-tab-wrap { display:flex; align-items:center; gap:2px; }
       .perfil-checkboxes { display:flex; flex-wrap:wrap; gap:10px; }
-      .perfil-checkboxes label { display:flex; align-items:center; gap:6px; font-size:12.5px; }
+      .perfil-checkboxes label { display:flex; align-items:center; gap:6px; font-size: var(--fs-sm); }
       .perfis-panel { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0 16px; flex-wrap:wrap; }
-      .already-in-trilha { margin-left:auto; font-size:11px; white-space:nowrap; }
+      .already-in-trilha { margin-left:auto; font-size: var(--fs-xs); white-space:nowrap; }
       tr.sequence-row { cursor: grab; }
       tr.sequence-row.dragging { opacity: 0.4; }
       tr.sequence-row.drag-over { box-shadow: inset 0 2px 0 var(--brand-blue); }
-      [data-desvio-select] { font-size:12.5px; padding:4px 8px; min-width:220px; }
+      [data-desvio-select] { font-size: var(--fs-sm); padding:4px 8px; min-width:220px; }
     </style>
   </head>
   <body data-page="trilhas">
@@ -135,7 +135,7 @@
 
               <div class="settings-row" style="margin-bottom:14px;justify-content:space-between;">
                 <div class="settings-row" style="gap:8px;">
-                  <label for="sequenceSetorFilter" style="font-size:12.5px;font-weight:600;color:var(--text-muted);">Setor:</label>
+                  <label for="sequenceSetorFilter" style="font-size: var(--fs-sm);font-weight:600;color:var(--text-muted);">Setor:</label>
                   <select id="sequenceSetorFilter" style="min-width:220px;">
                     <option value="">Todos os setores</option>
                   </select>
@@ -311,6 +311,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -344,14 +345,6 @@
       let renameReleaseTrap = null;
       let addSequenceTrilhaReleaseTrap = null;
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -430,8 +423,8 @@
                   <button class="icon-btn-edit" data-edit-macrotema="${escapeHtml(m.macrotema)}" type="button" title="Editar nome" aria-label="Editar nome do macrotema">✎</button>
                 </div>
               </div>
-              <p class="text-muted" style="margin-top:6px;font-size:12.5px;">Perfis: ${perfis.length ? escapeHtml(perfis.join(", ")) : '<span class="text-faint">Nenhum</span>'}</p>
-              <p class="text-faint" style="margin-top:10px;font-size:12.5px;">${m.trails.length} trilha(s) · ${videosCount} vídeo(s)</p>
+              <p class="text-muted" style="margin-top:6px;font-size: var(--fs-sm);">Perfis: ${perfis.length ? escapeHtml(perfis.join(", ")) : '<span class="text-faint">Nenhum</span>'}</p>
+              <p class="text-faint" style="margin-top:10px;font-size: var(--fs-sm);">${m.trails.length} trilha(s) · ${videosCount} vídeo(s)</p>
             </div>`;
           })
           .join("");
@@ -502,6 +495,7 @@
                 ${escapeHtml(t.trilha)} <span class="count">(${t.videos.length})</span>
               </button>
               <button class="icon-btn-edit" data-edit-trilha="${escapeHtml(key)}" type="button" title="Editar nome" aria-label="Editar nome da trilha">✎</button>
+              <button class="icon-btn-edit" data-remove-trilha="${escapeHtml(key)}" type="button" title="Remover trilha" aria-label="Remover trilha ${escapeHtml(t.trilha)}">🗑</button>
             </span>`;
           })
           .join("");
@@ -515,6 +509,13 @@
 
         document.querySelectorAll("[data-edit-trilha]").forEach((btn) => {
           btn.addEventListener("click", () => openRenameTrilha(btn.dataset.editTrilha));
+        });
+
+        document.querySelectorAll("[data-remove-trilha]").forEach((btn) => {
+          btn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            confirmRemoveTrilha(btn.dataset.removeTrilha);
+          });
         });
 
         const trail = macrotema.trails.find((t) => trilhaKey(t) === selectedTrilhaKey) || macrotema.trails[0];
@@ -555,6 +556,7 @@
                 <button class="btn btn-secondary btn-sm" data-move="${escapeHtml(v.id)}">Adicionar a outra trilha</button>
                 <button class="btn btn-secondary btn-sm" data-remove="${escapeHtml(v.id)}">Remover desta trilha</button>
                 <button class="btn btn-ghost btn-sm" data-review-caption="${escapeHtml(v.id)}">Revisar legenda</button>
+                <button class="icon-btn-edit" data-rename-video="${escapeHtml(v.id)}" type="button" title="Renomear vídeo" aria-label="Renomear vídeo ${escapeHtml(v.nome_do_arquivo)}">✎</button>
               </td>
             </tr>`
           )
@@ -563,6 +565,7 @@
         document.querySelectorAll("[data-move]").forEach((btn) => btn.addEventListener("click", () => openMove(trail, btn.dataset.move)));
         document.querySelectorAll("[data-remove]").forEach((btn) => btn.addEventListener("click", () => removeVideoFromCurrentTrail(trail, btn.dataset.remove)));
         document.querySelectorAll("[data-review-caption]").forEach((btn) => btn.addEventListener("click", () => openCaptionReview(trail, btn.dataset.reviewCaption)));
+        document.querySelectorAll("[data-rename-video]").forEach((btn) => btn.addEventListener("click", () => openRenameVideo(trail, btn.dataset.renameVideo)));
         document.querySelectorAll("[data-reorder-video-up]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoUp, -1)));
         document.querySelectorAll("[data-reorder-video-down]").forEach((btn) => btn.addEventListener("click", () => reorderVideoByStep(trail, btn.dataset.reorderVideoDown, 1)));
         attachDragAndDrop(trail);
@@ -1959,6 +1962,39 @@
         renameReleaseTrap = window.estimuloTrapFocus(renameOverlay);
       }
 
+      async function confirmRemoveTrilha(trilhaId) {
+        const trail = state.trails.find((t) => t.id === trilhaId);
+        if (!trail) return;
+
+        let groupsCount = 0;
+        try {
+          const usage = await requestJson(`/trilhas/${encodeURIComponent(trilhaId)}/usage`);
+          groupsCount = usage?.groups_count || 0;
+        } catch (error) {
+          // segue sem o aviso de grupos afetados caso a checagem falhe
+        }
+
+        const warning =
+          groupsCount > 0
+            ? `\n\nAtenção: ${groupsCount} grupo(s) estão atualmente nesta trilha e ficarão sem trilha selecionada.`
+            : "";
+
+        const confirmed = await window.estimuloConfirm(
+          `Remover a trilha "${trail.trilha}" (${trail.macrotema})? Os vídeos vinculados a ela deixarão de fazer parte desta trilha.${warning}`,
+          { title: "Remover trilha", confirmLabel: "Remover" }
+        );
+
+        if (!confirmed) return;
+
+        try {
+          await requestJson(`/trilhas/${encodeURIComponent(trilhaId)}`, { method: "DELETE" });
+          selectedTrilhaKey = null;
+          await initialize();
+        } catch (error) {
+          window.estimuloAlert(error.message);
+        }
+      }
+
       function openRenameTrilha(trilhaId) {
         const trail = state.trails.find((t) => t.id === trilhaId);
         if (!trail) return;
@@ -1966,6 +2002,19 @@
         renameContext = { type: "trilha", trilhaId, trilha: trail.trilha };
         document.getElementById("renameModalTitle").textContent = "Editar nome da trilha";
         document.getElementById("renameNome").value = trail.trilha;
+        document.getElementById("renameStatus").textContent = "";
+        document.getElementById("renameStatus").className = "status-line";
+        renameOverlay.hidden = false;
+        renameReleaseTrap = window.estimuloTrapFocus(renameOverlay);
+      }
+
+      function openRenameVideo(trail, videoId) {
+        const video = trail.videos.find((v) => v.id === videoId);
+        if (!video) return;
+
+        renameContext = { type: "video", videoId, nome_do_arquivo: video.nome_do_arquivo };
+        document.getElementById("renameModalTitle").textContent = "Renomear vídeo";
+        document.getElementById("renameNome").value = video.nome_do_arquivo;
         document.getElementById("renameStatus").textContent = "";
         document.getElementById("renameStatus").className = "status-line";
         renameOverlay.hidden = false;
@@ -2019,6 +2068,12 @@
 
             selectedMacrotemaKey = novoNome;
             selectedTrilhaKey = null;
+          } else if (renameContext.type === "video") {
+            await requestJson(`/video-catalog/${encodeURIComponent(renameContext.videoId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ nome_do_arquivo: novoNome }),
+            });
           } else {
             await requestJson(`/trilhas/${encodeURIComponent(renameContext.trilhaId)}`, {
               method: "PATCH",
@@ -2039,34 +2094,39 @@
       });
 
       async function initialize() {
+        window.estimuloShowLoading();
         try {
-          const profiles = await requestJson("/group-profiles");
-          state.groupProfiles = Array.isArray(profiles) ? profiles : [];
-          state.profiles = state.groupProfiles.map((p) => p.nome);
-        } catch (error) {
-          state.groupProfiles = [];
-          state.profiles = [];
-        }
-
-        try {
-          const trails = await requestJson("/trilhas/overview");
-          state.trails = Array.isArray(trails) ? trails : [];
-
-          if (!selectedMacrotemaKey) {
-            const macrotemas = macrotemasForActivePerfil();
-            selectedMacrotemaKey = macrotemas.length ? macrotemaKey(macrotemas[0]) : null;
-            selectedTrilhaKey = macrotemas.length && macrotemas[0].trails.length ? trilhaKey(macrotemas[0].trails[0]) : null;
+          try {
+            const profiles = await requestJson("/group-profiles");
+            state.groupProfiles = Array.isArray(profiles) ? profiles : [];
+            state.profiles = state.groupProfiles.map((p) => p.nome);
+          } catch (error) {
+            state.groupProfiles = [];
+            state.profiles = [];
           }
 
-          renderPerfilTabs();
-          renderMacrotemaGrid();
-          renderTrailDetail();
+          try {
+            const trails = await requestJson("/trilhas/overview");
+            state.trails = Array.isArray(trails) ? trails : [];
 
-          if (activeView === "sequencia") {
-            await loadSequenceView();
+            if (!selectedMacrotemaKey) {
+              const macrotemas = macrotemasForActivePerfil();
+              selectedMacrotemaKey = macrotemas.length ? macrotemaKey(macrotemas[0]) : null;
+              selectedTrilhaKey = macrotemas.length && macrotemas[0].trails.length ? trilhaKey(macrotemas[0].trails[0]) : null;
+            }
+
+            renderPerfilTabs();
+            renderMacrotemaGrid();
+            renderTrailDetail();
+
+            if (activeView === "sequencia") {
+              await loadSequenceView();
+            }
+          } catch (error) {
+            renderLoadError(error);
           }
-        } catch (error) {
-          renderLoadError(error);
+        } finally {
+          window.estimuloHideLoading();
         }
       }
 

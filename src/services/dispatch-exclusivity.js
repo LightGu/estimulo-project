@@ -117,11 +117,19 @@ async function resolveAdHocDispatchBlock(params = {}) {
     return null;
   }
 
-  // Janela de um instante: pega apenas campanhas cujo periodo cobre o agora.
+  // Olha `resumeBufferMs` para a FRENTE, nao so o instante atual.
+  //
+  // Antes a consulta era [agora, agora+1ms]: uma campanha de video cuja janela
+  // comecava dali a alguns segundos nao aparecia, e a mensagem pontual saia
+  // colada no inicio dela - exatamente a disputa pela sessao do WhatsApp que
+  // este modulo existe para evitar. Usar o mesmo buffer que ja governa a
+  // retomada mantem a regra simetrica: se o pontual seria adiado ate
+  // `fim + buffer`, ele tambem nao deve sair no `buffer` que antecede um inicio.
+  const lookAheadMs = Number.isFinite(resumeBufferMs) && resumeBufferMs > 0 ? resumeBufferMs : 0;
   const inFlight = await listOverlappingVideoCampaigns({
     campaignsRepository,
     windowStart: new Date(atTime).toISOString(),
-    windowEnd: new Date(atTime + 1).toISOString(),
+    windowEnd: new Date(atTime + lookAheadMs + 1).toISOString(),
   });
 
   if (!inFlight.length) {

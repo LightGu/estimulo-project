@@ -7,6 +7,7 @@ const defaultSettingsService = require("./settings.service");
 const defaultMensagensService = require("./mensagens.service");
 const defaultWhatsappInstancesService = require("./whatsapp-instances.service");
 const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
+const { resolveLogScheduledAt } = require("./dispatch-staleness");
 // Modulos inteiros (nao desestruturados): campaignTriggerQueue/dispatchQueue/
 // mensagensDispatchQueue sao getters que criam a conexao BullMQ na primeira
 // leitura - desestruturar aqui no topo do arquivo criaria as 3 filas so por
@@ -39,14 +40,6 @@ function normalizeScheduledDate(value = new Date()) {
   }
 
   return date;
-}
-
-function formatDateOnly(date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function formatTimeOnly(date) {
-  return date.toISOString().slice(11, 19);
 }
 
 function normalizeNumber(value, defaultValue) {
@@ -742,8 +735,28 @@ function createCampaignsService(dependencies = {}) {
         continue;
       }
 
-      const currentPlannedMs = log.horario_envio_planejado ? new Date(log.horario_envio_planejado).getTime() : Date.now();
-      const newPlanned = new Date(currentPlannedMs + pauseDurationMs).toISOString();
+      // Log sem horario planejado NAO pode receber `Date.now()` aqui: isso
+      // gravava no banco um horario inventado para um envio que podia ser de
+      // dias atras, destruindo de forma permanente a evidencia de atraso - e o
+      // envio antigo passava a ser tratado como novo pelas travas. O fallback
+      // correto e criado_em, o momento em que o envio foi de fato planejado.
+      const anchorScheduledAt = resolveLogScheduledAt(log);
+
+      if (!anchorScheduledAt) {
+        console.warn &&
+          console.warn(
+            JSON.stringify({
+              event: "campaigns.resume_skipped_log_sem_horario",
+              campaign_id: id,
+              log_id: log.id,
+              group_id: log.group_id,
+              note: "log sem horario_envio_planejado nem criado_em; nao pode ser reagendado sem inventar horario",
+            })
+          );
+        continue;
+      }
+
+      const newPlanned = new Date(new Date(anchorScheduledAt).getTime() + pauseDurationMs).toISOString();
       const updated = await dispatchLogsRepositoryDependency.updatePlannedSchedule(log.id, newPlanned);
       shiftedLogs.push(updated || { ...log, horario_envio_planejado: newPlanned });
     }

@@ -29,26 +29,24 @@
       .settings-row + .settings-row { border-top: 1px solid var(--line); }
       .settings-row .switch { flex: none; }
       .events-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:10px 20px; }
-      .check-row { display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; }
+      .check-row { display:flex; align-items:center; gap:8px; font-size: var(--fs-md); cursor:pointer; }
       .section-num { color: var(--text-faint); font-weight:600; margin-right:6px; }
-      .link-toggle { display:inline-flex; align-items:center; gap:6px; background:none; border:none; padding:0; font-size:13px; color:var(--text); cursor:pointer; }
+      .link-toggle { display:inline-flex; align-items:center; gap:6px; background:none; border:none; padding:0; font-size: var(--fs-md); color:var(--text); cursor:pointer; }
       .link-toggle:hover { color:var(--primary, var(--text)); }
       .link-toggle-arrow { display:inline-block; width:10px; color:var(--text-faint); }
-      .status-line { min-height:20px; margin-top:10px; font-size:12.5px; color:var(--text-muted); }
-      .status-line.error { color:var(--danger); }
-      .drag-handle { cursor: grab; color: var(--text-faint); font-size:16px; line-height:1; padding:4px 6px; user-select:none; }
+      .drag-handle { cursor: grab; color: var(--text-faint); font-size: var(--icon-glyph-sm); line-height:1; padding:4px 6px; user-select:none; }
       .drag-handle:active { cursor: grabbing; }
       #whatsappInstancesBody tr.dragging { opacity: 0.5; }
-      #whatsappInstancesBody tr.drag-over { border-top: 2px solid var(--brand, #6366f1); }
+      #whatsappInstancesBody tr.drag-over { border-top: 2px solid var(--brand-blue); }
       .period-add-row { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
       .period-add-row input[type="time"] { width: 92px; }
       .chip .chip-arrow { cursor:pointer; color: var(--text-faint); font-weight:700; }
       .chip .chip-arrow:hover { color: var(--text); }
       .chip .chip-arrow.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
-      .chip .chip-order-badge { font-size:10.5px; font-weight:700; color: var(--text-faint); background: var(--surface); border-radius:999px; padding:1px 6px; }
-      .chip .chip-journey-toggle { cursor:pointer; color: var(--text-faint); font-size:11px; white-space:nowrap; }
+      .chip .chip-order-badge { font-size: var(--fs-2xs); font-weight:700; color: var(--text-faint); background: var(--surface); border-radius:999px; padding:1px 6px; }
+      .chip .chip-journey-toggle { cursor:pointer; color: var(--text-faint); font-size: var(--fs-xs); white-space:nowrap; }
       .chip .chip-journey-toggle:hover { color: var(--accent, #5b6cff); }
-      .profiles-subhead { font-size:12px; color: var(--text-muted); margin-bottom:6px; }
+      .profiles-subhead { font-size: var(--fs-sm); color: var(--text-muted); margin-bottom:6px; }
     </style>
   </head>
   <body data-page="configuracoes">
@@ -243,7 +241,7 @@
               <div class="card-body">
                 <div class="field">
                   <label>Status</label>
-                  <div><span class="badge badge-neutral" id="dbStatusBadge">Desconhecido</span> <span class="text-faint" style="font-size:12px;" id="dbLatencyText"></span></div>
+                  <div><span class="badge badge-neutral" id="dbStatusBadge">Desconhecido</span> <span class="text-faint" style="font-size: var(--fs-sm);" id="dbLatencyText"></span></div>
                 </div>
               </div>
               <div class="modal-footer">
@@ -302,7 +300,7 @@
                   <button class="btn btn-secondary" id="addProfileButton" type="button">Adicionar</button>
                 </div>
                 <button class="btn btn-secondary" id="mergeProfilesButton" type="button" disabled>Fundir selecionados</button>
-                <div id="profilesStatus" class="text-muted" style="margin-top:8px; font-size:12.5px;"></div>
+                <div id="profilesStatus" class="text-muted" style="margin-top:8px; font-size: var(--fs-sm);"></div>
               </div>
             </div>
           </section>
@@ -318,15 +316,19 @@
         </div>
         <div class="modal-body" style="text-align:center;">
           <img id="qrImage" alt="QR Code" style="width:240px;height:240px;margin:0 auto 12px;">
-          <div id="qrCountdown" style="font-size:22px;font-weight:700;"></div>
+          <div id="qrCountdown" style="font-size: var(--fs-3xl);font-weight:700;"></div>
           <div id="qrStatus" class="status-line"></div>
         </div>
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
+      window.estimuloShowLoading();
+      const initialLoadPromises = [];
+
       function simulateAction(buttonId, statusId, runningText, doneText) {
         const button = document.getElementById(buttonId);
         const status = document.getElementById(statusId);
@@ -379,7 +381,7 @@
         setTimeout(() => (profileSaveStatus.textContent = ""), 2500);
       });
 
-      loadProfileSettings();
+      initialLoadPromises.push(loadProfileSettings());
 
       // ---------- 2. Google Drive ----------
       const driveStatus = document.getElementById("driveActionStatus");
@@ -492,7 +494,7 @@
         setTimeout(() => setDriveStatus(""), 3000);
       });
 
-      loadDriveSettings();
+      initialLoadPromises.push(loadDriveSettings());
 
       // ---------- 3. Evolution API (WhatsApp) ----------
       let whatsappInstances = [];
@@ -824,8 +826,8 @@
         }
       });
 
-      loadWhatsappInstances();
-      loadRotationSettings();
+      initialLoadPromises.push(loadWhatsappInstances());
+      initialLoadPromises.push(loadRotationSettings());
 
       // ---------- 4. IA ----------
       // Mantido em sincronia com ALLOWED_GEMINI_MODELS em
@@ -912,7 +914,7 @@
             <div data-prompt-panel="${def.key}" ${promptOpen ? "" : "hidden"} style="margin-top:10px;">
               <div class="field" style="margin-bottom:0;">
                 <textarea data-agent-prompt="${def.key}" rows="6" style="width:100%;resize:vertical;">${promptValue}</textarea>
-                <p class="text-faint" style="font-size:12px;margin-top:6px;">Este é o texto usado hoje (padrão do sistema, caso ainda não tenha sido personalizado). Edite e salve para sobrescrevê-lo.</p>
+                <p class="text-faint" style="font-size: var(--fs-sm);margin-top:6px;">Este é o texto usado hoje (padrão do sistema, caso ainda não tenha sido personalizado). Edite e salve para sobrescrevê-lo.</p>
               </div>
             </div>`
                 : ""
@@ -1043,7 +1045,7 @@
         setTimeout(() => (aiSaveStatus.textContent = ""), 2500);
       });
 
-      loadAiSettings();
+      initialLoadPromises.push(loadAiSettings());
 
       // ---------- 5. Agendamento padrão ----------
       const timezoneSelect = document.getElementById("timezoneSelect");
@@ -1061,7 +1063,7 @@
               <span class="chip">${p.inicio} - ${p.fim}<span class="chip-remove" data-remove-default-period="${i}">✕</span></span>`
               )
               .join("")
-          : '<span class="text-faint" style="font-size:12px;">Nenhum período padrão adicionado</span>';
+          : '<span class="text-faint" style="font-size: var(--fs-sm);">Nenhum período padrão adicionado</span>';
 
         document.querySelectorAll("[data-remove-default-period]").forEach((el) =>
           el.addEventListener("click", () => {
@@ -1124,11 +1126,11 @@
         setTimeout(() => (scheduleSaveStatus.textContent = ""), 2500);
       });
 
-      loadScheduleSettings();
+      initialLoadPromises.push(loadScheduleSettings());
 
       // ---------- 6. Regras de envio ----------
       const DISPATCH_RULES = [
-        { id: "auto_advance_trilha", label: "Avançar automaticamente para a próxima trilha", hint: "Quando a trilha atual de um grupo terminar, escolhe a próxima automaticamente segundo a ordem definida para o perfil (com desvios por setor e troca de perfil quando a jornada avança). Se desativado, o grupo fica pausado até alguém escolher a trilha manualmente.", checked: true },
+        { id: "auto_advance_trilha", label: "Avançar automaticamente para a próxima trilha", hint: "Quando a trilha atual de um grupo terminar, escolhe a próxima automaticamente dentro da ordem definida para o perfil (com desvios por setor). Nunca troca de perfil sozinho — ao esgotar a sequência do perfil, o grupo fica pausado até alguém atribuir uma nova trilha manualmente.", checked: true },
         { id: "notify_on_trail_advanced", label: "Notificar quando o avanço automático trocar a trilha de um grupo", hint: "Envia uma notificação quando o motor de sequenciamento reatribui a trilha de um grupo sozinho.", checked: true },
         { id: "never_repeat_video", label: "Nunca repetir vídeo", hint: "Impede que o mesmo vídeo seja enviado duas vezes ao mesmo grupo. Quando desativado, você pode forçar o reenvio de um vídeo específico na tela de Envio automatizado.", checked: true },
         { id: "notify_on_trail_finished", label: "Notificar quando uma trilha em um grupo terminar", hint: "Envia uma notificação (conforme configurado na seção Notificações) quando não houver mais vídeos aprovados pendentes na trilha do grupo.", checked: true },
@@ -1144,8 +1146,8 @@
           <div class="settings-row">
             <label class="switch" style="margin:0;"><input type="checkbox" data-rule="${rule.id}"${rule.checked ? " checked" : ""}><span class="track"></span></label>
             <div style="flex:1;">
-              <strong style="font-size:13px;">${rule.label}</strong>
-              <p class="text-faint" style="font-size:12px;">${rule.hint}</p>
+              <strong style="font-size: var(--fs-md);">${rule.label}</strong>
+              <p class="text-faint" style="font-size: var(--fs-sm);">${rule.hint}</p>
               ${
                 rule.withMinutes
                   ? `<div style="margin-top:8px;${rule.checked ? "" : "display:none;"}" data-rule-minutes-wrap="${rule.id}">
@@ -1235,7 +1237,7 @@
         renderDispatchRules();
       }
 
-      loadDispatchRules();
+      initialLoadPromises.push(loadDispatchRules());
 
       // ---------- 7. Notificações ----------
       const NOTIFY_EVENTS = [
@@ -1246,14 +1248,6 @@
         { id: "trailFinished", label: "Trilha finalizada em um grupo", checked: true },
       ];
 
-      function escapeHtmlNotify(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       function renderNotifyEvents() {
         document.getElementById("notifyEventsGrid").innerHTML = NOTIFY_EVENTS.map(
@@ -1292,7 +1286,7 @@
           notifyTargetSelect.innerHTML =
             '<option value="">Selecione um grupo…</option>' +
             (Array.isArray(groups) ? groups : [])
-              .map((group) => `<option value="${escapeHtmlNotify(group.id)}">${escapeHtmlNotify(group.nome)}</option>`)
+              .map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.nome)}</option>`)
               .join("");
         } catch (error) {
           // mantém apenas a opção padrão se a listagem de grupos falhar
@@ -1327,7 +1321,7 @@
         }
       });
 
-      loadNotificationSettings();
+      initialLoadPromises.push(loadNotificationSettings());
 
       // ---------- 8. Banco de dados ----------
       const dbActionStatus = document.getElementById("dbActionStatus");
@@ -1374,14 +1368,6 @@
       // survivor_id -> nome do perfil que seria restaurado ao desfundir
       const unmergeableProfiles = new Map();
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       function setProfilesStatus(text, color) {
         profilesStatus.style.color = color || "var(--text-muted)";
@@ -1433,7 +1419,7 @@
             </span>`;
               })
               .join("")
-          : '<span class="text-faint" style="font-size:12.5px;">Nenhum perfil na jornada automática.</span>';
+          : '<span class="text-faint" style="font-size: var(--fs-sm);">Nenhum perfil na jornada automática.</span>';
 
         document.getElementById("unorderedProfileChips").innerHTML = unorderedProfiles.length
           ? unorderedProfiles
@@ -1445,7 +1431,7 @@
             </span>`
               )
               .join("")
-          : '<span class="text-faint" style="font-size:12.5px;">Nenhum perfil fora da jornada.</span>';
+          : '<span class="text-faint" style="font-size: var(--fs-sm);">Nenhum perfil fora da jornada.</span>';
 
         document.querySelectorAll("[data-unmerge-profile]").forEach((el) =>
           el.addEventListener("click", (event) => {
@@ -1686,7 +1672,7 @@
         setTimeout(() => setProfilesStatus(""), 3000);
       });
 
-      loadProfiles();
+      initialLoadPromises.push(loadProfiles());
 
       // ---------- 9. Usuários do painel ----------
       const appUsersStatus = document.getElementById("appUsersStatus");
@@ -1792,7 +1778,9 @@
         setTimeout(() => setAppUsersStatus(""), 3000);
       });
 
-      loadAppUsers();
+      initialLoadPromises.push(loadAppUsers());
+
+      Promise.allSettled(initialLoadPromises).finally(() => window.estimuloHideLoading());
     </script>
   </body>
 </html>

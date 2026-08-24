@@ -191,7 +191,16 @@ async function testQueuedAdHocDoesNotReportUnconfirmedAsSent() {
 
   const job = {
     id: "job-1",
-    data: { group_id: "120@g.us", message: "oi", dispatch_log_id: "log-1" },
+    data: {
+      group_id: "120@g.us",
+      message: "oi",
+      dispatch_log_id: "log-1",
+      // Em producao buildMensagensJobData sempre preenche scheduled_at, e o
+      // worker cancela sem enviar o job que chega sem horario (trava de atraso
+      // que falha fechado). Sem este campo o teste cancelaria antes de exercitar
+      // a recusa da Evolution, que e o que ele quer verificar.
+      scheduled_at: new Date().toISOString(),
+    },
     async updateData(next) {
       this.data = next;
     },
@@ -479,7 +488,15 @@ async function testQueuedAdHocRecordsProviderEvidence() {
 
   const job = {
     id: "job-1",
-    data: { group_id: "120@g.us", message: "oi", dispatch_log_id: "log-1" },
+    // scheduled_at obrigatorio: o worker cancela sem enviar o job que chega sem
+    // horario (trava de atraso que falha fechado). Em producao
+    // buildMensagensJobData sempre preenche este campo.
+    data: {
+      group_id: "120@g.us",
+      message: "oi",
+      dispatch_log_id: "log-1",
+      scheduled_at: new Date().toISOString(),
+    },
     async updateData(next) {
       this.data = next;
     },
@@ -511,7 +528,15 @@ async function testProviderEvidenceFailureDoesNotFailTheJob() {
 
   const job = {
     id: "job-1",
-    data: { group_id: "120@g.us", message: "oi", dispatch_log_id: "log-1" },
+    // scheduled_at obrigatorio: o worker cancela sem enviar o job que chega sem
+    // horario (trava de atraso que falha fechado). Em producao
+    // buildMensagensJobData sempre preenche este campo.
+    data: {
+      group_id: "120@g.us",
+      message: "oi",
+      dispatch_log_id: "log-1",
+      scheduled_at: new Date().toISOString(),
+    },
     async updateData(next) {
       this.data = next;
     },

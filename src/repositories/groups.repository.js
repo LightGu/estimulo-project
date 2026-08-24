@@ -180,7 +180,21 @@ async function remove(id, client) {
   return data || null;
 }
 
+async function countByTrilhaId(trilhaId, client) {
+  const { count, error } = await getClient(client)
+    .from("groups")
+    .select("*", { count: "exact", head: true })
+    .eq("trilha_id", trilhaId);
+
+  if (error) {
+    throw error;
+  }
+
+  return count || 0;
+}
+
 module.exports = {
+  countByTrilhaId,
   create,
   delete: remove,
   findAll,

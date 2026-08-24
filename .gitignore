@@ -43,9 +43,6 @@ supabase/.branches/
 scratch_*
 *.inspect.ndjson
 
-# Staging da refatoracao: codigo legado a ser removido manualmente
-_codigo-sem-uso/
-
 # OS/editor files
 .DS_Store
 Thumbs.db

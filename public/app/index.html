@@ -51,14 +51,6 @@
               <h2>Visão consolidada por organização</h2>
             </div>
             <div class="toolbar">
-              <div class="field" style="min-width:200px;">
-                <label for="orgRollupFilter">Organização</label>
-                <select id="orgRollupFilter"><option value="todas">Todas</option></select>
-              </div>
-              <div class="field" style="min-width:200px;">
-                <label for="campanhaRollupFilter">Campanha</label>
-                <select id="campanhaRollupFilter"><option value="todas">Todas</option></select>
-              </div>
               <div class="field">
                 <label for="rollupDataInicio">De</label>
                 <input id="rollupDataInicio" type="date">
@@ -74,9 +66,9 @@
                   <tr>
                     <th>Organização</th>
                     <th>Grupos</th>
-                    <th>Classificados</th>
+                    <th>Aguardando</th>
                     <th>Enviados</th>
-                    <th>Processando</th>
+                    <th>Cancelado</th>
                     <th>Erros</th>
                   </tr>
                 </thead>
@@ -108,10 +100,11 @@
 
           <section class="page-section">
             <div class="section-head">
-              <h2>Campanhas em destaque</h2>
-              <a class="btn btn-secondary btn-sm" href="campanhas.html">Ver todas as campanhas</a>
+              <h2>Envios por dia</h2>
             </div>
-            <div class="grid grid-cols-3" id="campaignCards"></div>
+            <div class="card card-pad" id="videosChartCard">
+              <div id="videosChart"></div>
+            </div>
           </section>
 
           <section class="page-section">
@@ -141,6 +134,7 @@
       </div>
     </div>
 
+    <script src="assets/js/dom-utils.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -152,14 +146,6 @@
         allDispatches: [],
       };
 
-      function escapeHtml(value) {
-        return String(value === null || value === undefined ? "" : value)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-      }
 
       async function requestJson(url, options) {
         const response = await fetch(url, options);
@@ -191,18 +177,11 @@
         return DISPATCH_STATUS_TIP[d.status] || "";
       }
 
-      const CAMPAIGN_STATUS_LABEL = { concluido: "Concluído", programado: "Programado", gerando_legendas: "Gerando legendas" };
-      const CAMPAIGN_STATUS_BADGE = { concluido: "badge-success", programado: "badge-info", gerando_legendas: "badge-warning" };
-      const CAMPAIGN_STATUS_TIP = {
-        concluido: "Todos os grupos já tiveram o envio finalizado (com sucesso ou erro definitivo).",
-        programado: "Aguardando o horário de disparo programado.",
-        gerando_legendas: "Gerando legendas por IA antes de liberar o disparo aos grupos.",
-      };
 
       function renderKpis() {
         const groups = state.groups;
         const naoClassificados = groups.filter((g) => !g.segmento).length;
-        const campanhasAtivas = state.campaigns.filter((c) => c.status !== "concluido").length;
+        const campanhasEnviadas = state.campaigns.filter((c) => c.status === "concluido").length;
 
         const enviosHoje = state.todayDispatches.length;
         const errosHoje = state.todayDispatches.filter((d) => d.status === "erro" || d.status === "falhou").length;
@@ -218,12 +197,12 @@
             tip: "Total de grupos do WhatsApp já sincronizados via Evolution API, incluindo os que ainda não têm perfil definido.",
           },
           {
-            label: "Campanhas ativas",
-            value: campanhasAtivas,
+            label: "Campanhas concluídas",
+            value: campanhasEnviadas,
             sub: `${state.campaigns.length} no total`,
             bar: "var(--brand-purple)",
             tone: "info",
-            tip: "Campanhas que ainda não tiveram o envio finalizado para todos os grupos (status diferente de Concluído).",
+            tip: "Campanhas com o envio finalizado para todos os grupos (status Concluído).",
           },
           {
             label: "Envios hoje",
@@ -277,59 +256,199 @@
           .join("");
       }
 
-      async function renderCampaignCards() {
-        const top = state.campaigns.slice(0, 3);
+      const VIDEOS_CHART_DAYS = 14;
 
-        if (!top.length) {
-          document.getElementById("campaignCards").innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><strong>Nenhuma campanha cadastrada ainda</strong></div>`;
+      function isTextMessageCampaign(campaign) {
+        if (!campaign || campaign.tipo !== "pontual") return false;
+        return !campaign.possui_midia && !campaign.link_conteudo;
+      }
+
+      function buildSentSeries() {
+        const days = [];
+        const today = new Date();
+        for (let i = VIDEOS_CHART_DAYS - 1; i >= 0; i--) {
+          const d = new Date(today);
+          d.setDate(d.getDate() - i);
+          days.push(d.toISOString().slice(0, 10));
+        }
+
+        const videoCountsByDay = new Map(days.map((day) => [day, 0]));
+        const textCountsByDay = new Map(days.map((day) => [day, 0]));
+
+        state.allDispatches
+          .filter((d) => d.status === "enviado")
+          .forEach((d) => {
+            const day = (d.criado_em || "").slice(0, 10);
+            if (!videoCountsByDay.has(day)) return;
+            const counts = isTextMessageCampaign(d.campaigns) ? textCountsByDay : videoCountsByDay;
+            counts.set(day, counts.get(day) + 1);
+          });
+
+        return days.map((day) => ({ day, video: videoCountsByDay.get(day), texto: textCountsByDay.get(day) }));
+      }
+
+      const SENT_CHART_SERIES = [
+        { key: "video", label: "Vídeos", color: "var(--brand-blue)", nounSingular: "vídeo", nounPlural: "vídeos" },
+        { key: "texto", label: "Mensagens de texto", color: "var(--brand-purple)", nounSingular: "mensagem de texto", nounPlural: "mensagens de texto" },
+      ];
+
+      function renderVideosChart() {
+        const container = document.getElementById("videosChart");
+        const series = buildSentSeries();
+
+        if (!state.allDispatches.length) {
+          container.innerHTML = `<div class="empty-state"><strong>Nenhum envio registrado ainda</strong></div>`;
           return;
         }
 
-        const withProgress = await Promise.all(
-          top.map(async (c) => {
-            try {
-              const groupsDetail = await requestJson(`/campaigns/${c.id}/groups`);
-              return { ...c, gruposEnviados: groupsDetail.filter((g) => g.status === "enviado").length };
-            } catch (error) {
-              return { ...c, gruposEnviados: null };
-            }
-          })
-        );
+        const width = 720;
+        const height = 260;
+        const margin = { top: 16, right: 16, bottom: 28, left: 32 };
+        const plotW = width - margin.left - margin.right;
+        const plotH = height - margin.top - margin.bottom;
 
-        document.getElementById("campaignCards").innerHTML = withProgress
-          .map((c) => {
-            const total = Number(c.grupos_total || 0);
-            const enviados = c.gruposEnviados ?? 0;
-            const pct = total ? Math.round((enviados / total) * 100) : 0;
-            return `
-              <div class="card card-pad">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
-                  <strong>${escapeHtml(c.trilha || c.nome || "Campanha")}</strong>
-                  <span class="badge has-tip ${CAMPAIGN_STATUS_BADGE[c.status] || "badge-neutral"}" data-tip="${escapeHtml(CAMPAIGN_STATUS_TIP[c.status] || "")}" data-tip-tone="${(CAMPAIGN_STATUS_BADGE[c.status] || "badge-neutral").replace("badge-", "")}">${CAMPAIGN_STATUS_LABEL[c.status] || escapeHtml(c.status)}</span>
-                </div>
-                <div class="progress" style="margin-top:14px;"><span style="width:${pct}%"></span></div>
-                <p class="text-faint" style="margin-top:6px;">${c.gruposEnviados === null ? "—" : `${enviados}/${total} grupos enviados`}</p>
-              </div>`;
+        const maxCount = Math.max(1, ...series.flatMap((p) => SENT_CHART_SERIES.map((s) => p[s.key])));
+        const yTicks = 4;
+        const xForIndex = (i) => margin.left + (series.length === 1 ? plotW / 2 : (i / (series.length - 1)) * plotW);
+        const yForValue = (v) => margin.top + plotH - (v / maxCount) * plotH;
+
+        const gridLines = Array.from({ length: yTicks + 1 }, (_, i) => {
+          const value = Math.round((maxCount / yTicks) * i);
+          const y = yForValue(value);
+          return `
+            <line x1="${margin.left}" y1="${y.toFixed(1)}" x2="${width - margin.right}" y2="${y.toFixed(1)}" stroke="var(--line)" stroke-width="1" />
+            <text x="${margin.left - 8}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" class="chart-axis-label">${value}</text>`;
+        }).join("");
+
+        const labelEvery = Math.ceil(series.length / 7);
+        const xLabels = series
+          .map((p, i) => {
+            if (i % labelEvery !== 0 && i !== series.length - 1) return "";
+            const [, month, dayNum] = p.day.split("-");
+            return `<text x="${xForIndex(i).toFixed(1)}" y="${height - margin.bottom + 18}" text-anchor="middle" class="chart-axis-label">${dayNum}/${month}</text>`;
           })
           .join("");
+
+        const linesAndDots = SENT_CHART_SERIES.map((s) => {
+          const linePoints = series.map((p, i) => `${xForIndex(i).toFixed(1)},${yForValue(p[s.key]).toFixed(1)}`).join(" ");
+          const dots = series
+            .map((p, i) => {
+              const cx = xForIndex(i).toFixed(1);
+              const cy = yForValue(p[s.key]).toFixed(1);
+              return `<circle class="chart-dot" data-series="${s.key}" data-index="${i}" cx="${cx}" cy="${cy}" r="3.5" fill="${s.color}" stroke="var(--surface)" stroke-width="1.5" />`;
+            })
+            .join("");
+          return `
+            <polyline points="${linePoints}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />
+            ${dots}`;
+        }).join("");
+
+        const hoverDots = SENT_CHART_SERIES.map(
+          (s) => `<circle class="chart-hover-dot" data-series="${s.key}" r="5" fill="${s.color}" stroke="var(--surface)" stroke-width="2" opacity="0" />`
+        ).join("");
+
+        const legend = SENT_CHART_SERIES.map(
+          (s) => `
+            <span style="display:inline-flex;align-items:center;gap:6px;">
+              <span style="width:10px;height:10px;border-radius:50%;background:${s.color};display:inline-block;"></span>
+              <span class="text-muted" style="font-size: var(--fs-sm);">${s.label}</span>
+            </span>`
+        ).join("");
+
+        container.innerHTML = `
+          <div style="display:flex;gap:18px;margin-bottom:12px;">${legend}</div>
+          <div class="chart-hover-wrap" style="position:relative;">
+            <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Vídeos e mensagens de texto enviados por dia, últimos ${VIDEOS_CHART_DAYS} dias" style="width:100%;height:auto;display:block;">
+              <style>.chart-axis-label { font-size: var(--fs-2xs); fill: var(--text-faint); font-family: var(--font-sans); }</style>
+              ${gridLines}
+              ${linesAndDots}
+              <line class="chart-crosshair" x1="0" y1="${margin.top}" x2="0" y2="${height - margin.bottom}" stroke="var(--text-faint)" stroke-width="1" stroke-dasharray="3,3" opacity="0" />
+              ${hoverDots}
+              ${xLabels}
+              <rect class="chart-hover-target" x="${margin.left}" y="${margin.top}" width="${plotW}" height="${plotH}" fill="transparent" />
+            </svg>
+            <div class="tooltip-bubble tooltip-bubble--info chart-tooltip" role="tooltip" style="position:absolute;opacity:0;pointer-events:none;display:flex;flex-direction:column;gap:3px;"></div>
+          </div>`;
+
+        wireChartHover(container, series, { width, height, margin, plotW, xForIndex, yForValue });
       }
 
-      function populateRollupFilters() {
-        document.getElementById("orgRollupFilter").innerHTML =
-          '<option value="todas">Todas</option>' + state.organizations.map((o) => `<option value="${o.id}">${escapeHtml(o.nome)}</option>`).join("");
+      function formatChartDay(isoDay) {
+        const [, month, day] = isoDay.split("-");
+        return `${day}/${month}`;
+      }
 
-        const campanhas = Array.from(new Set(state.allDispatches.map((d) => d.campaigns?.trilha).filter(Boolean)));
-        document.getElementById("campanhaRollupFilter").innerHTML =
-          '<option value="todas">Todas</option>' + campanhas.map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
+      function wireChartHover(container, series, geo) {
+        const svg = container.querySelector("svg");
+        const hoverTarget = container.querySelector(".chart-hover-target");
+        const crosshair = container.querySelector(".chart-crosshair");
+        const hoverDots = container.querySelectorAll(".chart-hover-dot");
+        const tooltip = container.querySelector(".chart-tooltip");
+
+        function pointFromEvent(event) {
+          const pt = svg.createSVGPoint();
+          pt.x = event.clientX;
+          pt.y = event.clientY;
+          const ctm = svg.getScreenCTM();
+          if (!ctm) return null;
+          return pt.matrixTransform(ctm.inverse());
+        }
+
+        function showAt(index) {
+          const p = series[index];
+          const cx = geo.xForIndex(index);
+
+          crosshair.setAttribute("x1", cx.toFixed(1));
+          crosshair.setAttribute("x2", cx.toFixed(1));
+          crosshair.setAttribute("opacity", "1");
+
+          hoverDots.forEach((dot) => {
+            const key = dot.dataset.series;
+            const cy = geo.yForValue(p[key]);
+            dot.setAttribute("cx", cx.toFixed(1));
+            dot.setAttribute("cy", cy.toFixed(1));
+            dot.setAttribute("opacity", "1");
+          });
+
+          const rows = SENT_CHART_SERIES.map((s) => {
+            const count = p[s.key];
+            const noun = count === 1 ? s.nounSingular : s.nounPlural;
+            return `<span style="display:flex;align-items:center;gap:5px;"><span style="width:8px;height:8px;border-radius:50%;background:${s.color};display:inline-block;"></span>${count} ${noun}</span>`;
+          }).join("");
+          tooltip.innerHTML = `<strong>${formatChartDay(p.day)}</strong>${rows}`;
+
+          const svgRect = svg.getBoundingClientRect();
+          const scale = svgRect.width / geo.width;
+          const topMostValue = Math.max(...SENT_CHART_SERIES.map((s) => p[s.key]));
+          const top = geo.yForValue(topMostValue) * scale;
+          const left = cx * scale;
+          tooltip.style.left = `${left}px`;
+          tooltip.style.top = `${Math.max(0, top - 12)}px`;
+          tooltip.style.transform = "translate(-50%, -100%)";
+          tooltip.style.opacity = "1";
+        }
+
+        function hide() {
+          crosshair.setAttribute("opacity", "0");
+          hoverDots.forEach((dot) => dot.setAttribute("opacity", "0"));
+          tooltip.style.opacity = "0";
+        }
+
+        hoverTarget.addEventListener("mousemove", (event) => {
+          const point = pointFromEvent(event);
+          if (!point) return;
+          const ratio = series.length === 1 ? 0 : (point.x - geo.margin.left) / geo.plotW;
+          const index = Math.min(series.length - 1, Math.max(0, Math.round(ratio * (series.length - 1))));
+          showAt(index);
+        });
+        hoverTarget.addEventListener("mouseleave", hide);
       }
 
       function filteredDispatchForRollup() {
-        const campanha = document.getElementById("campanhaRollupFilter").value;
         const dIni = document.getElementById("rollupDataInicio").value;
         const dFim = document.getElementById("rollupDataFim").value;
 
         return state.allDispatches.filter((d) => {
-          if (campanha !== "todas" && d.campaigns?.trilha !== campanha) return false;
           const day = (d.criado_em || "").slice(0, 10);
           if (dIni && day < dIni) return false;
           if (dFim && day > dFim) return false;
@@ -338,9 +457,8 @@
       }
 
       function renderOrgRollup() {
-        const orgFilter = document.getElementById("orgRollupFilter").value;
         const dispatches = filteredDispatchForRollup();
-        const orgs = state.organizations.filter((o) => orgFilter === "todas" || o.id === orgFilter);
+        const orgs = state.organizations;
 
         if (!orgs.length) {
           document.getElementById("orgRollupBody").innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>Nenhuma organização encontrada</strong></div></td></tr>`;
@@ -357,22 +475,23 @@
               <tr>
                 <td class="strong">${escapeHtml(org.nome)}</td>
                 <td>${groups.length}</td>
-                <td>${groups.filter((g) => g.segmento).length}</td>
+                <td>${orgDispatches.filter((d) => d.status === "pendente").length}</td>
                 <td>${orgDispatches.filter((d) => d.status === "enviado").length}</td>
-                <td>${orgDispatches.filter((d) => d.status === "processando").length}</td>
+                <td>${orgDispatches.filter((d) => d.status === "cancelado").length}</td>
                 <td>${orgDispatches.filter((d) => d.status === "erro" || d.status === "falhou").length}</td>
               </tr>`;
           })
           .join("");
       }
 
-      ["orgRollupFilter", "campanhaRollupFilter", "rollupDataInicio", "rollupDataFim"].forEach((id) =>
+      ["rollupDataInicio", "rollupDataFim"].forEach((id) =>
         document.getElementById(id).addEventListener("input", renderOrgRollup)
       );
 
       async function loadDashboard() {
         const today = new Date().toISOString().slice(0, 10);
 
+        window.estimuloShowLoading();
         try {
           const [organizations, groups, campaigns, todayDispatches, allDispatches] = await Promise.all([
             requestJson("/organizations"),
@@ -390,15 +509,16 @@
 
           renderKpis();
           renderDispatchLog();
-          populateRollupFilters();
           renderOrgRollup();
-          await renderCampaignCards();
+          renderVideosChart();
         } catch (error) {
           document.getElementById("kpiGrid").innerHTML = `
             <div class="empty-state" style="grid-column:1/-1;">
               <strong>Falha ao carregar o painel</strong>
               <span>${escapeHtml(error.message)}</span>
             </div>`;
+        } finally {
+          window.estimuloHideLoading();
         }
       }
 

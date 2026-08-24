@@ -77,6 +77,44 @@
   --shadow-lg: 0 12px 32px rgba(17, 20, 45, 0.14);
 
   --font-sans: "Poppins", "Segoe UI", Arial, Helvetica, sans-serif;
+
+  /* Escala tipografica — antes deste bloco havia 18 tamanhos ad-hoc (10px..28px)
+     espalhados em 136 declaracoes hardcoded. A escala abaixo consolida todos.
+     Deliberadamente compacta: o painel mostra tabelas densas e a regra do
+     produto e' que nenhuma caixa role horizontalmente, entao a fonte pequena
+     e' o que compra a largura necessaria. */
+  --fs-2xs: 10.5px;  /* micro-rotulos, contadores, rotulo de eixo de grafico */
+  --fs-xs: 11.5px;   /* cabecalho de tabela, badges */
+  --fs-sm: 12.5px;   /* corpo de tabela, campos densos */
+  --fs-md: 13.5px;   /* corpo padrao */
+  --fs-lg: 15px;     /* titulo de card, h3 */
+  --fs-xl: 17px;     /* marca da sidebar, h2 */
+  --fs-2xl: 19px;    /* titulo de pagina (topbar h1) */
+  --fs-3xl: 22px;    /* destaque medio (contador de QR) */
+  --fs-4xl: 24px;    /* h1 de conteudo */
+  --fs-5xl: 28px;    /* numero de KPI */
+
+  /* Dimensao de glifo/icone desenhado com fonte (⋮, ⠿). Nao e' tipografia de
+     texto: o valor e' tamanho visual do simbolo, por isso fica fora da escala
+     acima e nao deve ser "arredondado" para um degrau dela. */
+  --icon-glyph-sm: 16px;
+  --icon-glyph-md: 18px;
+  --icon-glyph-lg: 20px;
+
+  --lh-tight: 1.25;
+  --lh-normal: 1.45;
+
+  /* Espacamento */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Densidade de tabela — usada por .table-wrap/table em components.css */
+  --table-pad-y: 10px;
+  --table-pad-x: 12px;
 }
 
 :root[data-theme="dark"] {

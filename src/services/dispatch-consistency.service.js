@@ -6,7 +6,7 @@ const videoCatalogRepository = require("../repositories/video-catalog.repository
 const defaultSettingsService = require("./settings.service");
 // Regra compartilhada com o disparo pontual - ver delivery-confirmation.js.
 const { assertDeliveryConfirmed, extractProviderDelivery } = require("./delivery-confirmation");
-const { resolveStaleDispatchReason } = require("./dispatch-staleness");
+const { resolveMaxVideoDispatchDelayMs, resolveStaleDispatchReason } = require("./dispatch-staleness");
 
 function writeStageLog(logger, level, event, payload = {}) {
   const writer = logger && (logger[level] || logger.info);
@@ -77,6 +77,33 @@ function createDispatchConsistencyService(dependencies = {}) {
     }) || null;
   }
 
+  // LIMITACAO CONHECIDA (segura na configuracao atual, perigosa se escalar).
+  //
+  // As tres etapas abaixo - buscar log "processando", buscar "pendente", criar -
+  // sao round-trips separados, sem atomicidade. Com DOIS workers de dispatch
+  // rodando, ambos podem passar pelas buscas antes de qualquer um criar, e cada
+  // um cria a SUA linha em `logs`. Como o claimForSend seguinte e' um
+  // compare-and-set por `id` de linha, os dois claims tem sucesso: o CAS protege
+  // uma linha, nao o trio logico campanha/grupo/video. Resultado: o mesmo video
+  // postado duas vezes no grupo.
+  //
+  // Por que e' seguro hoje: infra/docker-compose.yml declara UMA instancia de
+  // dispatch-worker (sem deploy.replicas) e a BullMQ usa concurrency 1 por
+  // padrao - nenhum dos dois e' sobrescrito no projeto. A serializacao e'
+  // operacional, nao estrutural.
+  //
+  // ANTES DE ESCALAR (`--scale dispatch-worker=N` ou concurrency > 1) e preciso:
+  //   1. auditar duplicatas historicas em `logs` para o trio
+  //      (campaign_id, group_id, video_id) - o indice abaixo falha se existirem;
+  //   2. criar o indice unico parcial:
+  //      CREATE UNIQUE INDEX CONCURRENTLY idx_logs_trio_ativo
+  //        ON public.logs (campaign_id, group_id, video_id)
+  //        WHERE status IN ('pendente','processando','enviado');
+  //   3. tratar a violacao aqui, relendo o log vencedor em vez de propagar o erro;
+  //   4. reverificar requeuePendingDispatchJobsForCampaign (campaign-trigger.js),
+  //      que reenfileira para o mesmo trio.
+  // O retry (markRetrying em dispatch-logs.repository.js) reutiliza o log
+  // existente, entao ja e' compativel com o indice.
   async function createAttemptLog(payload) {
     const existing = await findExistingLog(payload.campaignId, payload.groupId, payload.videoId, ["processando"]);
 
@@ -96,6 +123,12 @@ function createDispatchConsistencyService(dependencies = {}) {
       video_id: payload.videoId,
       status: "pendente",
       mensagem_erro: null,
+      // Grava o horario do job. Sem isto o log nascia com
+      // horario_envio_planejado NULL - a origem dos "logs orfaos" que apareciam
+      // no relatorio com "-" e, pior, que faziam todo caminho de resume/retry
+      // reenfileirar o envio sem nenhum horario em que ancorar a trava de
+      // atraso (o default `new Date()` assumia e o envio antigo saia como novo).
+      horario_envio_planejado: payload.scheduledAt || null,
     });
 
     return { log, created: true, skipSend: false };
@@ -107,7 +140,8 @@ function createDispatchConsistencyService(dependencies = {}) {
     }
 
     const duplicate = await groupVideoProgressRepositoryDependency.hasDuplicate(groupId, videoId);
-    let record;
+    let record = null;
+    let skippedProgress = false;
 
     if (duplicate) {
       if (options.neverRepeatVideo === false) {
@@ -117,7 +151,7 @@ function createDispatchConsistencyService(dependencies = {}) {
           trilha_id: trilhaId || null,
         });
       } else {
-        return { duplicate: true, record: null };
+        skippedProgress = true;
       }
     } else {
       record = await groupVideoProgressRepositoryDependency.registerDelivery({
@@ -127,6 +161,10 @@ function createDispatchConsistencyService(dependencies = {}) {
       });
     }
 
+    // A mensagem ja foi enviada mesmo quando o registro de progresso e pulado
+    // (repeticao com "nunca repetir video" ativo) - o forced_next_video_id
+    // precisa ser limpo de qualquer forma, senao o proximo disparo tenta
+    // reenviar o mesmo video forcado indefinidamente.
     const groupUpdate = { ...(trilhaId ? { trilha_id: trilhaId } : {}) };
 
     if (options.forcedNextVideoId && options.forcedNextVideoId === videoId) {
@@ -135,6 +173,10 @@ function createDispatchConsistencyService(dependencies = {}) {
 
     if (Object.keys(groupUpdate).length > 0) {
       await groupsRepositoryDependency.update(groupId, groupUpdate);
+    }
+
+    if (skippedProgress) {
+      return { duplicate: true, record: null };
     }
 
     return { duplicate: false, record };
@@ -165,7 +207,19 @@ function createDispatchConsistencyService(dependencies = {}) {
       const dispatchRules = await settingsService.getDispatchRulesSettings();
       autoRetryFailures = Boolean(dispatchRules.auto_retry_failures);
     } catch (error) {
-      autoRetryFailures = false;
+      // Antes assumia `false` em silencio, e `false` e' justamente o valor que
+      // DESATIVA a campanha logo abaixo. Ou seja: uma falha de leitura das
+      // settings derrubava a campanha inteira e o sweep de retry parava de
+      // reprocessa-la, sem log nenhum. Assumir `true` mantem a campanha viva e
+      // deixa a decisao com o worker de retry, que e' o comportamento
+      // recuperavel; a falha agora aparece no log.
+      autoRetryFailures = true;
+
+      writeStageLog(logger, "error", "dispatch_consistency.dispatch_rules_unavailable", {
+        campaign_id: campaignId,
+        assumed_auto_retry_failures: true,
+        error_message: error && error.message,
+      });
     }
 
     // Quando o reprocessamento automatico de falhas esta ativo, o worker de retry
@@ -190,6 +244,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       deliveryPayload,
       neverRepeatVideo,
       forcedNextVideoId,
+      scheduledAt,
     } = options;
 
     writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.started", {
@@ -252,6 +307,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       campaignId,
       groupId,
       videoId,
+      scheduledAt,
     });
     writeStageLog(logger, "info", "dispatch_consistency.create_attempt_log.completed", {
       campaign_id: campaignId,
@@ -274,7 +330,16 @@ function createDispatchConsistencyService(dependencies = {}) {
     // planejado do log (fila parada, worker que caiu e voltou, resume de
     // campanha pausada ha muito tempo) nao pode disparar por cima do horario
     // perdido - cancela em vez de mandar video "atrasado" sem contexto.
-    const staleReason = resolveStaleDispatchReason(log.horario_envio_planejado);
+    //
+    // O fallback para scheduledAt (horario do job) e essencial: createAttemptLog
+    // cria o log sem horario_envio_planejado, entao sozinho ele deixava esta
+    // trava cega em todo primeiro envio de um par campanha/grupo/video.
+    const staleReason = resolveStaleDispatchReason(log.horario_envio_planejado || scheduledAt, {
+      // Mesmo teto generoso do worker de video (ver dispatch-staleness.js): com
+      // concorrencia 1 os ultimos grupos de uma campanha grande acumulam atraso
+      // legitimo, e o teto de 30 min do envio pontual cancelaria esses envios.
+      maxDelayMs: resolveMaxVideoDispatchDelayMs(),
+    });
 
     if (staleReason) {
       writeStageLog(logger, "warn", "dispatch_consistency.cancelled_stale", {
