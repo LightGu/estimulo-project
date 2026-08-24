@@ -71,6 +71,31 @@ services:
       retries: 3
       start_period: 20s
 
+  # Proxy HTTPS opcional: emite/renova certificado Let's Encrypt automaticamente
+  # para ESTIMULO_PUBLIC_HOSTNAME (dominio proprio ou um host tipo sslip.io/
+  # nip.io que resolve para o IP da VM sem custo) e repassa para a API interna.
+  # So funciona com as portas 80 e 443 liberadas na Security List/NSG.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["proxy"]
+    depends_on:
+      - api
+    env_file:
+      - ../.env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "3"
+
   campaign-trigger-worker:
     <<: *app
     profiles: ["workers"]
@@ -174,5 +199,7 @@ services:
 volumes:
   app-storage:
   redis-data:
+  caddy-data:
+  caddy-config:
   evolution-postgres-data:
   evolution-instances:
