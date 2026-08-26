@@ -87,14 +87,42 @@
                   <div class="field">
                     <label>Grupos destinatários</label>
                     <input id="groupSearchInput" type="search" placeholder="Buscar grupo por nome…" style="margin-bottom:6px;">
+                    <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;margin-bottom:6px;">
+                      <div class="field" style="margin:0;">
+                        <label for="groupOrgFilter" style="font-size: var(--fs-xs);">Parceiro</label>
+                        <select id="groupOrgFilter">
+                          <option value="todos">Todos</option>
+                        </select>
+                      </div>
+                      <div class="field" style="margin:0;">
+                        <label for="groupClassFilter" style="font-size: var(--fs-xs);">Classificação</label>
+                        <select id="groupClassFilter">
+                          <option value="todos">Todos</option>
+                          <option value="classificados">Classificados</option>
+                          <option value="nao-classificados">Não classificados</option>
+                        </select>
+                      </div>
+                      <div class="field" style="margin:0;">
+                        <label for="groupVideoFilter" style="font-size: var(--fs-xs);">Envia vídeo</label>
+                        <select id="groupVideoFilter">
+                          <option value="todos">Todos</option>
+                          <option value="sim">Sim</option>
+                          <option value="nao">Não</option>
+                        </select>
+                      </div>
+                    </div>
                     <label style="margin-bottom:6px;"><input type="checkbox" id="selectAllGroups"> <strong>Selecionar todos os grupos</strong></label>
+                    <div class="text-faint" id="selectedGroupsSummary" style="font-size: var(--fs-xs);margin:0 0 8px;"></div>
                     <div class="checkbox-list" id="groupCheckboxes"></div>
                   </div>
 
                   <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;">
                     <div class="field">
                       <label for="msgData">Data do envio</label>
-                      <input id="msgData" type="date">
+                      <div style="display:flex;gap:6px;">
+                        <input id="msgData" type="date" style="flex:1;">
+                        <button class="btn btn-secondary" id="setTodayButton" type="button" style="white-space:nowrap;">Hoje</button>
+                      </div>
                     </div>
                     <div class="field">
                       <label for="msgInicio">Início</label>
@@ -177,7 +205,7 @@
       const STATUS_BADGE = { programado: "badge-info", enviada: "badge-success", parcial: "badge-warning", erro: "badge-danger" };
       const STATUS_LABEL = { programado: "Programado (fila)", enviada: "Enviada", parcial: "Parcial", erro: "Erro" };
 
-      const state = { groups: [] };
+      const state = { groups: [], organizations: [], selectedGroupIds: new Set() };
       const sentMessages = [];
 
 
@@ -199,12 +227,25 @@
         return new Date(`${dataEnvio}T${horaStr}:00`).toISOString();
       }
 
+      // Filtra por nome, parceiro (organização), classificação e envio de vídeo.
+      // A seleção fica guardada em state.selectedGroupIds (por id), não lida a
+      // partir dos checkboxes renderizados — assim trocar um filtro não derruba
+      // silenciosamente a seleção de um grupo que ficou fora da lista filtrada.
       function populateGroupCheckboxes() {
-        const checkedIds = new Set(selectedGroupIds());
         const query = document.getElementById("groupSearchInput").value.trim().toLowerCase();
-        const filteredGroups = query
-          ? state.groups.filter((g) => g.nome.toLowerCase().includes(query))
-          : state.groups;
+        const orgFilter = document.getElementById("groupOrgFilter").value;
+        const classFilter = document.getElementById("groupClassFilter").value;
+        const videoFilter = document.getElementById("groupVideoFilter").value;
+
+        const filteredGroups = state.groups.filter((g) => {
+          if (query && !g.nome.toLowerCase().includes(query)) return false;
+          if (orgFilter !== "todos" && g.organization_id !== orgFilter) return false;
+          if (classFilter === "classificados" && !g.segmento) return false;
+          if (classFilter === "nao-classificados" && g.segmento) return false;
+          if (videoFilter === "sim" && g.envia_video !== true) return false;
+          if (videoFilter === "nao" && g.envia_video === true) return false;
+          return true;
+        });
 
         if (!state.groups.length) {
           document.getElementById("groupCheckboxes").innerHTML = '<span class="text-faint">Nenhum grupo cadastrado.</span>';
@@ -215,15 +256,19 @@
           ? filteredGroups
               .map(
                 (g) =>
-                  `<label><input type="checkbox" value="${g.id}" class="group-check" ${checkedIds.has(g.id) ? "checked" : ""}> ${escapeHtml(g.nome)}${g.evolution_group_id ? "" : ' <span class="text-faint">(sem WhatsApp vinculado)</span>'}</label>`
+                  `<label><input type="checkbox" value="${g.id}" class="group-check" ${state.selectedGroupIds.has(g.id) ? "checked" : ""}> ${escapeHtml(g.nome)}${g.evolution_group_id ? "" : ' <span class="text-faint">(sem WhatsApp vinculado)</span>'}</label>`
               )
               .join("")
-          : '<span class="text-faint">Nenhum grupo encontrado para essa busca.</span>';
+          : '<span class="text-faint">Nenhum grupo encontrado para esses filtros.</span>';
         document.querySelectorAll(".group-check").forEach((cb) => cb.addEventListener("change", () => {
+          if (cb.checked) state.selectedGroupIds.add(cb.value);
+          else state.selectedGroupIds.delete(cb.value);
           updateSelectAllState();
+          renderSelectedGroupsSummary();
           updatePreview();
         }));
         updateSelectAllState();
+        renderSelectedGroupsSummary();
       }
 
       function updateSelectAllState() {
@@ -240,10 +285,25 @@
         selectAll.checked = checkboxes.every((cb) => cb.checked);
       }
 
+      // Mostra, logo abaixo de "Selecionar todos os grupos", quais grupos estão
+      // selecionados no momento — inclusive os que ficaram escondidos por causa
+      // de um filtro/busca aplicado depois da seleção.
+      function renderSelectedGroupsSummary() {
+        const names = selectedGroupNames();
+        const summary = document.getElementById("selectedGroupsSummary");
+
+        summary.textContent = names.length
+          ? `${names.length} selecionado(s): ${names.join(", ")}`
+          : "Nenhum grupo selecionado.";
+      }
+
       document.getElementById("selectAllGroups").addEventListener("change", (event) => {
         document.querySelectorAll(".group-check").forEach((cb) => {
           cb.checked = event.target.checked;
+          if (event.target.checked) state.selectedGroupIds.add(cb.value);
+          else state.selectedGroupIds.delete(cb.value);
         });
+        renderSelectedGroupsSummary();
         updatePreview();
       });
 
@@ -253,15 +313,45 @@
           .join("");
       }
 
+      // Preenche o filtro "Parceiro" só com organizações que de fato têm grupo
+      // elegível para disparo — evita opções que sempre dariam lista vazia.
+      function populateGroupOrgFilter() {
+        const select = document.getElementById("groupOrgFilter");
+        const previous = select.value || "todos";
+        const orgIdsWithGroups = new Set(state.groups.map((g) => g.organization_id).filter(Boolean));
+        const options = state.organizations.filter((org) => orgIdsWithGroups.has(org.id));
+
+        select.innerHTML =
+          '<option value="todos">Todos</option>' +
+          options.map((org) => `<option value="${escapeHtml(org.id)}">${escapeHtml(org.nome)}</option>`).join("");
+        select.value = [...select.options].some((option) => option.value === previous) ? previous : "todos";
+      }
+
       document.getElementById("groupSearchInput").addEventListener("input", populateGroupCheckboxes);
+      document.getElementById("groupOrgFilter").addEventListener("change", populateGroupCheckboxes);
+      document.getElementById("groupClassFilter").addEventListener("change", populateGroupCheckboxes);
+      document.getElementById("groupVideoFilter").addEventListener("change", populateGroupCheckboxes);
 
       function selectedGroupIds() {
-        return Array.from(document.querySelectorAll(".group-check:checked")).map((cb) => cb.value);
+        return Array.from(state.selectedGroupIds);
       }
 
       function selectedGroupNames() {
         return selectedGroupIds().map((id) => state.groups.find((g) => g.id === id)?.nome).filter(Boolean);
       }
+
+      function todayLocalDateString() {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      }
+
+      document.getElementById("setTodayButton").addEventListener("click", () => {
+        document.getElementById("msgData").value = todayLocalDateString();
+        updatePreview();
+      });
 
       function attachedMediaFile() {
         const files = document.getElementById("msgMidia").files;
@@ -396,7 +486,10 @@
         document.getElementById("msgTitulo").value = "";
         document.getElementById("msgTexto").value = "";
         document.getElementById("msgMidia").value = "";
+        state.selectedGroupIds.clear();
         document.querySelectorAll(".group-check:checked").forEach((cb) => (cb.checked = false));
+        updateSelectAllState();
+        renderSelectedGroupsSummary();
         updatePreview();
       }
 
@@ -526,7 +619,14 @@
           } catch (error) {
             document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(error.message)}</span>`;
           }
+          try {
+            const organizations = await requestJson("/organizations");
+            state.organizations = Array.isArray(organizations) ? organizations : [];
+          } catch (error) {
+            state.organizations = [];
+          }
           await loadScheduleDefaults();
+          populateGroupOrgFilter();
           populateGroupCheckboxes();
           populateTestGroupSelect();
           updatePreview();
