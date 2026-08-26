@@ -14,6 +14,11 @@
 > `campaigns.status`, `dispatch_logs.retry_count`) e colunas já removidas
 > (`trilhas.organization_id`, e as colunas legadas de trilha em `video_catalog`:
 > `macrotema`, `trilha`, `ordem`, `perfil_da_jornada`).
+>
+> **Atualizado em 26/08/2026:** incluída a tabela `app_users` (migration
+> `202608100001`), que guarda os logins do painel administrativo e não
+> constava no diagrama nem na lista acima. As demais tabelas listadas como
+> não documentadas continuam pendentes.
 
 ## 1. Visão Geral
 
@@ -234,7 +239,19 @@ erDiagram
         text nome
         timestamptz created_at
     }
+
+    APP_USERS {
+        uuid id PK
+        text username
+        text password_hash
+        boolean active
+        timestamptz created_at
+        timestamptz updated_at
+        timestamptz last_login_at
+    }
 ```
+
+`app_users` não tem relacionamento com nenhuma outra tabela — é uma tabela isolada, usada apenas pelo gate de autenticação do painel (login/senha de quem acessa a aplicação), sem FK de/para o restante do schema. Por isso não aparece com setas no diagrama acima.
 
 ## 3. Descrição das Tabelas
 
@@ -256,6 +273,7 @@ erDiagram
 | `group_whatsapp_instances` | Relaciona grupos de WhatsApp com as instâncias que os identificaram. |
 | `settings` | Centraliza parâmetros operacionais, como indexação do Drive, fuso, regras de envio e agentes de IA. |
 | `group_profiles` | Lista perfis usados para classificar grupos e apoiar regras de trilhas. |
+| `app_users` | Logins do painel administrativo (usuário/senha), separados dos dados de operação. |
 
 ## 4. Principais Regras de Modelagem
 
@@ -284,6 +302,10 @@ Antes do envio real, o sistema cria registros em `logs`. Esses registros represe
 ### WhatsApp e Evolution API
 
 `whatsapp_instances` representa as instâncias conectadas à Evolution API. `group_whatsapp_instances` registra quais grupos foram encontrados por cada instância, permitindo controle de disponibilidade, rotação e rastreabilidade.
+
+### Autenticação do painel
+
+`app_users` guarda os logins de quem acessa o painel administrativo (não confundir com `organizations`/clientes B2B). Cada linha tem `username`, `password_hash` (hash, nunca senha em texto puro) e `active` para desativar um acesso sem apagar o histórico. A tabela tem RLS habilitada e nenhuma policy criada — só a `service_role` key (usada pelo backend) consegue lê-la ou escrevê-la; a `anon` key nunca enxerga usuários nem hashes.
 
 ## 5. Fluxo Simplificado de Envio
 
