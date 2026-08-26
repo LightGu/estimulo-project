@@ -97,13 +97,6 @@ function createApp(dependencies = {}) {
   app.get("/access/status", authGate.statusHandler);
   app.post("/access/login", authGate.loginHandler);
   app.post("/access/logout", authGate.logoutHandler);
-  // Publica de proposito: qualquer pessoa que souber a senha mestra
-  // (ESTIMULO_ADMIN_MASTER_PASSWORD) consegue criar seu proprio login sem
-  // precisar de uma sessao previa - resolve o problema de "ninguem loga para
-  // criar o primeiro usuario" e permite autoatendimento para novas pessoas.
-  // masterPasswordGuard: sem ele a senha mestra ficava exposta a forca bruta
-  // ilimitada, ja que esta rota nao passa pelo authGate.
-  app.post("/access/register", authGate.masterPasswordGuard, appUsersController.create);
   app.use(authGate.middleware);
   // Nao existe public/index.html (so public/app/*) - sem isso, "/" com
   // sessao valida caia em "Cannot GET /" porque o static nao acha arquivo
@@ -281,7 +274,11 @@ function createApp(dependencies = {}) {
   app.get("/settings/whatsapp/rotation", whatsappInstancesController.getRotation);
   app.patch("/settings/whatsapp/rotation", whatsappInstancesController.updateRotation);
   app.get("/settings/app-users", appUsersController.list);
-  app.patch("/settings/app-users/:id", authGate.masterPasswordGuard, appUsersController.setActive);
+  // Criar ou (des)ativar login exige is_admin=true na conta de quem esta logado
+  // (checado por requireAdmin a partir da sessao) - substitui a antiga senha
+  // mestra compartilhada por uma permissao rastreavel a uma pessoa.
+  app.post("/settings/app-users", authGate.requireAdmin, appUsersController.create);
+  app.patch("/settings/app-users/:id", authGate.requireAdmin, appUsersController.setActive);
   app.get("/group-profiles", groupProfilesController.list);
   app.post("/group-profiles", groupProfilesController.create);
   app.get("/group-profiles/merges", groupProfilesController.listMerges);

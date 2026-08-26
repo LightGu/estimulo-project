@@ -36,6 +36,7 @@ function createSessionStore(options = {}) {
           sessions.set(token, {
             userId: session.userId,
             username: session.username,
+            isAdmin: Boolean(session.isAdmin),
             expiresAt,
           });
         }
@@ -58,6 +59,7 @@ function createSessionStore(options = {}) {
         payload.sessions[token] = {
           userId: session.userId,
           username: session.username,
+          isAdmin: Boolean(session.isAdmin),
           expiresAt: new Date(session.expiresAt).toISOString(),
         };
       }
@@ -75,7 +77,7 @@ function createSessionStore(options = {}) {
     const token = crypto.randomBytes(TOKEN_BYTES).toString("hex");
     const expiresAt = Date.now() + ttlMs;
 
-    sessions.set(token, { userId: user.id, username: user.username, expiresAt });
+    sessions.set(token, { userId: user.id, username: user.username, isAdmin: Boolean(user.is_admin), expiresAt });
     saveState();
 
     return { token, expiresAt };

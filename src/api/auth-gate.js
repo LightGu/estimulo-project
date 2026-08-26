@@ -95,12 +95,6 @@ function createAuthGate(options = {}) {
   })();
   const sessionStore = options.sessionStore || createSessionStore(options.sessionStoreOptions || {});
   const rateLimiter = options.rateLimiter || createLoginRateLimiter(options.rateLimiterOptions || {});
-  // Limitador separado do de login: as rotas de senha mestra tem sua propria
-  // contagem, para uma tentativa de login errada nao bloquear o cadastro (e
-  // vice-versa) e para os testes poderem afinar um sem mexer no outro.
-  const masterPasswordLimiter =
-    options.masterPasswordRateLimiter ||
-    createLoginRateLimiter(options.masterPasswordRateLimiterOptions || {});
 
   function getClientIp(req) {
     const forwardedFor = req.headers["x-forwarded-for"];
@@ -148,7 +142,7 @@ function createAuthGate(options = {}) {
     res.set("Cache-Control", "no-store");
 
     if (!enabled) {
-      res.json({ required: false, authorized: true, username: null, expires_at: null });
+      res.json({ required: false, authorized: true, username: null, is_admin: true, expires_at: null });
       return;
     }
 
@@ -157,6 +151,7 @@ function createAuthGate(options = {}) {
       required: true,
       authorized: Boolean(session),
       username: session ? session.username : null,
+      is_admin: session ? Boolean(session.isAdmin) : null,
       expires_at: session ? new Date(session.expiresAt).toISOString() : null,
     });
   }
@@ -229,6 +224,7 @@ function createAuthGate(options = {}) {
       authorized: true,
       required: true,
       username: user.username,
+      is_admin: Boolean(user.is_admin),
       expires_at: new Date(expiresAt).toISOString(),
     });
   }
@@ -254,7 +250,7 @@ function createAuthGate(options = {}) {
 
     const session = getSession(req);
     if (session) {
-      req.user = { id: session.userId, username: session.username };
+      req.user = { id: session.userId, username: session.username, isAdmin: Boolean(session.isAdmin) };
       next();
       return;
     }
@@ -277,40 +273,22 @@ function createAuthGate(options = {}) {
     });
   }
 
-  // POST /access/register e' publico de proposito (auto-cadastro sabendo a senha
-  // mestra), mas sem limite de tentativas a senha mestra - um unico segredo
-  // compartilhado - podia ser varrida por forca bruta na velocidade da rede, e
-  // acertar da acesso total ao painel, inclusive ao disparo para os grupos.
-  // Este guard aplica ao endpoint a mesma politica exponencial do login.
-  function masterPasswordGuard(req, res, next) {
+  // Substitui a antiga senha mestra compartilhada (ESTIMULO_ADMIN_MASTER_PASSWORD):
+  // criar ou (des)ativar outro login agora exige que a PROPRIA conta logada
+  // tenha is_admin=true. Isso torna a acao rastreavel a uma pessoa especifica
+  // em vez de um segredo unico que qualquer um com acesso ao painel conhecia.
+  // Com o authGate desligado (enabled=false, usado em testes/dev sem login),
+  // deixa passar - mesmo comportamento que os demais guards deste arquivo.
+  function requireAdmin(req, res, next) {
     if (!enabled) {
       next();
       return;
     }
 
-    const key = `master:${getClientIp(req)}`;
-    const status = masterPasswordLimiter.check(key);
-
-    if (status.blocked) {
-      const retryAfterSeconds = Math.ceil((status.retryAfterMs || 0) / 1000);
-      res.set("Retry-After", String(retryAfterSeconds));
-      res.status(429).json({
-        error: "Muitas tentativas. Aguarde antes de tentar novamente.",
-        code: "TOO_MANY_ATTEMPTS",
-        retry_after_seconds: retryAfterSeconds,
-      });
+    if (!req.user || !req.user.isAdmin) {
+      res.status(403).json({ error: "Apenas administradores podem gerenciar logins do painel." });
       return;
     }
-
-    // O acerto/erro da senha mestra so e' conhecido depois que o controller
-    // responde (403 = senha errada), dai a contagem acontecer no finish.
-    res.on("finish", () => {
-      if (res.statusCode === 403) {
-        masterPasswordLimiter.registerFailure(key);
-      } else if (res.statusCode >= 200 && res.statusCode < 300) {
-        masterPasswordLimiter.registerSuccess(key);
-      }
-    });
 
     next();
   }
@@ -320,7 +298,7 @@ function createAuthGate(options = {}) {
     statusHandler,
     loginHandler,
     logoutHandler,
-    masterPasswordGuard,
+    requireAdmin,
     middleware,
   };
 }

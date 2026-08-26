@@ -48,7 +48,7 @@ async function authenticate({ username, password }, deps = {}) {
   return sanitizeUser(user);
 }
 
-async function createUser({ username, password, active = true }, deps = {}) {
+async function createUser({ username, password, active = true, is_admin = false }, deps = {}) {
   const repository = deps.appUsersRepository || appUsersRepositoryDefault;
   const normalizedUsername = normalizeUsername(username);
 
@@ -62,6 +62,7 @@ async function createUser({ username, password, active = true }, deps = {}) {
     username: normalizedUsername,
     password_hash: hashPassword(password),
     active,
+    is_admin: Boolean(is_admin),
   });
 
   return sanitizeUser(user);
@@ -86,10 +87,17 @@ async function setActive(id, active, deps = {}) {
   return sanitizeUser(user);
 }
 
+async function setAdmin(id, isAdmin, deps = {}) {
+  const repository = deps.appUsersRepository || appUsersRepositoryDefault;
+  const user = await repository.update(id, { is_admin: Boolean(isAdmin) });
+  return sanitizeUser(user);
+}
+
 module.exports = {
   authenticate,
   createUser,
   listUsers,
   setActive,
+  setAdmin,
   updatePassword,
 };

@@ -245,6 +245,7 @@ erDiagram
         text username
         text password_hash
         boolean active
+        boolean is_admin
         timestamptz created_at
         timestamptz updated_at
         timestamptz last_login_at
@@ -306,6 +307,8 @@ Antes do envio real, o sistema cria registros em `logs`. Esses registros represe
 ### Autenticação do painel
 
 `app_users` guarda os logins de quem acessa o painel administrativo (não confundir com `organizations`/clientes B2B). Cada linha tem `username`, `password_hash` (hash, nunca senha em texto puro) e `active` para desativar um acesso sem apagar o histórico. A tabela tem RLS habilitada e nenhuma policy criada — só a `service_role` key (usada pelo backend) consegue lê-la ou escrevê-la; a `anon` key nunca enxerga usuários nem hashes.
+
+`is_admin` (migration `202608260001`) marca quem pode criar ou (des)ativar outros logins pela tela de Configurações. Substituiu a antiga senha mestra única compartilhada (`ESTIMULO_ADMIN_MASTER_PASSWORD`, removida do código): a permissão agora fica atrelada à sessão de uma conta específica, não a um segredo que qualquer pessoa com acesso ao painel conhecia.
 
 ## 5. Fluxo Simplificado de Envio
 

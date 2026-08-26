@@ -1,14 +1,18 @@
 // Gerencia contas de login do painel (tabela app_users no Supabase).
 //
 // Uso:
-//   node scripts/manage-app-user.js create <usuario> <senha>
+//   node scripts/manage-app-user.js create <usuario> <senha> [--admin]
 //   node scripts/manage-app-user.js set-password <usuario> <nova-senha>
 //   node scripts/manage-app-user.js activate <usuario>
 //   node scripts/manage-app-user.js deactivate <usuario>
+//   node scripts/manage-app-user.js make-admin <usuario>
+//   node scripts/manage-app-user.js revoke-admin <usuario>
 //   node scripts/manage-app-user.js list
 //
-// Esta e' a forma "facil de adicionar outro login" pedida: nao existe UI de
-// cadastro de usuarios ainda, entao criar/gerenciar contas passa por aqui.
+// Existe UI para tudo isso em Configuracoes -> Usuarios do painel, mas so
+// para quem ja tem uma conta is_admin=true. Este script continua sendo o
+// caminho de bootstrap: criar/promover o primeiro admin quando ainda nao
+// existe nenhum (ou recuperar acesso se todos os admins forem desativados).
 require("dotenv").config({ quiet: true });
 
 const authService = require("../src/services/auth.service");
@@ -16,10 +20,12 @@ const appUsersRepository = require("../src/repositories/app-users.repository");
 
 function printUsage() {
   console.log(`Uso:
-  node scripts/manage-app-user.js create <usuario> <senha>
+  node scripts/manage-app-user.js create <usuario> <senha> [--admin]
   node scripts/manage-app-user.js set-password <usuario> <nova-senha>
   node scripts/manage-app-user.js activate <usuario>
   node scripts/manage-app-user.js deactivate <usuario>
+  node scripts/manage-app-user.js make-admin <usuario>
+  node scripts/manage-app-user.js revoke-admin <usuario>
   node scripts/manage-app-user.js list`);
 }
 
@@ -41,15 +47,16 @@ async function main() {
   }
 
   if (action === "create") {
-    const [username, password] = args;
+    const [username, password, ...rest] = args;
+    const isAdmin = rest.includes("--admin");
     if (!username || !password) {
       printUsage();
       process.exitCode = 1;
       return;
     }
 
-    const user = await authService.createUser({ username, password });
-    console.log(`Usuario criado: ${user.username} (id ${user.id})`);
+    const user = await authService.createUser({ username, password, is_admin: isAdmin });
+    console.log(`Usuario criado: ${user.username} (id ${user.id})${isAdmin ? " [admin]" : ""}`);
     return;
   }
 
@@ -81,6 +88,20 @@ async function main() {
     return;
   }
 
+  if (action === "make-admin" || action === "revoke-admin") {
+    const [username] = args;
+    if (!username) {
+      printUsage();
+      process.exitCode = 1;
+      return;
+    }
+
+    const existing = await findUserOrFail(username);
+    await authService.setAdmin(existing.id, action === "make-admin");
+    console.log(`Usuario "${existing.username}" ${action === "make-admin" ? "agora e admin" : "deixou de ser admin"}.`);
+    return;
+  }
+
   if (action === "list") {
     const users = await authService.listUsers();
     if (!users.length) {
@@ -90,8 +111,9 @@ async function main() {
 
     users.forEach((user) => {
       const status = user.active ? "ativo" : "inativo";
+      const admin = user.is_admin ? "  [admin]" : "";
       const lastLogin = user.last_login_at ? new Date(user.last_login_at).toLocaleString("pt-BR") : "nunca";
-      console.log(`${user.username}  [${status}]  ultimo login: ${lastLogin}`);
+      console.log(`${user.username}  [${status}]${admin}  ultimo login: ${lastLogin}`);
     });
     return;
   }

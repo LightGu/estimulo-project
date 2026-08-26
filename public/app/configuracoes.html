@@ -251,20 +251,20 @@
             </div>
           </section>
 
-          <section class="page-section">
+          <section class="page-section" id="appUsersSection" hidden>
             <div class="card">
               <div class="card-header"><h3><span class="section-num">9.</span>Usuários do painel</h3></div>
               <div class="card-body">
-                <p class="text-muted" style="margin-bottom:14px;">Cada pessoa loga com seu próprio usuário e senha. Criar ou desativar um login exige a senha mestra (definida no servidor).</p>
+                <p class="text-muted" style="margin-bottom:14px;">Cada pessoa loga com seu próprio usuário e senha. Só quem tem conta de administrador vê esta seção e pode criar ou (des)ativar outros logins.</p>
                 <div class="table-wrap">
                   <table>
-                    <thead><tr><th>Usuário</th><th>Status</th><th>Criado em</th><th>Último login</th><th>Ações</th></tr></thead>
+                    <thead><tr><th>Usuário</th><th>Status</th><th>Admin</th><th>Criado em</th><th>Último login</th><th>Ações</th></tr></thead>
                     <tbody id="appUsersBody"></tbody>
                   </table>
                 </div>
                 <div class="divider" style="margin:16px 0;"></div>
                 <p class="text-muted" style="margin-bottom:10px;">Novo login</p>
-                <div class="field-row" style="grid-template-columns:1fr 1fr 1fr;">
+                <div class="field-row" style="grid-template-columns:1fr 1fr;">
                   <div class="field">
                     <label for="newAppUsername">Usuário</label>
                     <input id="newAppUsername" type="text" autocomplete="off">
@@ -273,11 +273,11 @@
                     <label for="newAppPassword">Senha (mín. 8 caracteres)</label>
                     <input id="newAppPassword" type="password" autocomplete="new-password">
                   </div>
-                  <div class="field">
-                    <label for="newAppMasterPassword">Senha mestra</label>
-                    <input id="newAppMasterPassword" type="password" autocomplete="off">
-                  </div>
                 </div>
+                <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+                  <input type="checkbox" id="newAppIsAdmin">
+                  Tornar administrador (pode criar e (des)ativar outros logins)
+                </label>
               </div>
               <div class="modal-footer">
                 <span class="text-muted" id="appUsersStatus" style="margin-right:auto;"></span>
@@ -1695,6 +1695,7 @@
           <tr>
             <td class="strong">${escapeHtml(user.username)}</td>
             <td><span class="badge ${user.active ? "badge-success" : "badge-danger"}">${user.active ? "Ativo" : "Desativado"}</span></td>
+            <td>${user.is_admin ? '<span class="badge badge-info">Admin</span>' : '<span class="text-faint">-</span>'}</td>
             <td>${escapeHtml(formatAppUserDate(user.created_at))}</td>
             <td>${escapeHtml(formatAppUserDate(user.last_login_at))}</td>
             <td><button class="btn btn-secondary btn-sm" data-toggle-app-user="${escapeHtml(user.id)}" data-active="${user.active ? "1" : "0"}">${user.active ? "Desativar" : "Ativar"}</button></td>
@@ -1722,17 +1723,17 @@
         const nextActive = button.getAttribute("data-active") !== "1";
         const actionLabel = nextActive ? "ativar" : "desativar";
 
-        const masterPassword = await window.estimuloPrompt(`Senha mestra para ${actionLabel} este login:`, {
+        const confirmed = await window.estimuloConfirm(`Confirma ${actionLabel} este login?`, {
           title: nextActive ? "Ativar login" : "Desativar login",
         });
-        if (masterPassword === null || masterPassword === "") return;
+        if (!confirmed) return;
 
         setAppUsersStatus(`${nextActive ? "Ativando" : "Desativando"}…`);
         try {
           const response = await fetch(`/settings/app-users/${encodeURIComponent(userId)}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ active: nextActive, master_password: masterPassword }),
+            body: JSON.stringify({ active: nextActive }),
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error || "Falha ao atualizar login");
@@ -1747,11 +1748,11 @@
       document.getElementById("addAppUserButton").addEventListener("click", async () => {
         const usernameInput = document.getElementById("newAppUsername");
         const passwordInput = document.getElementById("newAppPassword");
-        const masterPasswordInput = document.getElementById("newAppMasterPassword");
+        const isAdminInput = document.getElementById("newAppIsAdmin");
 
         const username = usernameInput.value.trim();
         const password = passwordInput.value;
-        const masterPassword = masterPasswordInput.value;
+        const isAdmin = isAdminInput.checked;
 
         if (!username || !password) {
           setAppUsersStatus("Informe usuário e senha.", "var(--danger)");
@@ -1760,16 +1761,16 @@
 
         setAppUsersStatus("Criando login…");
         try {
-          const response = await fetch("/access/register", {
+          const response = await fetch("/settings/app-users", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username, password, master_password: masterPassword }),
+            body: JSON.stringify({ username, password, is_admin: isAdmin }),
           });
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error || "Falha ao criar login");
           usernameInput.value = "";
           passwordInput.value = "";
-          masterPasswordInput.value = "";
+          isAdminInput.checked = false;
           setAppUsersStatus("Login criado.", "var(--success)");
           await loadAppUsers();
         } catch (error) {
@@ -1778,7 +1779,22 @@
         setTimeout(() => setAppUsersStatus(""), 3000);
       });
 
-      initialLoadPromises.push(loadAppUsers());
+      // Secao inteira (lista + criacao) so aparece para quem tem is_admin=true
+      // na propria sessao - substitui a antiga senha mestra compartilhada.
+      async function initAppUsersSection() {
+        try {
+          const response = await fetch("/access/status", { cache: "no-store" });
+          const status = await response.json();
+          if (!status.is_admin) return;
+
+          document.getElementById("appUsersSection").hidden = false;
+          await loadAppUsers();
+        } catch (error) {
+          // Sem acesso a /access/status, mantem a secao oculta por seguranca.
+        }
+      }
+
+      initialLoadPromises.push(initAppUsersSection());
 
       Promise.allSettled(initialLoadPromises).finally(() => window.estimuloHideLoading());
     </script>
