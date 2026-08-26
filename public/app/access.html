@@ -95,51 +95,7 @@
           <p class="access-error" id="accessError" role="alert" hidden></p>
         </form>
 
-        <p style="margin-top:14px;">
-          <button type="button" id="toggleRegisterButton" class="btn-link" style="background:none;border:none;padding:0;color:var(--accent);cursor:pointer;font:inherit;text-decoration:underline;">Criar um login novo</button>
-        </p>
-
-        <form id="registerForm" class="access-form" hidden>
-          <div class="field">
-            <label for="registerUsername">Novo usuario</label>
-            <input id="registerUsername" name="username" type="text" autocomplete="username">
-          </div>
-          <div class="field">
-            <label for="registerPassword">Nova senha (min. 8 caracteres)</label>
-            <div class="password-field">
-              <input id="registerPassword" name="password" type="password" autocomplete="new-password">
-              <button type="button" class="password-toggle" data-target="registerPassword" aria-label="Mostrar senha" aria-pressed="false">
-                <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path>
-                  <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-                <svg class="icon-eye-off is-hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.7 19.7 0 0 1 4.22-5.77M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a19.6 19.6 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                  <line x1="1" y1="1" x2="23" y2="23"></line>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <div class="field">
-            <label for="registerMasterPassword">Senha mestra</label>
-            <div class="password-field">
-              <input id="registerMasterPassword" name="master_password" type="password" autocomplete="off">
-              <button type="button" class="password-toggle" data-target="registerMasterPassword" aria-label="Mostrar senha" aria-pressed="false">
-                <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path>
-                  <circle cx="12" cy="12" r="3"></circle>
-                </svg>
-                <svg class="icon-eye-off is-hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                  <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a19.7 19.7 0 0 1 4.22-5.77M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 8 11 8a19.6 19.6 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                  <line x1="1" y1="1" x2="23" y2="23"></line>
-                </svg>
-              </button>
-            </div>
-          </div>
-          <button class="btn" type="submit" id="registerButton">Criar login</button>
-          <p class="access-error" id="registerError" role="alert" hidden></p>
-          <p class="access-error" id="registerSuccess" role="status" hidden style="color:var(--success);"></p>
-        </form>
+        <p class="text-faint" style="margin-top:14px;font-size: var(--fs-sm);">Não tem login? Peça a um administrador do painel para criar sua conta em Configurações → Usuários do painel.</p>
       </section>
     </main>
 
@@ -249,69 +205,6 @@
           });
         });
 
-        const toggleRegisterButton = document.getElementById("toggleRegisterButton");
-        const registerForm = document.getElementById("registerForm");
-        const registerUsernameInput = document.getElementById("registerUsername");
-        const registerPasswordInput = document.getElementById("registerPassword");
-        const registerMasterPasswordInput = document.getElementById("registerMasterPassword");
-        const registerButton = document.getElementById("registerButton");
-        const registerErrorEl = document.getElementById("registerError");
-        const registerSuccessEl = document.getElementById("registerSuccess");
-
-        // .access-form tem "display: grid" no CSS, que tem prioridade sobre o
-        // estilo padrao do atributo [hidden] ("display: none") - por isso o
-        // toggle usa style.display explicitamente em vez de .hidden.
-        registerForm.style.display = "none";
-
-        toggleRegisterButton.addEventListener("click", () => {
-          const showingRegister = registerForm.style.display !== "none";
-          registerForm.style.display = showingRegister ? "none" : "grid";
-          form.style.display = showingRegister ? "grid" : "none";
-          toggleRegisterButton.textContent = showingRegister ? "Criar um login novo" : "Já tenho login, entrar";
-        });
-
-        registerForm.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          registerErrorEl.hidden = true;
-          registerSuccessEl.hidden = true;
-          registerButton.disabled = true;
-          registerButton.textContent = "Criando...";
-
-          try {
-            const response = await fetch(apiUrl("/access/register"), {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                username: registerUsernameInput.value,
-                password: registerPasswordInput.value,
-                master_password: registerMasterPasswordInput.value,
-              }),
-            });
-            const payload = await response.json().catch(() => ({}));
-
-            if (!response.ok) {
-              throw new Error(payload.error || "Nao foi possivel criar o login.");
-            }
-
-            registerSuccessEl.textContent = `Login "${payload.username}" criado. Voce ja pode entrar.`;
-            registerSuccessEl.hidden = false;
-            usernameInput.value = payload.username;
-            registerForm.reset();
-            setTimeout(() => {
-              registerForm.style.display = "none";
-              form.style.display = "grid";
-              toggleRegisterButton.textContent = "Criar um login novo";
-              input.focus();
-            }, 1500);
-          } catch (error) {
-            registerErrorEl.textContent = error.message;
-            registerErrorEl.hidden = false;
-          } finally {
-            registerButton.disabled = false;
-            registerButton.textContent = "Criar login";
-          }
-        });
       })();
     </script>
   </body>

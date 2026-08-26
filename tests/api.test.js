@@ -925,34 +925,28 @@ async function main() {
     const missingGroupProgressResponse = await fetch(`http://127.0.0.1:${port}/groups/group-missing/video-progress`);
     assert.equal(missingGroupProgressResponse.status, 404);
 
-    process.env.ESTIMULO_ADMIN_MASTER_PASSWORD = "!35Estimulo@246";
-
     const listAppUsersResponse = await fetch(`http://127.0.0.1:${port}/settings/app-users`);
     assert.equal(listAppUsersResponse.status, 200);
     const appUsersPayload = await listAppUsersResponse.json();
     assert.equal(appUsersPayload[0].username, "operador");
     assert.equal(appUsersPayload[0].password_hash, undefined);
 
-    // /access/register fica fora do authGate de proposito: qualquer um pode
-    // criar seu proprio login sabendo so a senha mestra, sem sessao previa.
-    const wrongMasterPasswordResponse = await fetch(`http://127.0.0.1:${port}/access/register`, {
+    // Criar/(des)ativar login agora exige is_admin=true na sessao de quem
+    // chama (authGate.requireAdmin) em vez da antiga senha mestra
+    // compartilhada. Esta suite roda com authGate.enabled=false, entao
+    // requireAdmin deixa passar - a cobertura do bloqueio 403 para uma sessao
+    // nao-admin fica em tests/app-users-admin-gate.test.js.
+    const duplicateAppUserResponse = await fetch(`http://127.0.0.1:${port}/settings/app-users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "novo", password: "senhaforte1", master_password: "errada" }),
-    });
-    assert.equal(wrongMasterPasswordResponse.status, 403);
-
-    const duplicateAppUserResponse = await fetch(`http://127.0.0.1:${port}/access/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "operador", password: "senhaforte1", master_password: "!35Estimulo@246" }),
+      body: JSON.stringify({ username: "operador", password: "senhaforte1" }),
     });
     assert.equal(duplicateAppUserResponse.status, 409);
 
-    const createAppUserResponse = await fetch(`http://127.0.0.1:${port}/access/register`, {
+    const createAppUserResponse = await fetch(`http://127.0.0.1:${port}/settings/app-users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "novo", password: "senhaforte1", master_password: "!35Estimulo@246" }),
+      body: JSON.stringify({ username: "novo", password: "senhaforte1" }),
     });
     assert.equal(createAppUserResponse.status, 201);
     const createAppUserPayload = await createAppUserResponse.json();
@@ -961,7 +955,7 @@ async function main() {
     const deactivateAppUserResponse = await fetch(`http://127.0.0.1:${port}/settings/app-users/app-user-1`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: false, master_password: "!35Estimulo@246" }),
+      body: JSON.stringify({ active: false }),
     });
     assert.equal(deactivateAppUserResponse.status, 200);
     const deactivateAppUserPayload = await deactivateAppUserResponse.json();
