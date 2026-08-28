@@ -81,7 +81,7 @@ function createTrilhasService(dependencies = {}) {
 
     return trilhas
       .map((trilha) => {
-        const links = (linksByTrilha.get(trilha.id) || []).sort((left, right) => (left.ordem ?? 0) - (right.ordem ?? 0));
+        const links = (linksByTrilha.get(trilha.id) || []).sort((left, right) => (left.ordem ?? Number.MAX_SAFE_INTEGER) - (right.ordem ?? Number.MAX_SAFE_INTEGER));
         const videos = links
           .map((link) => {
             const video = videosById.get(link.video_id);
@@ -438,6 +438,23 @@ function createTrilhasService(dependencies = {}) {
 
     if (!Array.isArray(orderedVideoIds) || orderedVideoIds.length === 0) {
       throw new Error("orderedVideoIds is required");
+    }
+
+    // Confere que a lista enviada e' exatamente o conjunto atual de videos da
+    // trilha (mesmo tamanho, sem repetidos, sem sobra) antes de gravar. Sem
+    // isso, uma lista parcial (aba desatualizada, video adicionado por outra
+    // pessoa entre o carregamento da tela e o drop) deixa os videos de fora
+    // com o "ordem" antigo, que pode colidir com os novos valores 1..N.
+    const currentLinks = await repository.listVideoLinksByTrilha(trilha.id);
+    const currentIds = new Set(currentLinks.map((link) => link.video_id));
+    const providedIds = new Set(orderedVideoIds);
+
+    if (
+      providedIds.size !== orderedVideoIds.length ||
+      providedIds.size !== currentIds.size ||
+      orderedVideoIds.some((id) => !currentIds.has(id))
+    ) {
+      throw new Error("orderedVideoIds must match exactly the trilha's current videos");
     }
 
     return repository.reorderVideosWithinTrilha(trilha.id, orderedVideoIds);

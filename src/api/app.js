@@ -279,6 +279,7 @@ function createApp(dependencies = {}) {
   // mestra compartilhada por uma permissao rastreavel a uma pessoa.
   app.post("/settings/app-users", authGate.requireAdmin, appUsersController.create);
   app.patch("/settings/app-users/:id", authGate.requireAdmin, appUsersController.setActive);
+  app.delete("/settings/app-users/:id", authGate.requireAdmin, appUsersController.remove);
   app.get("/group-profiles", groupProfilesController.list);
   app.post("/group-profiles", groupProfilesController.create);
   app.get("/group-profiles/merges", groupProfilesController.listMerges);

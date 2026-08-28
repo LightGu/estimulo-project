@@ -186,6 +186,10 @@
             <input id="newTrailNome" type="text" placeholder="Ex.: 2.3 Como Cuidar das Finanças">
           </div>
           <div class="field">
+            <label for="newTrailVideoSearch">Buscar vídeo</label>
+            <input id="newTrailVideoSearch" type="text" placeholder="Filtrar pelo nome do arquivo">
+          </div>
+          <div class="field">
             <label>Vídeos</label>
             <div class="unclassified-list" id="newTrailVideosList"></div>
           </div>
@@ -341,6 +345,12 @@
       let addSequenceTrilhaSetorMode = null;
       let newTrailReleaseTrap = null;
       let newVideoReleaseTrap = null;
+      // Guardados a parte (nao lidos direto do DOM no submit) porque a lista de
+      // videos e' refeita a cada tecla digitada na busca - sem isso, marcar um
+      // video e depois filtrar por outro nome desmarcava o primeiro (o
+      // checkbox dele saia do DOM junto com o resto da lista filtrada).
+      let newTrailSelectedVideoIds = new Set();
+      let newVideoSelectedVideoIds = new Set();
       let moveReleaseTrap = null;
       let renameReleaseTrap = null;
       let addSequenceTrilhaReleaseTrap = null;
@@ -539,7 +549,7 @@
           return;
         }
 
-        const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? 0) - (right.ordem ?? 0));
+        const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? Number.MAX_SAFE_INTEGER) - (right.ordem ?? Number.MAX_SAFE_INTEGER));
 
         document.getElementById("videosBody").innerHTML = sortedVideos
           .map(
@@ -658,7 +668,7 @@
       }
 
       function reorderVideoByStep(trail, videoId, delta) {
-        const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? 0) - (right.ordem ?? 0));
+        const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? Number.MAX_SAFE_INTEGER) - (right.ordem ?? Number.MAX_SAFE_INTEGER));
         const orderedIds = sortedVideos.map((v) => v.id);
         const fromIndex = orderedIds.indexOf(videoId);
         const toIndex = fromIndex + delta;
@@ -698,7 +708,7 @@
             const targetVideoId = row.dataset.videoId;
             if (!draggingVideoId || draggingVideoId === targetVideoId) return;
 
-            const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? 0) - (right.ordem ?? 0));
+            const sortedVideos = [...trail.videos].sort((left, right) => (left.ordem ?? Number.MAX_SAFE_INTEGER) - (right.ordem ?? Number.MAX_SAFE_INTEGER));
             const orderedIds = sortedVideos.map((v) => v.id);
             const fromIndex = orderedIds.indexOf(draggingVideoId);
             const toIndex = orderedIds.indexOf(targetVideoId);
@@ -1532,18 +1542,29 @@
           return;
         }
 
-        const newVideos = state.selectableVideos.filter((v) => !(v.trilhas || []).length);
-        const classifiedVideos = state.selectableVideos.filter((v) => (v.trilhas || []).length);
+        const search = document.getElementById("newTrailVideoSearch").value.trim().toLowerCase();
+        const filtered = state.selectableVideos.filter(
+          (v) => !search || String(v.nome_do_arquivo || "").toLowerCase().includes(search)
+        );
+
+        if (!filtered.length) {
+          list.innerHTML = '<div class="unclassified-item text-faint">Nenhum vídeo encontrado para esta busca.</div>';
+          return;
+        }
+
+        const newVideos = filtered.filter((v) => !(v.trilhas || []).length);
+        const classifiedVideos = filtered.filter((v) => (v.trilhas || []).length);
 
         function renderItem(v) {
           const existingTrilhas = (v.trilhas || []).map((t) => t.trilha).join(", ");
           const badge = existingTrilhas
             ? `<span class="text-faint already-in-trilha">Já em: ${escapeHtml(existingTrilhas)}</span>`
             : "";
+          const checked = newTrailSelectedVideoIds.has(v.id) ? "checked" : "";
 
           return `
             <label class="unclassified-item">
-              <input type="checkbox" value="${escapeHtml(v.id)}">
+              <input type="checkbox" value="${escapeHtml(v.id)}" ${checked}>
               <span class="mono">${escapeHtml(v.nome_do_arquivo)}</span>
               ${badge}
             </label>`;
@@ -1561,13 +1582,27 @@
         ].join("");
       }
 
+      document.getElementById("newTrailVideosList").addEventListener("change", (event) => {
+        const checkbox = event.target.closest('input[type="checkbox"]');
+        if (!checkbox) return;
+
+        if (checkbox.checked) {
+          newTrailSelectedVideoIds.add(checkbox.value);
+        } else {
+          newTrailSelectedVideoIds.delete(checkbox.value);
+        }
+      });
+      document.getElementById("newTrailVideoSearch").addEventListener("input", renderNewTrailVideosList);
+
       document.getElementById("newTrailButton").addEventListener("click", async () => {
         renderNewTrailPerfilCheckboxes();
         renderNewTrailMacrotemaSelect();
         document.getElementById("newTrailMacrotemaNovo").value = "";
         document.getElementById("newTrailNome").value = "";
+        document.getElementById("newTrailVideoSearch").value = "";
         document.getElementById("newTrailStatus").textContent = "";
         document.getElementById("newTrailStatus").className = "status-line";
+        newTrailSelectedVideoIds = new Set();
         renderNewTrailVideosList();
         newTrailOverlay.hidden = false;
         newTrailReleaseTrap = window.estimuloTrapFocus(newTrailOverlay);
@@ -1605,9 +1640,7 @@
             ? document.getElementById("newTrailMacrotemaNovo").value.trim()
             : macrotemaSelect;
         const trilha = document.getElementById("newTrailNome").value.trim();
-        const video_ids = Array.from(document.querySelectorAll("#newTrailVideosList input[type=checkbox]:checked")).map(
-          (input) => input.value
-        );
+        const video_ids = Array.from(newTrailSelectedVideoIds);
 
         if (!perfis.length || !macrotema || !trilha || !video_ids.length) {
           status.textContent = "Selecione ao menos um perfil, preencha macrotema, nome da trilha e selecione ao menos um vídeo.";
@@ -1675,10 +1708,11 @@
           const badge = existingTrilhas
             ? `<span class="text-faint already-in-trilha">Já em: ${escapeHtml(existingTrilhas)}</span>`
             : "";
+          const checked = newVideoSelectedVideoIds.has(v.id) ? "checked" : "";
 
           return `
             <label class="unclassified-item">
-              <input type="checkbox" data-new-video value="${escapeHtml(v.id)}">
+              <input type="checkbox" data-new-video value="${escapeHtml(v.id)}" ${checked}>
               <span class="mono">${escapeHtml(v.nome_do_arquivo)}</span>
               ${badge}
             </label>`;
@@ -1698,6 +1732,7 @@
 
       async function openNewVideo(trail) {
         newVideoTrail = trail;
+        newVideoSelectedVideoIds = new Set();
         document.getElementById("newVideoTrailLabel").textContent = `Trilha: ${trail.macrotema} · ${trail.trilha}`;
         document.getElementById("newVideoSearch").value = "";
         document.getElementById("newVideoStatusLine").textContent = "";
@@ -1719,6 +1754,16 @@
       }
 
       document.getElementById("newVideoSearch").addEventListener("input", renderNewVideoList);
+      document.getElementById("newVideoList").addEventListener("change", (event) => {
+        const checkbox = event.target.closest("[data-new-video]");
+        if (!checkbox) return;
+
+        if (checkbox.checked) {
+          newVideoSelectedVideoIds.add(checkbox.value);
+        } else {
+          newVideoSelectedVideoIds.delete(checkbox.value);
+        }
+      });
 
       function closeNewVideoOverlay() {
         newVideoOverlay.hidden = true;
@@ -1741,9 +1786,7 @@
 
         const button = document.getElementById("createVideoButton");
         const status = document.getElementById("newVideoStatusLine");
-        const videoIds = Array.from(document.querySelectorAll("[data-new-video]:checked")).map(
-          (input) => input.value
-        );
+        const videoIds = Array.from(newVideoSelectedVideoIds);
 
         if (!videoIds.length) {
           status.textContent = "Selecione ao menos um vídeo.";

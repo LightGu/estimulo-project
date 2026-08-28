@@ -15,7 +15,7 @@ const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-ins
 const defaultWhatsappInstancesService = require("./whatsapp-instances.service");
 const { formatAdHocCampaignName, formatDateOnlyInTimezone } = require("../utils/campaign-naming");
 
-const CLASSIFICACOES = ["evento", "credito", "pesquisa", "aviso", "outro"];
+const CLASSIFICACOES = ["evento", "credito", "pesquisa", "aviso", "capacitacao", "outro"];
 
 function normalizeGroupIds(payload = {}) {
   return Array.isArray(payload.group_ids) ? [...new Set(payload.group_ids.filter(Boolean))] : [];

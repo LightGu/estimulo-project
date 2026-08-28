@@ -1,13 +1,15 @@
 /*
   Regressao: resolveAdHocDispatchBlock consultava campanhas de video na janela
-  [agora, agora+1ms]. Uma campanha de video prestes a comecar (segundos a
-  frente) nao aparecia, e a mensagem pontual saia colada no inicio dela -
-  exatamente a disputa pela sessao unica do WhatsApp que dispatch-exclusivity
-  existe para evitar.
+  [agora, agora+1ms]. Uma campanha de video prestes a comecar (ou ja
+  "programada" pra daqui a pouco) nao aparecia, e a mensagem pontual saia por
+  cima dela - exatamente a disputa pela sessao unica do WhatsApp que
+  dispatch-exclusivity existe para evitar.
 
-  A consulta agora olha `resumeBufferMs` a frente, mantendo a regra simetrica:
-  se o pontual e' adiado ate `fim + buffer`, ele tambem nao deve sair no
-  `buffer` que antecede um inicio.
+  A consulta agora olha `lookAheadMs` (30min por padrao, DEFAULT_LOOKAHEAD_MS)
+  a frente do instante atual - independente do `resumeBufferMs` (que so
+  governa a folga depois que uma campanha JA EM ANDAMENTO termina). Campanhas
+  muito distantes (ex.: 1h+) continuam nao bloqueando de proposito, senao o
+  disparo pontual nunca sairia.
 */
 const assert = require("node:assert/strict");
 
@@ -66,6 +68,23 @@ async function testContinuaBloqueandoCampanhaEmAndamento() {
   assert.equal(block.campaign.id, "campanha-video-2");
 }
 
+// Campanha comecando 20min a frente: dentro do novo lookahead padrao de 30min.
+async function testBloqueiaCampanhaProgramadaDentroDoLookahead() {
+  const campaignsRepository = repositoryComCampanha({
+    id: "campanha-video-programada",
+    tipo: "video",
+    trilha: "Trilha Programada",
+    window_start: "2026-08-23T12:20:00.000Z",
+    window_end: "2026-08-23T13:00:00.000Z",
+  });
+
+  const block = await resolveAdHocDispatchBlock({ campaignsRepository, at: AGORA });
+
+  assert.ok(block, "campanha programada dentro do lookahead de 30min deve bloquear o pontual");
+  assert.equal(block.campaign.id, "campanha-video-programada");
+  assert.match(block.reason, /programada/);
+}
+
 // Campanha muito adiante (1h) nao pode bloquear: senao o pontual nunca sairia.
 async function testNaoBloqueiaCampanhaDistante() {
   const campaignsRepository = repositoryComCampanha({
@@ -99,6 +118,7 @@ async function testPontualNaoBloqueiaPontual() {
 async function main() {
   await testBloqueiaCampanhaPrestesAComecar();
   await testContinuaBloqueandoCampanhaEmAndamento();
+  await testBloqueiaCampanhaProgramadaDentroDoLookahead();
   await testNaoBloqueiaCampanhaDistante();
   await testPontualNaoBloqueiaPontual();
   console.log("dispatch exclusivity lookahead tests OK");

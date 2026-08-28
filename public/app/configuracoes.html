@@ -315,7 +315,8 @@
           <button class="icon-btn-close" id="qrCloseModal" type="button" aria-label="Fechar">&times;</button>
         </div>
         <div class="modal-body" style="text-align:center;">
-          <img id="qrImage" alt="QR Code" style="width:240px;height:240px;margin:0 auto 12px;">
+          <div id="qrLoadingSpinner" class="loading-overlay-spinner" style="border-color: var(--line-strong); border-top-color: var(--primary); margin: 20px auto;"></div>
+          <img id="qrImage" alt="QR Code" style="width:240px;height:240px;margin:0 auto 12px;" hidden>
           <div id="qrCountdown" style="font-size: var(--fs-3xl);font-weight:700;"></div>
           <div id="qrStatus" class="status-line"></div>
         </div>
@@ -732,9 +733,17 @@
       async function startQrFlow(instanceId) {
         const qrStatus = document.getElementById("qrStatus");
         const qrCountdown = document.getElementById("qrCountdown");
+        const qrLoadingSpinner = document.getElementById("qrLoadingSpinner");
+        const qrImage = document.getElementById("qrImage");
 
         document.getElementById("qrOverlay").hidden = false;
         qrReleaseTrap = window.estimuloTrapFocus(document.getElementById("qrOverlay"));
+        // O QR demora alguns segundos pra ser gerado (chamada real pra Evolution
+        // API) - sem o spinner, a modal ficava com um icone de imagem quebrada
+        // ali (o <img> sem src) ate a resposta chegar, parecendo travada/com erro.
+        qrLoadingSpinner.hidden = false;
+        qrImage.hidden = true;
+        qrImage.removeAttribute("src");
         qrStatus.textContent = "Gerando QR Code…";
         qrStatus.className = "status-line";
         qrCountdown.textContent = "";
@@ -744,12 +753,15 @@
           const qrData = await qrResponse.json();
 
           if (!qrResponse.ok) {
+            qrLoadingSpinner.hidden = true;
             qrStatus.textContent = qrData.error || "Falha ao gerar QR Code";
             qrStatus.className = "status-line error";
             return;
           }
 
-          document.getElementById("qrImage").src = qrData.qr_base64;
+          qrLoadingSpinner.hidden = true;
+          qrImage.src = qrData.qr_base64;
+          qrImage.hidden = false;
           qrStatus.textContent = "Escaneie com o WhatsApp em até 45 segundos.";
 
           let remaining = qrData.expires_in_seconds || 45;
@@ -1698,7 +1710,10 @@
             <td>${user.is_admin ? '<span class="badge badge-info">Admin</span>' : '<span class="text-faint">-</span>'}</td>
             <td>${escapeHtml(formatAppUserDate(user.created_at))}</td>
             <td>${escapeHtml(formatAppUserDate(user.last_login_at))}</td>
-            <td><button class="btn btn-secondary btn-sm" data-toggle-app-user="${escapeHtml(user.id)}" data-active="${user.active ? "1" : "0"}">${user.active ? "Desativar" : "Ativar"}</button></td>
+            <td style="display:flex; gap:6px;">
+              <button class="btn btn-secondary btn-sm" data-toggle-app-user="${escapeHtml(user.id)}" data-active="${user.active ? "1" : "0"}">${user.active ? "Desativar" : "Ativar"}</button>
+              <button class="btn btn-danger btn-sm" data-remove-app-user="${escapeHtml(user.id)}" data-username="${escapeHtml(user.username)}">Apagar</button>
+            </td>
           </tr>`
           )
           .join("");
@@ -1738,6 +1753,34 @@
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error || "Falha ao atualizar login");
           setAppUsersStatus("Login atualizado.", "var(--success)");
+          await loadAppUsers();
+        } catch (error) {
+          setAppUsersStatus(error.message, "var(--danger)");
+        }
+        setTimeout(() => setAppUsersStatus(""), 3000);
+      });
+
+      document.getElementById("appUsersBody").addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-remove-app-user]");
+        if (!button) return;
+
+        const userId = button.getAttribute("data-remove-app-user");
+        const username = button.getAttribute("data-username");
+
+        const confirmed = await window.estimuloConfirm(
+          `Apagar o login "${username}"? Essa ação não pode ser desfeita.`,
+          { title: "Apagar login", confirmLabel: "Apagar" }
+        );
+        if (!confirmed) return;
+
+        setAppUsersStatus("Apagando…");
+        try {
+          const response = await fetch(`/settings/app-users/${encodeURIComponent(userId)}`, {
+            method: "DELETE",
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao apagar login");
+          setAppUsersStatus("Login apagado.", "var(--success)");
           await loadAppUsers();
         } catch (error) {
           setAppUsersStatus(error.message, "var(--danger)");

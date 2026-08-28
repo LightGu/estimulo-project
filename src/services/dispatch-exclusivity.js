@@ -20,6 +20,12 @@ const AD_HOC_CAMPAIGN_TYPE = "pontual";
 
 // Folga depois do fim da janela da campanha de video antes de liberar o pontual.
 const DEFAULT_RESUME_BUFFER_MS = 60 * 1000;
+// Ate quanto tempo A FRENTE do agora uma campanha de video "programada" (que
+// ainda nem comecou) ja bloqueia o "Enviar Agora" do disparo pontual. E'
+// deliberadamente maior que DEFAULT_RESUME_BUFFER_MS e independente dele: o
+// resume buffer e' sobre a folga depois que uma campanha TERMINA, este e'
+// sobre o quanto antes de uma campanha COMECAR o pontual ja para de sair.
+const DEFAULT_LOOKAHEAD_MS = 30 * 60 * 1000; // 30 min
 // Teto de adiamentos por job. Sem ele, uma campanha de video que ficasse ativa
 // indefinidamente manteria o pontual quicando na fila para sempre, sem nunca
 // aparecer como problema no relatorio.
@@ -110,22 +116,25 @@ async function assertNoVideoCampaignInWindow(params = {}) {
 // Consultado pelo worker no momento exato do envio. Devolve `null` quando o
 // caminho esta livre, ou o motivo e o instante em que o job deve ser retomado.
 async function resolveAdHocDispatchBlock(params = {}) {
-  const { campaignsRepository, at = new Date(), resumeBufferMs = DEFAULT_RESUME_BUFFER_MS } = params;
+  const {
+    campaignsRepository,
+    at = new Date(),
+    resumeBufferMs = DEFAULT_RESUME_BUFFER_MS,
+    lookAheadMs: lookAheadMsParam = DEFAULT_LOOKAHEAD_MS,
+  } = params;
   const atTime = toTime(at);
 
   if (atTime === null) {
     return null;
   }
 
-  // Olha `resumeBufferMs` para a FRENTE, nao so o instante atual.
-  //
-  // Antes a consulta era [agora, agora+1ms]: uma campanha de video cuja janela
-  // comecava dali a alguns segundos nao aparecia, e a mensagem pontual saia
-  // colada no inicio dela - exatamente a disputa pela sessao do WhatsApp que
-  // este modulo existe para evitar. Usar o mesmo buffer que ja governa a
-  // retomada mantem a regra simetrica: se o pontual seria adiado ate
-  // `fim + buffer`, ele tambem nao deve sair no `buffer` que antecede um inicio.
-  const lookAheadMs = Number.isFinite(resumeBufferMs) && resumeBufferMs > 0 ? resumeBufferMs : 0;
+  // Olha `lookAheadMs` para a FRENTE, nao so o instante atual - sem isso uma
+  // campanha "programado" (ja confirmada, so ainda nao comecou) nao aparecia
+  // nesta consulta e o "Enviar Agora" saia por cima dela. `lookAheadMs` e'
+  // maior que o resumeBufferMs (usado so na folga apos o FIM de uma campanha)
+  // de proposito: aqui e' sobre o quanto de antecedencia o inicio de uma
+  // campanha ja bloqueia, nao sobre a retomada apos ela terminar.
+  const lookAheadMs = Number.isFinite(lookAheadMsParam) && lookAheadMsParam > 0 ? lookAheadMsParam : 0;
   const inFlight = await listOverlappingVideoCampaigns({
     campaignsRepository,
     windowStart: new Date(atTime).toISOString(),
@@ -142,16 +151,20 @@ async function resolveAdHocDispatchBlock(params = {}) {
     return end !== null && end > accumulator ? end : accumulator;
   }, atTime);
 
+  const firstStart = toTime(inFlight[0].window_start);
+  const statusLabel = firstStart !== null && firstStart > atTime ? "programada" : "em andamento";
+
   return {
     campaign: inFlight[0],
     campaigns: inFlight,
     resumeAt: new Date(latestEnd + resumeBufferMs),
-    reason: `campanha de video "${inFlight[0].trilha}" em andamento`,
+    reason: `campanha de video "${inFlight[0].trilha}" ${statusLabel}`,
   };
 }
 
 module.exports = {
   AD_HOC_CAMPAIGN_TYPE,
+  DEFAULT_LOOKAHEAD_MS,
   DEFAULT_MAX_POSTPONEMENTS,
   DEFAULT_RESUME_BUFFER_MS,
   assertNoVideoCampaignInWindow,

@@ -254,6 +254,7 @@ function createTrilhasController(dependencies = {}) {
       "Profile id is required",
       "At least one field is required",
       "orderedVideoIds is required",
+      "orderedVideoIds must match exactly the trilha's current videos",
       "orderedTrilhaIds is required",
       "orderedTrilhaIds must include every trilha currently in this profile's sequence",
       "Trilha is not part of this profile's sequence",

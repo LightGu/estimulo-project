@@ -1,3 +1,77 @@
+/* Logo animada: as 8 pecas (3 arcos + 1 traco + 4 bolinhas de ponta) se soltam
+   e ficam flutuando (loop) enquanto o mouse esta em cima, e se juntam de novo
+   ao soltar. Sem JS: no hover a regra de baixo troca a "animation-name" de
+   cada peca para seu proprio @keyframes.
+
+   Cada @keyframes comeca E termina em transform:none (repouso) - por isso
+   entrar no hover nunca da salto: a animacao "nasce" exatamente de onde a peca
+   ja estava. Um animation-delay positivo (nao negativo) so atrasa esse
+   nascimento pra cada peca se soltar em um instante levemente diferente, sem
+   pular pro meio do movimento. Ao sair do hover, a "animation-name" para de
+   valer e quem assume e' o "transition" (unica coisa que continua ativa),
+   que anima suavemente da posicao atual - flutuante ou nao - de volta para
+   transform:none. Durations diferentes por peca fazem elas se dessincronizar
+   sozinhas depois do primeiro ciclo, sem precisar de mais nenhum truque. */
+.logo-mark > * {
+  transition: transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: center;
+}
+
+.logo-mark:hover > * {
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+
+.logo-mark:hover .lm-1 { animation-name: lm-float-1; animation-duration: 3.1s; animation-delay: 0s; }
+.logo-mark:hover .lm-2 { animation-name: lm-float-2; animation-duration: 2.8s; animation-delay: 0.05s; }
+.logo-mark:hover .lm-3 { animation-name: lm-float-3; animation-duration: 3.4s; animation-delay: 0.1s; }
+.logo-mark:hover .lm-4 { animation-name: lm-float-4; animation-duration: 2.6s; animation-delay: 0.15s; }
+.logo-mark:hover .lm-5 { animation-name: lm-float-5; animation-duration: 3.2s; animation-delay: 0.2s; }
+.logo-mark:hover .lm-6 { animation-name: lm-float-6; animation-duration: 2.9s; animation-delay: 0.25s; }
+.logo-mark:hover .lm-7 { animation-name: lm-float-7; animation-duration: 3.5s; animation-delay: 0.3s; }
+.logo-mark:hover .lm-8 { animation-name: lm-float-8; animation-duration: 2.7s; animation-delay: 0.35s; }
+
+@keyframes lm-float-1 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(-28px, -30px) rotate(-10deg); }
+  65% { transform: translate(-38px, -14px) rotate(6deg); }
+}
+@keyframes lm-float-2 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(30px, -26px) rotate(9deg); }
+  65% { transform: translate(20px, -40px) rotate(-7deg); }
+}
+@keyframes lm-float-3 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(6px, 34px) rotate(-6deg); }
+  65% { transform: translate(20px, 24px) rotate(8deg); }
+}
+@keyframes lm-float-4 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(-34px, 12px) rotate(5deg); }
+  65% { transform: translate(-22px, 26px) rotate(-9deg); }
+}
+@keyframes lm-float-5 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(-40px, -6px) rotate(-14deg); }
+  65% { transform: translate(-30px, 14px) rotate(10deg); }
+}
+@keyframes lm-float-6 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(-4px, -40px) rotate(12deg); }
+  65% { transform: translate(14px, -30px) rotate(-10deg); }
+}
+@keyframes lm-float-7 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(28px, 30px) rotate(-8deg); }
+  65% { transform: translate(40px, 16px) rotate(11deg); }
+}
+@keyframes lm-float-8 {
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  30% { transform: translate(38px, -4px) rotate(13deg); }
+  65% { transform: translate(28px, 16px) rotate(-9deg); }
+}
+
 /* Dark mode toggle */
 .theme-toggle {
   width: 36px;
@@ -217,6 +291,9 @@
   cursor: pointer;
   transition: background 0.15s ease, transform 0.05s ease, box-shadow 0.15s ease;
   white-space: nowrap;
+  /* Cobre <a class="btn">: sem isso, o sublinhado padrao de link do navegador
+     aparece so nesses casos (botoes <button> nunca tiveram esse problema). */
+  text-decoration: none;
 }
 
 .btn:hover {
@@ -291,6 +368,7 @@
 .access-logo {
   width: 44px;
   height: 44px;
+  overflow: visible;
 }
 
 .access-copy {
@@ -352,6 +430,18 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
+}
+
+/* Escopado a <a class="card"> (ex.: atalhos do painel) - cards estaticos
+   (div.card) usados em outras telas nao devem parecer clicaveis. */
+a.card {
+  transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+}
+
+a.card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
 }
 
 .card-pad {
@@ -516,6 +606,9 @@
 
 .tooltip-bubble--info { background: var(--tooltip-info-bg); color: var(--info); }
 .tooltip-bubble--info::after { border-top-color: var(--tooltip-info-bg); }
+
+.tooltip-bubble--purple { background: var(--tooltip-purple-bg); color: var(--brand-purple); }
+.tooltip-bubble--purple::after { border-top-color: var(--tooltip-purple-bg); }
 
 .tooltip-bubble--neutral { background: var(--tooltip-neutral-bg); color: var(--text-muted); }
 .tooltip-bubble--neutral::after { border-top-color: var(--tooltip-neutral-bg); }

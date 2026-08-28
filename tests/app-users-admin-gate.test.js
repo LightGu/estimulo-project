@@ -52,6 +52,12 @@ async function main() {
       listUsers: async () => [],
       createUser: async ({ username }) => ({ id: "novo-id", username, active: true, is_admin: false }),
       setActive: async (id, active) => ({ id, active }),
+      removeUser: async (id, { currentUserId } = {}) => {
+        if (currentUserId === id) {
+          throw new Error("Voce nao pode apagar o proprio login.");
+        }
+        return { id, username: id === "user-operador" ? "operador" : id };
+      },
     },
   });
 
@@ -111,6 +117,30 @@ async function main() {
       body: JSON.stringify({ active: false }),
     });
     assert.equal(adminPatchResponse.status, 200);
+
+    // DELETE tambem exige is_admin=true - operador barrado com 403.
+    const operadorDeleteResponse = await fetch(`${baseUrl}/settings/app-users/user-operador`, {
+      method: "DELETE",
+      headers: { Cookie: operadorCookie },
+    });
+    assert.equal(operadorDeleteResponse.status, 403);
+
+    // Admin consegue apagar outro usuario.
+    const adminDeleteResponse = await fetch(`${baseUrl}/settings/app-users/user-operador`, {
+      method: "DELETE",
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(adminDeleteResponse.status, 200);
+    const deleted = await adminDeleteResponse.json();
+    assert.equal(deleted.username, "operador");
+
+    // Admin nao consegue apagar o proprio login (bloqueado no service, que
+    // repassa o erro - o controller mapeia essa mensagem para 400).
+    const selfDeleteResponse = await fetch(`${baseUrl}/settings/app-users/user-admin`, {
+      method: "DELETE",
+      headers: { Cookie: adminCookie },
+    });
+    assert.equal(selfDeleteResponse.status, 400);
   } finally {
     await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }

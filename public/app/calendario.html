@@ -26,7 +26,21 @@
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
       /* Fill the space below the topbar using flexbox, computed natively by the browser —
-         no JS-measured pixel subtraction, so it stays correct at any OS/browser zoom level. */
+         no JS-measured pixel subtraction, so it stays correct at any OS/browser zoom level.
+         .shell only has min-height:100vh no layout.css (correto para o scroll normal da
+         janela em todas as outras paginas) - sem altura FIXA aqui, .shell/.main crescem
+         com o conteudo do calendario e o documento tambem ganha scroll proprio, duplicando
+         a barra de rolagem junto com a de .page abaixo. Travar em height:100vh + overflow
+         hidden faz so .page rolar. */
+      body[data-page="calendario"] .shell {
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      body[data-page="calendario"] .main {
+        overflow: hidden;
+      }
+
       body[data-page="calendario"] .page {
         max-width: none;
         flex: 1 1 auto;

@@ -106,8 +106,15 @@ function selectNextApprovedUnsentVideo(params = {}) {
     .filter((video) => isApprovedVideo(video))
     .filter((video) => neverRepeatVideo === false || !sentVideoIds.has(normalizeVideoId(resolveVideoId(video))))
     .sort((left, right) => {
-      const orderDifference = Number(left.ordem ?? left.ordem_geral ?? Number.MAX_SAFE_INTEGER) -
-        Number(right.ordem ?? right.ordem_geral ?? Number.MAX_SAFE_INTEGER);
+      // trilha_videos.ordem e' NOT NULL no banco - um video com "ordem" ausente
+      // aqui so pode significar que quem chamou esqueceu de mesclar o link
+      // (bug de outra camada), nunca "o video nao tem ordem de verdade". Cair
+      // para "ordem_geral" (coluna do catalogo GLOBAL de videos, sem nenhuma
+      // relacao com a trilha - ordena a indexacao do Drive) faria o disparo
+      // seguir uma sequencia diferente da configurada em "Trilhas de
+      // conteudo" sem nenhum aviso. Manda pro fim da fila em vez disso.
+      const orderDifference = Number(left.ordem ?? Number.MAX_SAFE_INTEGER) -
+        Number(right.ordem ?? Number.MAX_SAFE_INTEGER);
 
       if (orderDifference !== 0) {
         return orderDifference;

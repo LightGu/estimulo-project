@@ -15,11 +15,13 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
 }
 
-// Retorna `null` (em vez de 0) quando a Evolution API nao trouxe nenhum dado de
-// participantes nesta resposta - isso acontece quando o sync e feito com
-// getParticipants=false. Um `null` aqui sinaliza ao chamador para preservar a
-// contagem ja persistida em vez de zerar um numero que so ficou desatualizado
-// por falta de dado, nao porque o grupo esvaziou.
+// Retorna null (nao "0") quando a Evolution API nao devolveu nenhum dado de
+// contagem - acontece sempre que a sincronizacao roda com getParticipants=false
+// (usado pelo botao manual "Sincronizar" da tela de Grupos para evitar timeout
+// em contas grandes). Nesse modo a API nao inclui `participants` nem nenhum
+// campo alternativo de contagem, entao "sem dado" precisa ficar distinguivel
+// de "grupo com 0 membros de verdade" (getParticipants=true com array vazio) -
+// e' o chamador (syncGroupsFromEvolution) quem decide o que fazer com null.
 function countParticipants(group) {
   const participants = firstDefined(group?.participants, group?.Participants, group?.participantsIds, group?.participantIds);
 
@@ -35,6 +37,11 @@ function countParticipants(group) {
     group?.size,
     group?._count?.participants,
   );
+
+  if (count === undefined) {
+    return null;
+  }
+
   const numberCount = Number(count);
 
   return Number.isFinite(numberCount) && numberCount >= 0 ? numberCount : null;
@@ -517,13 +524,12 @@ function createGroupsService(dependencies = {}) {
     for (const [dedupeKey, entry] of groupsByJid) {
       const { group, instanceIds } = entry;
       const existing = await repository.findByEvolutionGroupId(group.id);
-      // group.quantidade_membros vem null quando a Evolution API nao devolveu
-      // participantes para este grupo especifico (falha pontual) - preserva o valor
-      // ja persistido em vez de zerar um numero que o usuario trata como critico.
-      const quantidadeMembros = group.quantidade_membros ?? existing?.quantidade_membros ?? 0;
+      // quantidade_membros null = Evolution nao mandou contagem nesta sync
+      // (getParticipants=false). Omitir a chave preserva o valor ja salvo no
+      // update; no create, deixa a coluna cair no DEFAULT 0 do banco.
       const payload = {
         nome: group.nome,
-        quantidade_membros: quantidadeMembros,
+        ...(group.quantidade_membros !== null ? { quantidade_membros: group.quantidade_membros } : {}),
       };
 
       let persisted;
@@ -552,7 +558,7 @@ function createGroupsService(dependencies = {}) {
       result.groups.push({
         id: group.id,
         nome: persisted?.nome || group.nome,
-        quantidade_membros: persisted?.quantidade_membros ?? quantidadeMembros,
+        quantidade_membros: persisted?.quantidade_membros,
         instance_ids: [...instanceIds],
       });
     }

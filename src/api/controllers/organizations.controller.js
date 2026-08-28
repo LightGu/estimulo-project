@@ -54,6 +54,10 @@ function createOrganizationsController(dependencies = {}) {
         return res.status(400).json({ error: message });
       }
 
+      if (message === "Organization already exists") {
+        return res.status(409).json({ error: message });
+      }
+
       if (message === "Organization not found") {
         return res.status(404).json({ error: message });
       }
