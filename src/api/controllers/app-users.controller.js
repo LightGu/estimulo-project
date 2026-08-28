@@ -46,7 +46,33 @@ function createAppUsersController(dependencies = {}) {
     }
   }
 
-  return { list, create, setActive };
+  // Tambem protegido por authGate.requireAdmin.
+  async function remove(req, res) {
+    try {
+      const user = await authService.removeUser(req.params.id, { currentUserId: req.user?.id });
+
+      return res.status(200).json(user);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (
+        [
+          "Voce nao pode apagar o proprio login.",
+          "Nao e possivel apagar o unico administrador do painel.",
+        ].includes(message)
+      ) {
+        return res.status(400).json({ error: message });
+      }
+
+      if (message === "Usuario nao encontrado.") {
+        return res.status(404).json({ error: message });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  return { list, create, setActive, remove };
 }
 
 module.exports = createAppUsersController;

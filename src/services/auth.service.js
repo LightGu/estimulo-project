@@ -93,10 +93,46 @@ async function setAdmin(id, isAdmin, deps = {}) {
   return sanitizeUser(user);
 }
 
+// currentUserId: quem esta fazendo a chamada (req.user.id, injetado pelo
+// authGate a partir da sessao) - nunca o proprio alvo da exclusao, senao um
+// admin se auto-remove sem querer e fica sem conseguir desfazer.
+async function removeUser(id, { currentUserId } = {}, deps = {}) {
+  const repository = deps.appUsersRepository || appUsersRepositoryDefault;
+
+  if (!id) {
+    throw new Error("Id do usuario e obrigatorio.");
+  }
+
+  if (currentUserId && String(currentUserId) === String(id)) {
+    throw new Error("Voce nao pode apagar o proprio login.");
+  }
+
+  const target = await repository.findById(id);
+
+  if (!target) {
+    throw new Error("Usuario nao encontrado.");
+  }
+
+  // Sem isso, apagar o ultimo admin trava o painel: ninguem mais teria acesso
+  // a aba de Usuarios para criar/reativar outro admin.
+  if (target.is_admin) {
+    const allUsers = await repository.findAll();
+    const remainingAdmins = allUsers.filter((user) => user.is_admin && user.id !== id);
+
+    if (remainingAdmins.length === 0) {
+      throw new Error("Nao e possivel apagar o unico administrador do painel.");
+    }
+  }
+
+  const removed = await repository.remove(id);
+  return sanitizeUser(removed);
+}
+
 module.exports = {
   authenticate,
   createUser,
   listUsers,
+  removeUser,
   setActive,
   setAdmin,
   updatePassword,

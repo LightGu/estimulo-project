@@ -67,6 +67,15 @@ function createOrganizationsService(dependencies = {}) {
       if (!nextPayload.nome) {
         throw new Error("Organization name is required");
       }
+
+      const existing = await repository.findAll();
+      const duplicate = existing.some(
+        (item) => item.id !== id && item.nome?.toLowerCase() === nextPayload.nome.toLowerCase()
+      );
+
+      if (duplicate) {
+        throw new Error("Organization already exists");
+      }
     }
 
     if (nextPayload.descricao !== undefined) {

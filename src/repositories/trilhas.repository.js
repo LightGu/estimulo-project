@@ -158,24 +158,33 @@ async function findVideoLink(trilhaId, videoId, client) {
 
 async function reorderVideosWithinTrilha(trilhaId, orderedVideoIds, client) {
   const resolvedClient = getClient(client);
-  const updates = orderedVideoIds.map((videoId, index) =>
-    resolvedClient
-      .from("trilha_videos")
-      .update({ ordem: index + 1 })
-      .eq("trilha_id", trilhaId)
-      .eq("video_id", videoId)
-      .select("*")
-      .single()
-  );
+  const rows = orderedVideoIds.map((videoId, index) => ({
+    trilha_id: trilhaId,
+    video_id: videoId,
+    ordem: index + 1,
+  }));
 
-  const results = await Promise.all(updates);
-  const failed = results.find((result) => result.error);
+  // upsert() manda todas as linhas numa unica requisicao ao PostgREST, que roda
+  // como uma unica transacao - ao contrario do Promise.all() de N updates
+  // independentes que existia aqui antes. Se um dos updates falhasse no meio
+  // do caminho (rede, corrida com outra escrita), os videos ja atualizados
+  // ficavam com o "ordem" novo e o resto com o antigo - numeros colidindo/fora
+  // de sequencia que nenhum leitor com "ORDER BY ordem" consegue distinguir de
+  // um resultado correto. onConflict usa a unique constraint (trilha_id,
+  // video_id) para so atualizar "ordem" das linhas existentes, sem duplicar.
+  const { data, error } = await resolvedClient
+    .from("trilha_videos")
+    .upsert(rows, { onConflict: "trilha_id,video_id" })
+    .select("*");
 
-  if (failed) {
-    throw failed.error;
+  if (error) {
+    throw error;
   }
 
-  return results.map((result) => result.data);
+  // O upsert nao garante devolver as linhas na mesma ordem enviada - reordena
+  // pelo "ordem" recem-gravado para manter o mesmo contrato de retorno que o
+  // Promise.all() anterior (resultado sempre alinhado com orderedVideoIds).
+  return (data || []).sort((left, right) => left.ordem - right.ordem);
 }
 
 async function listAllVideoLinks(client) {
