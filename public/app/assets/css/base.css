@@ -77,9 +77,10 @@
 
 html,
 body {
-  height: 100%;
   /* Rede de seguranca da regra "nada rola horizontalmente": mesmo que uma tela
-     futura introduza um elemento largo demais, a pagina nao ganha barra lateral. */
+     futura introduza um elemento largo demais, a pagina nao ganha barra lateral.
+     Sem height:100% fixo: com ele, um .shell mais alto que a viewport (min-height:100vh)
+     transborda o body e cria um segundo scroll (body) alem do da janela. */
   max-width: 100%;
   overflow-x: hidden;
 }

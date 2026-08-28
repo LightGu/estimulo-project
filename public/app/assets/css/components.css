@@ -263,7 +263,7 @@
 
 /* Access gate */
 .access-page {
-  min-height: 100%;
+  min-height: 100vh;
   background:
     linear-gradient(135deg, rgba(78, 121, 255, 0.14), transparent 36%),
     linear-gradient(315deg, rgba(87, 217, 136, 0.18), transparent 34%),

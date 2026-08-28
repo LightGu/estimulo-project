@@ -539,8 +539,6 @@
         trilhaNameById: new Map(),
         progressByGroup: new Map(),
         nextTrilhaByGroup: new Map(),
-        sequenceByProfile: new Map(),
-        desviosByProfile: new Map(),
         currentCampaignIds: [],
         timezone: null,
       };
@@ -672,10 +670,6 @@
       }
 
       async function loadSequenceAndDesvios(profileId) {
-        if (state.sequenceByProfile.has(profileId)) {
-          return { sequence: state.sequenceByProfile.get(profileId), desvios: state.desviosByProfile.get(profileId) };
-        }
-
         let sequence = [];
         let desvios = [];
         try {
@@ -688,8 +682,6 @@
           desvios = [];
         }
 
-        state.sequenceByProfile.set(profileId, sequence);
-        state.desviosByProfile.set(profileId, desvios);
         return { sequence, desvios };
       }
 

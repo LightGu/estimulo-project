@@ -81,6 +81,39 @@ async function testReturnsNullWithoutProfileId() {
   assert.equal(next, null);
 }
 
+async function testInitialDesvioReplacesFirstTrilhaForNewGroup() {
+  const desvios = [
+    { id: "d1", profile_id: "P1", after_trilha_id: null, setores: ["Bares e Restaurantes"], trilha_destino_id: "T3", created_at: "2026-01-01T00:00:00.000Z" },
+  ];
+  const service = buildService({ desvios, hasReceived: () => false });
+
+  const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P1", setor: "Bares e Restaurantes" });
+
+  assert.deepEqual(next, { trilha_id: "T3", profile_id: "P1", checkpoint: false, reason: "setor_desvio" });
+}
+
+async function testInitialDesvioIgnoredForGroupAlreadyInProgress() {
+  const desvios = [
+    { id: "d1", profile_id: "P1", after_trilha_id: null, setores: ["Bares e Restaurantes"], trilha_destino_id: "T3", created_at: "2026-01-01T00:00:00.000Z" },
+  ];
+  const service = buildService({ desvios, deliveredTrilhaIds: ["T1"] });
+
+  const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P1", setor: "Bares e Restaurantes" });
+
+  assert.deepEqual(next, { trilha_id: "T2", profile_id: "P1", checkpoint: false, reason: "sequencia" });
+}
+
+async function testSetorDesvioFiresOnFirstStepForNewGroup() {
+  const desvios = [
+    { id: "d1", profile_id: "P1", after_trilha_id: "T1", setores: ["Bares e Restaurantes"], trilha_destino_id: "TD1", created_at: "2026-01-01T00:00:00.000Z" },
+  ];
+  const service = buildService({ desvios, hasReceived: () => false });
+
+  const next = await service.resolveNextTrilhaForGroup({ id: "g1", profile_id: "P1", setor: "Bares e Restaurantes" });
+
+  assert.deepEqual(next, { trilha_id: "TD1", profile_id: "P1", checkpoint: false, reason: "setor_desvio" });
+}
+
 async function testSetorDesvioFiresWhenNotYetReceived() {
   const desvios = [
     { id: "d1", profile_id: "P1", after_trilha_id: "T2", setores: ["Bares e Restaurantes"], trilha_destino_id: "TD1", created_at: "2026-01-01T00:00:00.000Z" },
@@ -213,7 +246,7 @@ async function testCreateDesvioValidations() {
   await assert.rejects(() => service.createDesvio({}), /Profile id is required/);
   await assert.rejects(
     () => service.createDesvio({ profile_id: "P1" }),
-    /After trilha id is required/
+    /Trilha destino id is required/
   );
   await assert.rejects(
     () => service.createDesvio({ profile_id: "P1", after_trilha_id: "T2" }),
@@ -290,6 +323,37 @@ async function testCreateDesvioSucceedsWithoutOverlap() {
   assert.deepEqual(created.setores, ["Amazônia"]);
 }
 
+async function testCreateDesvioAllowsInitialDesvioWithoutAfterTrilhaId() {
+  const service = buildService({});
+
+  const created = await service.createDesvio({
+    profile_id: "P1",
+    trilha_destino_id: "T3",
+    setores: ["Bares e Restaurantes"],
+  });
+
+  assert.equal(created.profile_id, "P1");
+  assert.equal(created.after_trilha_id, null);
+  assert.equal(created.trilha_destino_id, "T3");
+}
+
+async function testCreateDesvioRejectsOverlappingInitialDesvio() {
+  const desvios = [
+    { id: "d1", profile_id: "P1", after_trilha_id: null, setores: ["Bares e Restaurantes"], trilha_destino_id: "T2", created_at: "2026-01-01T00:00:00.000Z" },
+  ];
+  const service = buildService({ desvios });
+
+  await assert.rejects(
+    () =>
+      service.createDesvio({
+        profile_id: "P1",
+        trilha_destino_id: "T3",
+        setores: ["bares e restaurantes"],
+      }),
+    /Setor already has a desvio at this point in the sequence/
+  );
+}
+
 async function testRemoveDesvioNotFound() {
   const service = buildService({});
 
@@ -307,6 +371,9 @@ async function main() {
   await testFirstStepWhenNothingDelivered();
   await testAdvancesToNextSequenceStep();
   await testReturnsNullWithoutProfileId();
+  await testInitialDesvioReplacesFirstTrilhaForNewGroup();
+  await testInitialDesvioIgnoredForGroupAlreadyInProgress();
+  await testSetorDesvioFiresOnFirstStepForNewGroup();
   await testSetorDesvioFiresWhenNotYetReceived();
   await testSetorDesvioSkippedWhenAlreadyReceived();
   await testSetorDesvioIgnoredWhenSetorDoesNotMatch();
@@ -322,6 +389,8 @@ async function main() {
   await testCreateDesvioValidations();
   await testCreateDesvioRejectsOverlappingSetorAtSameAnchor();
   await testCreateDesvioSucceedsWithoutOverlap();
+  await testCreateDesvioAllowsInitialDesvioWithoutAfterTrilhaId();
+  await testCreateDesvioRejectsOverlappingInitialDesvio();
   await testRemoveDesvioNotFound();
   await testListDesviosByProfileRequiresId();
 

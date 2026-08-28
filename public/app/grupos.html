@@ -714,14 +714,14 @@
 
         panel.classList.add("open");
         processedWrap.innerHTML = "";
-        status.textContent = "Sincronizando grupos com a Evolution API…";
+        status.textContent = "Sincronizando grupos com a Evolution API (buscando participantes, pode demorar alguns minutos)…";
         button.disabled = true;
 
         try {
           const result = await requestJson("/groups/sync", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ get_participants: false, timeout_ms: 180000 }),
+            body: JSON.stringify({ timeout_ms: 300000 }),
           });
 
           const failedInstances = Array.isArray(result.failed_instances) ? result.failed_instances : [];

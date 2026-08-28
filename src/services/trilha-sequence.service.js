@@ -93,7 +93,7 @@ function createTrilhaSequenceService(dependencies = {}) {
     }
 
     const candidates = desvios
-      .filter((desvio) => desvio.after_trilha_id === afterTrilhaId)
+      .filter((desvio) => (desvio.after_trilha_id ?? null) === afterTrilhaId)
       .filter((desvio) => {
         const setores = Array.isArray(desvio.setores) ? desvio.setores : [];
         return setores.some((value) => normalizeComparableText(value) === normalizedSetor);
@@ -117,6 +117,22 @@ function createTrilhaSequenceService(dependencies = {}) {
   // nesta mesma passada de avanco e sabe que estao sem video aprovado agora -
   // tratadas como "passadas" mesmo sem entrega real registrada, para o motor nao
   // ficar preso oferecendo a mesma trilha vazia. Ver firstNonExcluded.
+  async function resolveDesvioTarget(desvios, anchorTrilhaId, group, excludeTrilhaIds) {
+    const desvio = matchingDesvio(desvios, anchorTrilhaId, group.setor);
+
+    if (!desvio || excludeTrilhaIds.has(desvio.trilha_destino_id)) {
+      return null;
+    }
+
+    const alreadyReceived = await progressRepository.hasGroupReceivedTrilha(group.id, desvio.trilha_destino_id);
+
+    if (alreadyReceived) {
+      return null;
+    }
+
+    return desvio.trilha_destino_id;
+  }
+
   async function resolveNextTrilhaForGroup(group, options = {}) {
     const profileId = group?.profile_id;
 
@@ -133,17 +149,24 @@ function createTrilhaSequenceService(dependencies = {}) {
 
     const cursor = await findCursorIndex(sequence, group);
 
-    if (cursor >= 0) {
-      const anchor = sequence[cursor];
-      const desvio = matchingDesvio(desvios, anchor.trilha_id, group.setor);
+    // cursor -1 = grupo ainda nao recebeu nenhuma trilha deste perfil. Antes de
+    // cair na 1a trilha da sequencia, um "desvio inicial" (after_trilha_id nulo)
+    // pode trocar por setor qual trilha o grupo recebe de cara - ver
+    // buildSequencePathForSetor no frontend (trilhas.html), que simula esse mesmo
+    // caso comecando pelo desvio ancorado em null antes de state.sequence[0].
+    if (cursor === -1) {
+      const initialDesvioTarget = await resolveDesvioTarget(desvios, null, group, excludeTrilhaIds);
 
-      if (desvio && !excludeTrilhaIds.has(desvio.trilha_destino_id)) {
-        const alreadyReceived = await progressRepository.hasGroupReceivedTrilha(group.id, desvio.trilha_destino_id);
-
-        if (!alreadyReceived) {
-          return { trilha_id: desvio.trilha_destino_id, profile_id: profileId, checkpoint: false, reason: "setor_desvio" };
-        }
+      if (initialDesvioTarget) {
+        return { trilha_id: initialDesvioTarget, profile_id: profileId, checkpoint: false, reason: "setor_desvio" };
       }
+    }
+
+    const anchor = sequence[Math.max(cursor, 0)];
+    const desvioTarget = await resolveDesvioTarget(desvios, anchor.trilha_id, group, excludeTrilhaIds);
+
+    if (desvioTarget) {
+      return { trilha_id: desvioTarget, profile_id: profileId, checkpoint: false, reason: "setor_desvio" };
     }
 
     const next = firstNonExcluded(sequence, cursor + 1, excludeTrilhaIds);
@@ -183,7 +206,10 @@ function createTrilhaSequenceService(dependencies = {}) {
 
   async function createDesvio(payload) {
     const profileId = String(payload?.profile_id || "").trim();
-    const afterTrilhaId = String(payload?.after_trilha_id || "").trim();
+    // after_trilha_id ausente/vazio = "desvio inicial": para o setor, comece por
+    // trilha_destino_id em vez da 1a trilha da sequencia do perfil (ver
+    // resolveNextTrilhaForGroup e buildSequencePathForSetor em trilhas.html).
+    const afterTrilhaId = String(payload?.after_trilha_id || "").trim() || null;
     const trilhaDestinoId = String(payload?.trilha_destino_id || "").trim();
     const setores = Array.isArray(payload?.setores)
       ? Array.from(new Set(payload.setores.map((setor) => String(setor || "").trim()).filter(Boolean)))
@@ -191,10 +217,6 @@ function createTrilhaSequenceService(dependencies = {}) {
 
     if (!profileId) {
       throw new Error("Profile id is required");
-    }
-
-    if (!afterTrilhaId) {
-      throw new Error("After trilha id is required");
     }
 
     if (!trilhaDestinoId) {
@@ -212,11 +234,11 @@ function createTrilhaSequenceService(dependencies = {}) {
     }
 
     const [afterTrilha, trilhaDestino] = await Promise.all([
-      repository.findById(afterTrilhaId),
+      afterTrilhaId ? repository.findById(afterTrilhaId) : Promise.resolve(null),
       repository.findById(trilhaDestinoId),
     ]);
 
-    if (!afterTrilha) {
+    if (afterTrilhaId && !afterTrilha) {
       throw new Error("After trilha not found");
     }
 
@@ -230,7 +252,7 @@ function createTrilhaSequenceService(dependencies = {}) {
     const existing = await desviosRepository.listByProfile(profileId);
     const normalizedNewSetores = new Set(setores.map(normalizeComparableText));
     const overlapping = existing.find((desvio) => {
-      if (desvio.after_trilha_id !== afterTrilhaId) {
+      if ((desvio.after_trilha_id ?? null) !== afterTrilhaId) {
         return false;
       }
 

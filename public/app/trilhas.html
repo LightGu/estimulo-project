@@ -800,7 +800,7 @@
             "Este perfil está fora da jornada automática — inclua-o em Configurações → Perfis de grupo para que ele participe do avanço automático.";
         } else if (sequenceSetorFilter) {
           hint.textContent =
-            "Caminho deste setor dentro do perfil, com os desvios já aplicados. A 1ª trilha é sempre a mesma para todos os setores; a partir da 2ª você pode adicionar, remover e reordenar livremente só para este setor.";
+            "Caminho deste setor dentro do perfil, com os desvios já aplicados. Arraste para reordenar, incluindo a 1ª trilha — a mudança vale só para este setor.";
         } else {
           hint.textContent = "Arraste para reordenar. Esta é a ordem que o motor de disparo automático segue para grupos deste perfil.";
         }
@@ -866,7 +866,10 @@
         const visited = new Set();
         const path = [];
 
-        let current = state.sequence[0];
+        const initialDesvio = matchingDesvioForSetor(null, setor);
+        let current =
+          (initialDesvio && byId.has(initialDesvio.trilha_destino_id) && byId.get(initialDesvio.trilha_destino_id)) ||
+          state.sequence[0];
 
         while (current && !visited.has(current.trilha_id)) {
           path.push(current);
@@ -908,13 +911,41 @@
       }
 
       // Reconcilia os desvios deste setor para que buildSequencePathForSetor
-      // volte a produzir newPath: para cada par consecutivo (ancora, proximo) do
-      // caminho desejado, cria/ajusta um desvio so quando o proximo desejado
-      // difere do proximo natural da sequencia base - do contrario, remove o
-      // setor de qualquer desvio que estivesse la (deixa cair no fallthrough
-      // padrao). A posicao 0 nunca e ancora de remocao/insercao por si so, mas
-      // pode ter um desvio de saida normalmente.
+      // volte a produzir newPath: primeiro a "posicao -1" (desvio inicial,
+      // after_trilha_id nulo) - se newPath[0] difere de state.sequence[0], cria
+      // ou ajusta esse desvio; caso contrario remove qualquer desvio inicial
+      // existente para este setor. Depois, para cada par consecutivo (ancora,
+      // proximo) do caminho desejado, cria/ajusta um desvio so quando o proximo
+      // desejado difere do proximo natural da sequencia base - do contrario,
+      // remove o setor de qualquer desvio que estivesse la (deixa cair no
+      // fallthrough padrao).
       async function applySetorPathEdit(setor, newPath) {
+        const desiredFirst = newPath[0] || null;
+        const naturalFirst = state.sequence[0] || null;
+        const existingInitialDesvio = matchingDesvioForSetor(null, setor);
+        const needsInitialDesvio = desiredFirst && naturalFirst && desiredFirst.trilha_id !== naturalFirst.trilha_id;
+
+        if (needsInitialDesvio) {
+          if (!existingInitialDesvio || existingInitialDesvio.trilha_destino_id !== desiredFirst.trilha_id) {
+            if (existingInitialDesvio) {
+              await detachSetorFromDesvio(existingInitialDesvio, setor);
+            }
+
+            await requestJson("/trilhas/desvios", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                profile_id: sequenceProfileId,
+                after_trilha_id: null,
+                trilha_destino_id: desiredFirst.trilha_id,
+                setores: [setor],
+              }),
+            });
+          }
+        } else if (existingInitialDesvio) {
+          await detachSetorFromDesvio(existingInitialDesvio, setor);
+        }
+
         for (let index = 0; index < newPath.length - 1; index += 1) {
           const anchor = newPath[index];
           const desiredNext = newPath[index + 1];
@@ -976,7 +1007,7 @@
         const path = buildSequencePathForSetor(setor);
         const fromIndex = path.findIndex((item) => item.trilha_id === trilhaId);
         const toIndex = fromIndex + delta;
-        if (fromIndex <= 0 || toIndex <= 0 || toIndex >= path.length) return;
+        if (fromIndex < 0 || toIndex < 0 || toIndex >= path.length) return;
 
         const newPath = [...path];
         newPath.splice(toIndex, 0, newPath.splice(fromIndex, 1)[0]);
@@ -1019,8 +1050,6 @@
         const rows = document.querySelectorAll("#sequenceBody tr.sequence-row[data-setor-path-index]");
 
         rows.forEach((row) => {
-          if (Number(row.dataset.setorPathIndex) === 0) return;
-
           row.addEventListener("dragstart", () => {
             draggingTrilhaId = row.dataset.trilhaRowId;
             row.classList.add("dragging");
@@ -1050,7 +1079,7 @@
             const fromIndex = path.findIndex((item) => item.trilha_id === draggingTrilhaId);
             const toIndex = path.findIndex((item) => item.trilha_id === targetId);
             draggingTrilhaId = null;
-            if (fromIndex <= 0 || toIndex <= 0) return;
+            if (fromIndex < 0 || toIndex < 0) return;
 
             const newPath = [...path];
             newPath.splice(toIndex, 0, newPath.splice(fromIndex, 1)[0]);
@@ -1087,18 +1116,18 @@
 
           body.innerHTML = path
             .map((item, index) => {
-              const locked = index === 0;
+              const removable = index > 0;
 
               return `
-              <tr class="sequence-row"${locked ? "" : ' draggable="true"'} data-trilha-row-id="${escapeHtml(item.trilha_id)}" data-setor-path-index="${index}">
+              <tr class="sequence-row" draggable="true" data-trilha-row-id="${escapeHtml(item.trilha_id)}" data-setor-path-index="${index}">
                 <td>
-                  ${locked ? "" : '<span class="drag-handle" aria-hidden="true">⠿</span>'}${index + 1}
-                  ${locked ? "" : `<button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-up="${escapeHtml(item.trilha_id)}" aria-label="Mover para cima"${index === 1 ? " disabled" : ""}>&#8593;</button>`}
-                  ${locked ? "" : `<button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-down="${escapeHtml(item.trilha_id)}" aria-label="Mover para baixo"${index === path.length - 1 ? " disabled" : ""}>&#8595;</button>`}
+                  <span class="drag-handle" aria-hidden="true">⠿</span>${index + 1}
+                  <button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-up="${escapeHtml(item.trilha_id)}" aria-label="Mover para cima"${index === 0 ? " disabled" : ""}>&#8593;</button>
+                  <button class="btn-icon btn-secondary sr-only" type="button" data-reorder-setor-path-down="${escapeHtml(item.trilha_id)}" aria-label="Mover para baixo"${index === path.length - 1 ? " disabled" : ""}>&#8595;</button>
                 </td>
                 <td>${escapeHtml(item.macrotema)} · ${escapeHtml(item.trilha)}</td>
                 <td><span class="badge badge-success">${item.approved_count}/${item.videos_count} aprovado(s)</span></td>
-                <td>${locked ? "" : `<button class="btn btn-secondary btn-sm" data-remove-trilha-from-setor-path="${escapeHtml(item.trilha_id)}" type="button">Remover</button>`}</td>
+                <td>${removable ? `<button class="btn btn-secondary btn-sm" data-remove-trilha-from-setor-path="${escapeHtml(item.trilha_id)}" type="button">Remover</button>` : ""}</td>
               </tr>`;
             })
             .join("");

@@ -15,6 +15,11 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
 }
 
+// Retorna `null` (em vez de 0) quando a Evolution API nao trouxe nenhum dado de
+// participantes nesta resposta - isso acontece quando o sync e feito com
+// getParticipants=false. Um `null` aqui sinaliza ao chamador para preservar a
+// contagem ja persistida em vez de zerar um numero que so ficou desatualizado
+// por falta de dado, nao porque o grupo esvaziou.
 function countParticipants(group) {
   const participants = firstDefined(group?.participants, group?.Participants, group?.participantsIds, group?.participantIds);
 
@@ -32,7 +37,7 @@ function countParticipants(group) {
   );
   const numberCount = Number(count);
 
-  return Number.isFinite(numberCount) && numberCount >= 0 ? numberCount : 0;
+  return Number.isFinite(numberCount) && numberCount >= 0 ? numberCount : null;
 }
 
 function extractEvolutionGroups(payload) {
@@ -66,6 +71,7 @@ function normalizeEvolutionGroup(group) {
   return {
     id,
     nome,
+    // null quando a resposta da Evolution API nao trouxe participantes (ver countParticipants).
     quantidade_membros: countParticipants(group),
   };
 }
@@ -366,17 +372,16 @@ function createGroupsService(dependencies = {}) {
     const organizationId = options.organization_id || options.organizationId || null;
     const maturidade = Number(options.maturidade || options.defaultMaturidade || 1);
     const nameContains = options.name_contains || options.nameContains || options.filter_name || options.filterName;
-    const getParticipants =
-      options.get_participants !== undefined
-        ? options.get_participants
-        : options.getParticipants !== undefined
-          ? options.getParticipants
-          : true;
+    // quantidade_membros so pode ser calculado com precisao a partir do array de
+    // participantes da Evolution API - sem ele o sync acabava zerando/sobrescrevendo
+    // um numero critico para o negocio. Por isso getParticipants=false deixou de ser
+    // uma opcao aqui, mesmo que o chamador (frontend) ainda peca isso no body.
+    const getParticipants = true;
     const timeoutMs = Number(
       options.timeout_ms ||
         options.timeoutMs ||
         process.env.EVOLUTION_GROUP_SYNC_TIMEOUT_MS ||
-        (getParticipants ? 0 : 180000)
+        0
     );
 
     if (!Number.isInteger(maturidade) || maturidade < 1 || maturidade > 4) {
@@ -469,6 +474,19 @@ function createGroupsService(dependencies = {}) {
 
         if (!groupsByJid.has(dedupeKey)) {
           groupsByJid.set(dedupeKey, { group, instanceIds: new Set() });
+        } else {
+          // O mesmo grupo pode vir de mais de uma instancia com contagens diferentes
+          // (ex. uma resposta parcial da Evolution API) - fica com a maior contagem
+          // valida em vez da primeira instancia que respondeu, para nao perder membros
+          // reais por causa de uma resposta truncada de outra instancia.
+          const current = groupsByJid.get(dedupeKey);
+
+          if (
+            group.quantidade_membros !== null &&
+            (current.group.quantidade_membros === null || group.quantidade_membros > current.group.quantidade_membros)
+          ) {
+            current.group = group;
+          }
         }
 
         groupsByJid.get(dedupeKey).instanceIds.add(instance.id);
@@ -499,9 +517,13 @@ function createGroupsService(dependencies = {}) {
     for (const [dedupeKey, entry] of groupsByJid) {
       const { group, instanceIds } = entry;
       const existing = await repository.findByEvolutionGroupId(group.id);
+      // group.quantidade_membros vem null quando a Evolution API nao devolveu
+      // participantes para este grupo especifico (falha pontual) - preserva o valor
+      // ja persistido em vez de zerar um numero que o usuario trata como critico.
+      const quantidadeMembros = group.quantidade_membros ?? existing?.quantidade_membros ?? 0;
       const payload = {
         nome: group.nome,
-        quantidade_membros: group.quantidade_membros,
+        quantidade_membros: quantidadeMembros,
       };
 
       let persisted;
@@ -530,7 +552,7 @@ function createGroupsService(dependencies = {}) {
       result.groups.push({
         id: group.id,
         nome: persisted?.nome || group.nome,
-        quantidade_membros: persisted?.quantidade_membros ?? group.quantidade_membros,
+        quantidade_membros: persisted?.quantidade_membros ?? quantidadeMembros,
         instance_ids: [...instanceIds],
       });
     }
