@@ -138,20 +138,39 @@ function createAuthGate(options = {}) {
     );
   }
 
-  function statusHandler(req, res) {
+  async function statusHandler(req, res) {
     res.set("Cache-Control", "no-store");
 
     if (!enabled) {
-      res.json({ required: false, authorized: true, username: null, is_admin: true, expires_at: null });
+      res.json({ required: false, authorized: true, username: null, is_admin: true, display_name: null, expires_at: null });
       return;
     }
 
     const session = getSession(req);
+    // display_name vem de uma consulta ao vivo, nao do que ficou gravado na
+    // sessao no momento do login - a sessao dura ate 7 dias, entao sem isso o
+    // chip continuaria mostrando o nome antigo ate a pessoa deslogar e logar
+    // de novo, mesmo apos editar o proprio nome em Configuracoes.
+    let displayName = session ? session.username : null;
+
+    if (session) {
+      try {
+        const user = await authService.getUserById(session.userId);
+        if (user) {
+          displayName = user.display_name || user.username;
+        }
+      } catch (error) {
+        // Falha aqui nao pode derrubar o /access/status inteiro (chamado em
+        // toda pagina) - cai no username da sessao mesmo.
+      }
+    }
+
     res.json({
       required: true,
       authorized: Boolean(session),
       username: session ? session.username : null,
       is_admin: session ? Boolean(session.isAdmin) : null,
+      display_name: session ? displayName : null,
       expires_at: session ? new Date(session.expiresAt).toISOString() : null,
     });
   }

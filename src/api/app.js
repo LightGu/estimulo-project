@@ -253,8 +253,9 @@ function createApp(dependencies = {}) {
   app.patch("/settings/drive/schedule", settingsController.updateDriveSchedule);
   app.post("/settings/drive/test-connection", settingsController.testConnection);
   app.post("/settings/drive/reindex", settingsController.reindexNow);
-  app.get("/settings/profile", settingsController.getProfileSettings);
-  app.patch("/settings/profile", settingsController.updateProfileSettings);
+  // Nome de exibicao e' por conta (app_users.display_name), nao mais um valor
+  // global compartilhado - ver appUsersController.updateOwnDisplayName.
+  app.patch("/account/profile", appUsersController.updateOwnDisplayName);
   app.get("/settings/schedule", settingsController.getScheduleSettings);
   app.patch("/settings/schedule", settingsController.updateScheduleSettings);
   app.get("/settings/notifications", settingsController.getNotificationSettings);

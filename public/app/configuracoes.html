@@ -70,7 +70,7 @@
             <div class="card">
               <div class="card-header"><h3><span class="section-num">1.</span>Perfil do usuário</h3></div>
               <div class="card-body">
-                <p class="text-muted" style="margin-bottom:14px;">Nome exibido no canto superior direito do sistema.</p>
+                <p class="text-muted" style="margin-bottom:14px;">Nome exibido no canto superior direito do sistema - vale só para a sua própria conta, não afeta outros logins.</p>
                 <div class="field" style="max-width:360px;">
                   <label for="profileNameInput">Nome do usuário</label>
                   <input id="profileNameInput" type="text" placeholder="Nome completo">
@@ -352,9 +352,9 @@
 
       async function loadProfileSettings() {
         try {
-          const response = await fetch("/settings/profile");
+          const response = await fetch("/access/status", { cache: "no-store" });
           const data = await response.json();
-          if (data.profile_name) profileNameInput.value = data.profile_name;
+          if (data.display_name) profileNameInput.value = data.display_name;
         } catch (error) {
           // mantém o campo vazio caso a chamada falhe
         }
@@ -364,14 +364,14 @@
         profileSaveStatus.style.color = "var(--text-muted)";
         profileSaveStatus.textContent = "Salvando…";
         try {
-          const response = await fetch("/settings/profile", {
+          const response = await fetch("/account/profile", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ profile_name: profileNameInput.value.trim() }),
+            body: JSON.stringify({ display_name: profileNameInput.value.trim() }),
           });
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || "Falha ao salvar nome do usuário");
-          profileNameInput.value = data.profile_name;
+          profileNameInput.value = data.display_name;
           profileSaveStatus.textContent = "Configurações salvas.";
           profileSaveStatus.style.color = "var(--success)";
           if (window.estimuloRefreshUserChip) await window.estimuloRefreshUserChip();

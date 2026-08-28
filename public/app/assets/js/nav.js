@@ -474,8 +474,11 @@
   }
 
   // ---------- User chip (topbar) ----------
-  // Loads the current user's display name from /settings/profile and fills
-  // in the topbar chip (avatar initials + name) on every page.
+  // Loads the current SESSION's display name from /access/status and fills
+  // in the topbar chip (avatar initials + name) on every page. Antes isso
+  // vinha de /settings/profile - uma unica linha global compartilhada por
+  // todo mundo, entao mudar o nome numa conta mudava para todas as sessoes
+  // ativas. Agora e' por conta (app_users.display_name).
   function initialsFor(name) {
     const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
 
@@ -501,9 +504,10 @@
 
   window.estimuloRefreshUserChip = async function estimuloRefreshUserChip() {
     try {
-      const response = await fetch("/settings/profile");
+      const response = await fetch("/access/status", { cache: "no-store" });
       const data = await response.json();
-      if (data && data.profile_name) applyUserChipName(data.profile_name);
+      const name = data && (data.display_name || data.username);
+      if (name) applyUserChipName(name);
     } catch (error) {
       /* mantém o nome já exibido no HTML caso a chamada falhe */
     }
