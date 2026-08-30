@@ -795,6 +795,7 @@ function createDispatchProcessor(options = {}) {
           // valor a checagem de atraso ficava cega justamente nos logs novos.
           scheduledAt: job.data.scheduled_at,
           sender: executeDelivery,
+          whatsappInstanceId: job.data.whatsapp_instance_id,
         });
 
         delivery = result.result;

@@ -77,7 +77,7 @@ function createMensagensController(dependencies = {}) {
 
   async function dispatch(req, res) {
     try {
-      const result = await mensagensService.dispatchAdHoc(req.body || {});
+      const result = await mensagensService.dispatchAdHoc(req.body || {}, { userId: req.user && req.user.id });
 
       return res.status(200).json(result);
     } catch (error) {
@@ -87,7 +87,7 @@ function createMensagensController(dependencies = {}) {
 
   async function schedule(req, res) {
     try {
-      const result = await mensagensService.scheduleAdHoc(req.body || {});
+      const result = await mensagensService.scheduleAdHoc(req.body || {}, { userId: req.user && req.user.id });
 
       return res.status(202).json(result);
     } catch (error) {
@@ -98,7 +98,7 @@ function createMensagensController(dependencies = {}) {
   async function dispatchWithMedia(req, res) {
     try {
       const payload = { ...parseMultipartBody(req.body), ...buildContentFromUploadedFile(req.file) };
-      const result = await mensagensService.dispatchAdHoc(payload);
+      const result = await mensagensService.dispatchAdHoc(payload, { userId: req.user && req.user.id });
 
       return res.status(200).json(result);
     } catch (error) {
@@ -109,7 +109,7 @@ function createMensagensController(dependencies = {}) {
   async function scheduleWithMedia(req, res) {
     try {
       const payload = { ...parseMultipartBody(req.body), ...buildContentFromUploadedFile(req.file) };
-      const result = await mensagensService.scheduleAdHoc(payload);
+      const result = await mensagensService.scheduleAdHoc(payload, { userId: req.user && req.user.id });
 
       return res.status(202).json(result);
     } catch (error) {

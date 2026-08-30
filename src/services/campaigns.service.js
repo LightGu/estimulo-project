@@ -202,6 +202,10 @@ function createCampaignsService(dependencies = {}) {
       windowEnd: scheduleOptions.window_end,
       excludeId: options.excludeId,
       timezone: options.timezone,
+      // Este service so cria/reagenda campanha de video - pontual entra pela
+      // fila mensagens-dispatch e nao disputa esta janela (ver
+      // campaign-window-conflict.js).
+      campaignType: options.campaignType || "video",
     });
   }
 
@@ -356,7 +360,7 @@ function createCampaignsService(dependencies = {}) {
     return result;
   }
 
-  async function confirmDispatch(campaignId, payload = {}) {
+  async function confirmDispatch(campaignId, payload = {}, context = {}) {
     if (!campaignId) {
       throw new Error("Campaign id is required");
     }
@@ -402,6 +406,7 @@ function createCampaignsService(dependencies = {}) {
       window_end: scheduleOptions.window_end,
       jitter_delay_min_ms: scheduleOptions.jitter_delay_min_ms,
       jitter_delay_max_ms: scheduleOptions.jitter_delay_max_ms,
+      usuario_responsavel_id: context.userId || null,
     });
     const updatedCampaign = await repository.update(campaignId, {
       status: "programado",
@@ -722,7 +727,7 @@ function createCampaignsService(dependencies = {}) {
       await assertNoWindowConflict(
         groupRows.map((row) => row.group_id),
         { window_start: newWindowStart, window_end: newWindowEnd },
-        { excludeId: id }
+        { excludeId: id, campaignType: campaign.tipo }
       );
     }
 

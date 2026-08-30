@@ -146,7 +146,9 @@ function createCampaignsController(dependencies = {}) {
         })
       );
 
-      const result = await campaignService.confirmDispatch(req.params.id, req.body || {});
+      const result = await campaignService.confirmDispatch(req.params.id, req.body || {}, {
+        userId: req.user && req.user.id,
+      });
 
       console.log(
         JSON.stringify({

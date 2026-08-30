@@ -214,6 +214,7 @@ function createApp(dependencies = {}) {
   app.patch("/organizations/:id", organizationsController.update);
   app.delete("/organizations/:id", organizationsController.remove);
   app.get("/reports/dispatches", reportController.listDispatches);
+  app.delete("/reports/dispatches", authGate.requireAdmin, reportController.hideDispatches);
   app.get("/trilhas", trilhasController.listAll);
   app.get("/trilhas/overview", trilhasController.listOverview);
   app.get("/trilhas/by-perfil", trilhasController.listByPerfil);

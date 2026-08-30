@@ -994,7 +994,7 @@
       async function removeTrilhaFromSetorPath(setor, trilhaId) {
         const path = buildSequencePathForSetor(setor);
         const index = path.findIndex((item) => item.trilha_id === trilhaId);
-        if (index <= 0) return;
+        if (index < 0) return;
 
         const confirmed = await window.estimuloConfirm(
           `Remover "${trilhaLabelById(trilhaId)}" do caminho deste setor?`,
@@ -1126,8 +1126,6 @@
 
           body.innerHTML = path
             .map((item, index) => {
-              const removable = index > 0;
-
               return `
               <tr class="sequence-row" draggable="true" data-trilha-row-id="${escapeHtml(item.trilha_id)}" data-setor-path-index="${index}">
                 <td>
@@ -1137,7 +1135,7 @@
                 </td>
                 <td>${escapeHtml(item.macrotema)} · ${escapeHtml(item.trilha)}</td>
                 <td><span class="badge badge-success">${item.approved_count}/${item.videos_count} aprovado(s)</span></td>
-                <td>${removable ? `<button class="btn btn-secondary btn-sm" data-remove-trilha-from-setor-path="${escapeHtml(item.trilha_id)}" type="button">Remover</button>` : ""}</td>
+                <td><button class="btn btn-secondary btn-sm" data-remove-trilha-from-setor-path="${escapeHtml(item.trilha_id)}" type="button">Remover</button></td>
               </tr>`;
             })
             .join("");

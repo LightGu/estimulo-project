@@ -125,6 +125,66 @@ async function testNoConflictWhenGroupsAreDisjoint() {
   assert.equal(created.length, 1);
 }
 
+// Video x video nos mesmos grupos continua proibido: as duas disputam a
+// mesma fila de disparo (dispatch) e resolveriam o "proximo video" do grupo.
+async function testConflictBlocksWhenBothAreVideoCampaigns() {
+  const { service, created } = buildCampaignsServiceHarness([
+    {
+      campaign: {
+        id: "existing-1",
+        trilha: "Campanha de video existente",
+        window_start: WINDOW_START,
+        window_end: WINDOW_END,
+      },
+      groupIds: ["group-a"],
+    },
+  ]);
+
+  await assert.rejects(
+    () =>
+      service.createAndQueue({
+        group_ids: ["group-a"],
+        execution_at: WINDOW_START,
+        window_start: WINDOW_START,
+        window_end: WINDOW_END,
+      }),
+    (error) => {
+      assert.equal(error.code, "CAMPAIGN_WINDOW_CONFLICT");
+      return true;
+    }
+  );
+
+  assert.equal(created.length, 0);
+}
+
+// Pontual x campanha de video nos MESMOS grupos e janela agora e permitido:
+// cada tipo roda na sua propria fila (mensagens-dispatch x dispatch) e resolve
+// seu proprio "proximo" sem disputa - ver docs/evolution-api.md.
+async function testNoConflictWhenExistingCampaignIsDifferentQueueType() {
+  const { service, created } = buildCampaignsServiceHarness([
+    {
+      campaign: {
+        id: "existing-1",
+        tipo: "pontual",
+        trilha: "Disparo pontual existente",
+        window_start: WINDOW_START,
+        window_end: WINDOW_END,
+      },
+      groupIds: ["group-a"],
+    },
+  ]);
+
+  const result = await service.createAndQueue({
+    group_ids: ["group-a"],
+    execution_at: WINDOW_START,
+    window_start: WINDOW_START,
+    window_end: WINDOW_END,
+  });
+
+  assert.ok(result.campaign.id);
+  assert.equal(created.length, 1);
+}
+
 async function testNoConflictWhenNoOverlappingWindow() {
   const { service, overlapCalls } = buildCampaignsServiceHarness([]);
 
@@ -332,9 +392,6 @@ async function testScheduledAdHocBlocksWindowConflict() {
     overlapping: [
       {
         id: "existing-1",
-        // Pontual de proposito: com `tipo` de campanha de video o bloqueio viria
-        // da exclusividade (dispatch-exclusivity.js), que nem olha grupo. O caso
-        // exercitado aqui e o conflito por grupo compartilhado.
         tipo: "pontual",
         trilha: "Disparo no dia 01/08",
         window_start: WINDOW_START,
@@ -357,6 +414,30 @@ async function testScheduledAdHocBlocksWindowConflict() {
   // Conflito detectado antes de persistir campanha ou enfileirar job.
   assert.equal(created.length, 0);
   assert.equal(enqueued.length, 0);
+}
+
+// Pontual agendado por cima da janela de uma campanha de VIDEO existente, nos
+// mesmos grupos, e permitido: video roda na fila `dispatch`, pontual roda em
+// `mensagens-dispatch` - filas independentes, sem disputa pelo "proximo" do
+// grupo.
+async function testScheduledAdHocAllowsConflictWithVideoCampaign() {
+  const { service, created, enqueued } = buildScheduleAdHocHarness({
+    overlapping: [
+      {
+        id: "existing-1",
+        trilha: "Campanha de video em andamento",
+        window_start: WINDOW_START,
+        window_end: WINDOW_END,
+      },
+    ],
+    groupsByCampaign: { "existing-1": [{ group_id: "group-b" }] },
+  });
+
+  const result = await service.scheduleAdHoc(SCHEDULE_PAYLOAD);
+
+  assert.equal(result.scheduled, 2);
+  assert.equal(created.length, 1);
+  assert.equal(enqueued.length, 2);
 }
 
 async function testScheduledAdHocPropagatesInstanceRotation() {
@@ -547,6 +628,8 @@ async function testProviderEvidenceFailureDoesNotFailTheJob() {
 
 async function main() {
   await testConflictBlocksWhenGroupsOverlap();
+  await testConflictBlocksWhenBothAreVideoCampaigns();
+  await testNoConflictWhenExistingCampaignIsDifferentQueueType();
   await testNoConflictWhenGroupsAreDisjoint();
   await testNoConflictWhenNoOverlappingWindow();
   await testAdHocDispatchDoesNotReportUnconfirmedAsSent();
@@ -554,6 +637,7 @@ async function main() {
   testAssertDeliveryConfirmedAcceptsRealSuccess();
   testPendingIsAcceptedAndCaptured();
   await testScheduledAdHocBlocksWindowConflict();
+  await testScheduledAdHocAllowsConflictWithVideoCampaign();
   await testScheduledAdHocPropagatesInstanceRotation();
   await testScheduledAdHocRejectsGroupsWithoutInstanceCoverage();
   testMensagensJobDataKeepsInstanceId();

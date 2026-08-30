@@ -7,10 +7,6 @@ const {
   confirmProviderDelivery,
   extractProviderDelivery,
 } = require("../services/delivery-confirmation");
-const {
-  DEFAULT_MAX_POSTPONEMENTS,
-  resolveAdHocDispatchBlock,
-} = require("../services/dispatch-exclusivity");
 const { resolveJobStaleReason } = require("../services/dispatch-staleness");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
@@ -20,7 +16,6 @@ const MENSAGENS_DISPATCH_INITIAL_STATUS = "pending";
 const MENSAGENS_DISPATCH_PROCESSING_STATUS = "processing";
 const MENSAGENS_DISPATCH_SUCCESS_STATUS = "sent";
 const MENSAGENS_DISPATCH_FAILED_STATUS = "failed";
-const MENSAGENS_DISPATCH_POSTPONED_STATUS = "postponed";
 // Antes eram 60s, dimensionados para "postar e esquecer". Agora o job tambem
 // espera o ACK do WhatsApp (ate DELIVERY_CONFIRMATION_TIMEOUT_MS, 90s por
 // padrao), entao o teto precisa cobrir envio + confirmacao.
@@ -91,9 +86,6 @@ function buildMensagensJobData(params = {}) {
     // Sem este campo o job perdia a instancia sorteada no agendamento e o worker
     // enviava tudo pelo numero do .env, independente do rodizio configurado.
     whatsapp_instance_id: params.whatsapp_instance_id || params.whatsappInstanceId || null,
-    // Quantas vezes este envio ja foi adiado por campanha de video em voo.
-    // Viaja no job para o teto de adiamentos valer entre reenfileiramentos.
-    postponed_count: Number(params.postponed_count || params.postponedCount || 0),
   };
 }
 
@@ -133,18 +125,16 @@ function createMensagensDispatchProcessor(options = {}) {
     whatsappInstancesRepository,
     campaignsRepository = defaultCampaignsRepository,
     confirmDelivery = confirmProviderDelivery,
-    enqueue = addMensagensDispatchJob,
-    maxPostponements = DEFAULT_MAX_POSTPONEMENTS,
     now = () => new Date(),
   } = options;
 
-  async function updateDispatchLogStatus(dispatchLogId, status, mensagemErro) {
+  async function updateDispatchLogStatus(dispatchLogId, status, mensagemErro, whatsappInstanceId) {
     if (!dispatchLogId) {
       return;
     }
 
     try {
-      await dispatchLogs.updateStatus(dispatchLogId, status, mensagemErro || null);
+      await dispatchLogs.updateStatus(dispatchLogId, status, mensagemErro || null, whatsappInstanceId);
     } catch (error) {
       logger.error &&
         logger.error(
@@ -177,64 +167,6 @@ function createMensagensDispatchProcessor(options = {}) {
           })
         );
     }
-  }
-
-  // Reagenda o job para depois da campanha de video em vez de disparar por cima
-  // dela. O log volta para "pendente" com o novo horario planejado, entao o
-  // relatorio mostra o adiamento em vez de uma linha parada em "processando".
-  async function postponeForVideoCampaign(job, block) {
-    const postponedCount = Number(job.data.postponed_count || 0) + 1;
-    const resumeAt = block.resumeAt.toISOString();
-
-    if (postponedCount > maxPostponements) {
-      throw new Error(
-        `Envio adiado ${maxPostponements} vezes por ${block.reason} e nao chegou a sair. ` +
-          "Reagende a mensagem para um horario fora da janela das campanhas de video."
-      );
-    }
-
-    await enqueue(
-      { ...job.data, scheduled_at: resumeAt, postponed_count: postponedCount },
-      { removeOnComplete: false, removeOnFail: false }
-    );
-
-    if (job.data.dispatch_log_id && typeof dispatchLogs.updatePlannedSchedule === "function") {
-      try {
-        await dispatchLogs.updatePlannedSchedule(job.data.dispatch_log_id, resumeAt);
-      } catch (error) {
-        logger.error &&
-          logger.error(
-            JSON.stringify({
-              event: "mensagens_dispatch.update_planned_schedule_failed",
-              dispatch_log_id: job.data.dispatch_log_id,
-              error_message: error?.message,
-            })
-          );
-      }
-    }
-
-    await updateDispatchLogStatus(job.data.dispatch_log_id, "pendente");
-
-    logger.warn &&
-      logger.warn(
-        JSON.stringify({
-          event: "mensagens_dispatch.postponed",
-          job_id: job.id,
-          group_id: job.data.group_id,
-          internal_group_id: job.data.internal_group_id,
-          reason: block.reason,
-          campaign_id: block.campaign && block.campaign.id,
-          resume_at: resumeAt,
-          postponed_count: postponedCount,
-        })
-      );
-
-    return {
-      status: MENSAGENS_DISPATCH_POSTPONED_STATUS,
-      reason: block.reason,
-      resume_at: resumeAt,
-      postponed_count: postponedCount,
-    };
   }
 
   return async function mensagensDispatchWorker(job) {
@@ -328,55 +260,6 @@ function createMensagensDispatchProcessor(options = {}) {
       }
     }
 
-    // Antes de qualquer coisa: mensagem pontual nao divide a sessao do WhatsApp
-    // com campanha de video. A checagem e refeita aqui (e nao apenas no
-    // agendamento) porque a campanha pode ter sido criada depois, ou ter
-    // estourado a janela original.
-    const block = await resolveAdHocDispatchBlock({ campaignsRepository, at: now() }).catch((error) => {
-      // Falha ao consultar campanhas nao pode virar mensagem nao enviada: segue
-      // o fluxo normal e registra.
-      logger.error &&
-        logger.error(
-          JSON.stringify({
-            event: "mensagens_dispatch.exclusivity_check_failed",
-            job_id: job.id,
-            error_message: error?.message,
-          })
-        );
-
-      return null;
-    });
-
-    if (block) {
-      try {
-        return await postponeForVideoCampaign(job, block);
-      } catch (error) {
-        const failedAt = new Date().toISOString();
-
-        await job.updateData({
-          ...job.data,
-          status: MENSAGENS_DISPATCH_FAILED_STATUS,
-          failed_at: failedAt,
-          error_message: error.message,
-        });
-        await updateDispatchLogStatus(job.data.dispatch_log_id, "falhou", error.message);
-
-        logger.error &&
-          logger.error(
-            JSON.stringify({
-              event: "mensagens_dispatch.postpone_failed",
-              job_id: job.id,
-              group_id: job.data.group_id,
-              internal_group_id: job.data.internal_group_id,
-              failed_at: failedAt,
-              error_message: error.message,
-            })
-          );
-
-        throw error;
-      }
-    }
-
     await job.updateData({
       ...job.data,
       status: MENSAGENS_DISPATCH_PROCESSING_STATUS,
@@ -459,7 +342,7 @@ function createMensagensDispatchProcessor(options = {}) {
         completed_at: completedAt,
       });
 
-      await updateDispatchLogStatus(job.data.dispatch_log_id, "enviado");
+      await updateDispatchLogStatus(job.data.dispatch_log_id, "enviado", null, job.data.whatsapp_instance_id || null);
       await recordProviderDelivery(job.data.dispatch_log_id, result);
 
       logger.info &&
@@ -491,7 +374,7 @@ function createMensagensDispatchProcessor(options = {}) {
         error_message: error.message,
       });
 
-      await updateDispatchLogStatus(job.data.dispatch_log_id, "falhou", error.message);
+      await updateDispatchLogStatus(job.data.dispatch_log_id, "falhou", error.message, job.data.whatsapp_instance_id || null);
 
       logger.error &&
         logger.error(
@@ -520,7 +403,6 @@ function createMensagensDispatchWorker(options = {}) {
     dispatchLogs = dispatchLogsRepository,
     whatsappInstancesRepository,
     campaignsRepository,
-    maxPostponements,
     ...workerOptions
   } = options;
 
@@ -532,7 +414,6 @@ function createMensagensDispatchWorker(options = {}) {
       dispatchLogs,
       whatsappInstancesRepository,
       campaignsRepository,
-      maxPostponements,
     }),
     {
       // O job agora espera o ACK do WhatsApp; sem esticar o lock a BullMQ
@@ -551,7 +432,6 @@ module.exports = {
   MENSAGENS_DISPATCH_FAILED_STATUS,
   MENSAGENS_DISPATCH_INITIAL_STATUS,
   MENSAGENS_DISPATCH_JOB_NAME,
-  MENSAGENS_DISPATCH_POSTPONED_STATUS,
   MENSAGENS_DISPATCH_PROCESSING_STATUS,
   MENSAGENS_DISPATCH_SUCCESS_STATUS,
   addJitteredMensagensDispatchJobs,

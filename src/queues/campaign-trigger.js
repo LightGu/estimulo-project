@@ -740,6 +740,7 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
       status: "pendente",
       mensagem_erro: null,
       horario_envio_planejado: plannedScheduleByKey.get(`${group.progress_group_id}::${group.video_id}`) || null,
+      usuario_responsavel_id: options.usuario_responsavel_id || null,
     }))
     .filter((payload) => payload.group_id && payload.video_id);
 

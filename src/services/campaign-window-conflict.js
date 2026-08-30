@@ -1,14 +1,28 @@
-// Duas campanhas so conflitam quando disputam o mesmo grupo na mesma janela.
-// Janelas que se cruzam para grupos distintos continuam validas - e o caso
-// legitimo de organizacoes diferentes disparando em paralelo. O que quebrava
-// era a campanha criada por cima de outra sobre os mesmos grupos: as duas
-// resolviam o "proximo video" do grupo e uma atropelava a outra.
+// Duas campanhas so conflitam quando disputam o mesmo grupo, na mesma janela,
+// E na mesma fila de disparo. Janelas que se cruzam para grupos distintos
+// continuam validas - e o caso legitimo de organizacoes diferentes disparando
+// em paralelo. O que quebrava era a campanha criada por cima de outra sobre os
+// mesmos grupos NA MESMA FILA: as duas resolviam o "proximo" (video ou
+// mensagem) do grupo e uma atropelava a outra.
+//
+// Pontual (fila mensagens-dispatch) e campanha de video (fila dispatch) sao
+// filas independentes: podem disputar os mesmos grupos na mesma janela sem
+// briga, porque cada uma resolve seu proprio "proximo" numa fila separada.
+// Por isso o conflito so e valido quando os dois lados sao do mesmo tipo -
+// ver docs/evolution-api.md, secao "Disparo pontual e campanha de video rodam
+// em filas independentes".
 //
 // A regra vive aqui, e nao dentro de campaigns.service, porque o disparo pontual
 // agendado (mensagens.service.scheduleAdHoc) cria campanha com janela do mesmo
 // jeito. Com a checagem so no caminho de video, dava para agendar um pontual
 // exatamente por cima da janela de uma campanha de video nos mesmos grupos -
-// justamente o cenario que este guarda existe para impedir.
+// cenario que hoje e permitido, mas que precisava ser uma decisao explicita,
+// nao um buraco na checagem.
+
+function isSameQueueType(campaignTipo, candidateTipo) {
+  const normalize = (tipo) => (tipo === "pontual" ? "pontual" : "video");
+  return normalize(campaignTipo) === normalize(candidateTipo);
+}
 
 function formatConflictWindow(campaign, timezone) {
   const format = (value) => {
@@ -67,6 +81,7 @@ async function assertNoCampaignWindowConflict(params = {}) {
     windowEnd,
     excludeId,
     timezone,
+    campaignType,
   } = params;
 
   if (!campaignsRepository || typeof campaignsRepository.listActiveOverlappingWindow !== "function") {
@@ -87,6 +102,10 @@ async function assertNoCampaignWindowConflict(params = {}) {
   const conflicts = [];
 
   for (const campaign of candidates) {
+    if (!isSameQueueType(campaignType, campaign.tipo)) {
+      continue;
+    }
+
     const rows = await campaignGroupsRepository.listGroups(campaign.id);
     const sharedGroupIds = rows
       .map((row) => row.group_id)

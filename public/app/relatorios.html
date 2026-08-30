@@ -24,6 +24,27 @@
     <link rel="stylesheet" href="assets/css/base.css">
     <link rel="stylesheet" href="assets/css/layout.css">
     <link rel="stylesheet" href="assets/css/components.css">
+    <style>
+      /* Com 8 colunas (Data/Hora, Horario planejado, Organizacao, Grupo,
+         Campanha, Conteudo, Numero, Status) o padding/fonte padrao de tabela
+         (usado tambem em grupos.html, campanhas.html etc.) nao cabe sem
+         quebrar cabecalhos e datas/numeros que tem espaco de sobra para caber
+         numa linha so. Reduzido so aqui, sem tocar nos tokens globais. */
+      .table-compact-report th,
+      .table-compact-report td {
+        padding: 8px 8px;
+        font-size: var(--fs-xs);
+      }
+
+      .table-compact-report th {
+        white-space: nowrap;
+      }
+
+      .table-compact-report td.mono,
+      .table-compact-report td.nowrap {
+        white-space: nowrap;
+      }
+    </style>
   </head>
   <body data-page="relatorios">
     <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
@@ -75,6 +96,7 @@
               <div class="toolbar-spacer"></div>
               <button class="btn btn-secondary" id="clearFiltersButton" type="button">Limpar filtros</button>
               <button class="btn" id="applyFiltersButton" type="button">Aplicar filtro</button>
+              <button class="btn btn-danger" id="deleteRangeButton" type="button" hidden>Apagar registros</button>
             </div>
           </section>
 
@@ -88,15 +110,16 @@
               <span class="text-muted" id="timezoneLabel"></span>
             </div>
             <div class="table-wrap">
-              <table>
+              <table class="table-compact-report">
                 <thead>
                   <tr>
                     <th>Data/Hora</th>
-                    <th>Horário de envio planejado</th>
+                    <th>Horário envio</th>
                     <th>Organização</th>
                     <th>Grupo</th>
                     <th>Campanha</th>
                     <th>Conteúdo</th>
+                    <th>Número</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -171,7 +194,7 @@
         document.getElementById("summaryCards").innerHTML = "";
         document.getElementById("resultCount").textContent = "";
         document.getElementById("reportBody").innerHTML = `
-          <tr><td colspan="7"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
+          <tr><td colspan="8"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
       }
 
       const DISPATCH_STATUS_TIP = {
@@ -209,6 +232,16 @@
           second: "2-digit",
           timeZone: state.timezone || undefined,
         });
+      }
+
+      function formatDateTimeStacked(isoString) {
+        if (!isoString) return "—";
+        const date = new Date(isoString);
+        if (Number.isNaN(date.getTime())) return "—";
+        const options = { timeZone: state.timezone || undefined };
+        const dia = date.toLocaleDateString("pt-BR", { ...options, day: "2-digit", month: "2-digit", year: "numeric" });
+        const hora = date.toLocaleTimeString("pt-BR", { ...options, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        return `<div>${escapeHtml(dia)}</div><div class="text-faint" style="font-size: var(--fs-xs);">${escapeHtml(hora)}</div>`;
       }
 
       function populateFilters() {
@@ -252,6 +285,25 @@
       function clampToToday(inputEl) {
         if (inputEl.value && inputEl.value > todayIso) {
           inputEl.value = todayIso;
+        }
+      }
+
+      function formatDateOnlyPtBr(isoDateOnly) {
+        const [y, m, d] = isoDateOnly.split("-");
+        return `${d}/${m}/${y}`;
+      }
+
+      // Botao so aparece para quem tem is_admin=true na propria sessao - mesmo
+      // padrao usado em configuracoes.html para a secao de gestao de logins.
+      async function initDeleteRangeButton() {
+        try {
+          const response = await fetch("/access/status", { cache: "no-store" });
+          const status = await response.json();
+          if (status.is_admin) {
+            document.getElementById("deleteRangeButton").hidden = false;
+          }
+        } catch (error) {
+          // Sem acesso a /access/status, mantem o botao oculto por seguranca.
         }
       }
 
@@ -312,7 +364,7 @@
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
         renderPager(rows);
         if (!rows.length) {
-          document.getElementById("reportBody").innerHTML = `<tr><td colspan="7"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
+          document.getElementById("reportBody").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
         const start = (state.currentPage - 1) * PAGE_SIZE;
@@ -323,15 +375,17 @@
             const grupo = r.groups?.nome || "—";
             const campanha = campaignLabel(r.campaigns);
             const conteudo = r.video_catalog?.nome_do_arquivo || "—";
+            const numero = r.whatsapp_instances?.phone_number || r.whatsapp_instances?.instance_name || "—";
             const { label: statusLabel, badgeClass } = dispatchStatusPresentation(r);
             return `
             <tr>
-              <td class="mono">${formatDateTime(r.criado_em)}</td>
-              <td class="mono">${formatDateTime(r.horario_envio_planejado)}</td>
-              <td>${escapeHtml(organizacao)}</td>
+              <td class="mono">${formatDateTimeStacked(r.criado_em)}</td>
+              <td class="mono">${formatDateTimeStacked(r.horario_envio_planejado)}</td>
+              <td class="nowrap">${escapeHtml(organizacao)}</td>
               <td class="strong">${escapeHtml(grupo)}</td>
               <td>${escapeHtml(campanha)}</td>
               <td>${escapeHtml(conteudo)}</td>
+              <td class="mono">${escapeHtml(numero)}</td>
               <td><span class="badge has-tip ${badgeClass}" data-tip="${escapeHtml(dispatchStatusTip(r))}" data-tip-tone="${badgeClass.replace("badge-", "")}">${statusLabel}</span></td>
             </tr>`;
           })
@@ -367,6 +421,51 @@
         renderAll({ resetPage: true });
       });
 
+      // "Apagar registros": nunca remove do banco (ver report.controller.js
+      // hideDispatches) - so retira do relatorio os logs criados_em dentro do
+      // periodo escolhido, e junto qualquer campanha que fique sem nenhum log
+      // visivel restante. Reaproveita os campos de data ja usados no filtro.
+      document.getElementById("deleteRangeButton").addEventListener("click", async () => {
+        const dataInicio = document.getElementById("dataInicio").value;
+        const dataFim = document.getElementById("dataFim").value;
+
+        if (!dataInicio || !dataFim) {
+          window.estimuloAlert("Selecione o período (De/Até) que deseja apagar antes de continuar.", {
+            title: "Período obrigatório",
+          });
+          return;
+        }
+
+        if (dataInicio > dataFim) {
+          window.estimuloAlert("A data inicial não pode ser depois da data final.", { title: "Período inválido" });
+          return;
+        }
+
+        const confirmed = await window.estimuloConfirm(
+          `Apagar todos os registros do relatório entre ${formatDateOnlyPtBr(dataInicio)} e ${formatDateOnlyPtBr(dataFim)}? ` +
+            "Os registros somem do relatório, mas continuam guardados no banco de dados.",
+          { title: "Apagar registros do período", confirmLabel: "Apagar" }
+        );
+
+        if (!confirmed) return;
+
+        window.estimuloShowLoading();
+        try {
+          const params = new URLSearchParams({ start_date: dataInicio, end_date: dataFim });
+          const result = await requestJson(`/reports/dispatches?${params.toString()}`, { method: "DELETE" });
+          window.estimuloToast(
+            `${result.hidden_logs_count} registro(s) apagado(s) do relatório.` +
+              (result.hidden_campaigns_count ? ` ${result.hidden_campaigns_count} campanha(s) também removida(s) da listagem.` : ""),
+            { tone: "success" }
+          );
+          await renderAll({ resetPage: true });
+        } catch (error) {
+          window.estimuloAlert(error.message, { title: "Não foi possível apagar os registros" });
+        } finally {
+          window.estimuloHideLoading();
+        }
+      });
+
       document.getElementById("prevPageButton").addEventListener("click", () => {
         if (state.currentPage > 1) {
           state.currentPage--;
@@ -389,11 +488,12 @@
       document.getElementById("exportCsvButton").addEventListener("click", () => {
         const headers = [
           "Data/Hora",
-          "Horário de envio planejado",
+          "Horário envio",
           "Organização",
           "Grupo",
           "Campanha",
           "Conteúdo",
+          "Número",
           "Status",
           "ID da mensagem no provedor",
         ];
@@ -406,6 +506,7 @@
               r.groups?.nome || "",
               campaignLabel(r.campaigns),
               r.video_catalog?.nome_do_arquivo || "",
+              r.whatsapp_instances?.phone_number || r.whatsapp_instances?.instance_name || "",
               dispatchStatusPresentation(r).label,
               r.provider_message_id || "",
             ]
@@ -450,6 +551,7 @@
           populateFilters();
           readFiltersFromUrl();
           await renderAll();
+          await initDeleteRangeButton();
         } catch (error) {
           renderLoadError(error);
         } finally {

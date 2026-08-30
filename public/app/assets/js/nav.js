@@ -474,7 +474,7 @@
   }
 
   // ---------- User chip (topbar) ----------
-  // Loads the current user's display name from /settings/profile and fills
+  // Loads the current logged-in user's name from /access/status and fills
   // in the topbar chip (avatar initials + name) on every page.
   function initialsFor(name) {
     const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
@@ -501,9 +501,9 @@
 
   window.estimuloRefreshUserChip = async function estimuloRefreshUserChip() {
     try {
-      const response = await fetch("/settings/profile");
+      const response = await fetch("/access/status");
       const data = await response.json();
-      if (data && data.profile_name) applyUserChipName(data.profile_name);
+      if (data && data.username) applyUserChipName(data.username);
     } catch (error) {
       /* mantém o nome já exibido no HTML caso a chamada falhe */
     }

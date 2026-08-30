@@ -3,6 +3,30 @@ const campaignsRepository = require("../repositories/campaigns.repository");
 const groupsRepository = require("../repositories/groups.repository");
 const videoCatalogRepository = require("../repositories/video-catalog.repository");
 
+function assertValidReportDateRange(startDate, endDate) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (!startDate) {
+    throw new Error("Start date is required");
+  }
+
+  if (!endDate) {
+    throw new Error("End date is required");
+  }
+
+  if (startDate > today) {
+    throw new Error("Start date cannot be in the future");
+  }
+
+  if (endDate > today) {
+    throw new Error("End date cannot be in the future");
+  }
+
+  if (startDate > endDate) {
+    throw new Error("Start date cannot be after end date");
+  }
+}
+
 function createDispatchLogsService(dependencies = {}) {
   const repository = dependencies.repository || dispatchLogsRepository;
   const campaignsRepositoryDependency = dependencies.campaignsRepository || campaignsRepository;
@@ -51,7 +75,7 @@ function createDispatchLogsService(dependencies = {}) {
     return repository.createLog({ ...payload, status });
   }
 
-  async function updateStatus(id, status, mensagemErro = null) {
+  async function updateStatus(id, status, mensagemErro = null, whatsappInstanceId) {
     if (!id) {
       throw new Error("Dispatch log id is required");
     }
@@ -62,7 +86,7 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Invalid status");
     }
 
-    return repository.updateStatus(id, status, mensagemErro);
+    return repository.updateStatus(id, status, mensagemErro, whatsappInstanceId);
   }
 
   async function updatePlannedSchedule(id, horarioEnvioPlanejado) {
@@ -127,8 +151,36 @@ function createDispatchLogsService(dependencies = {}) {
     return logs.filter((log) => log.groups?.organization_id === organizationId);
   }
 
+  // "Apagar registros do relatorio por periodo": nunca remove do banco, so
+  // marca hidden_at (logs.criado_em dentro de [startDate, endDate], inclusive)
+  // - listForReport/listWithFilters ja passam a ignorar essas linhas. Quando
+  // uma campanha fica sem nenhum log visivel restante, ela e ocultada junto
+  // (findAll/listActive tambem ja filtram hidden_at), preservando a linha em
+  // ambas as tabelas para auditoria.
+  async function hideByDateRange(startDate, endDate) {
+    assertValidReportDateRange(startDate, endDate);
+
+    const hiddenLogs = await repository.hideByDateRange(`${startDate}T00:00:00.000Z`, `${endDate}T23:59:59.999Z`);
+
+    const affectedCampaignIds = [...new Set(hiddenLogs.map((log) => log.campaign_id).filter(Boolean))];
+
+    if (!affectedCampaignIds.length) {
+      return { hidden_logs_count: 0, hidden_campaigns_count: 0 };
+    }
+
+    const visibleCounts = await repository.countVisibleByCampaignIds(affectedCampaignIds);
+    const emptyCampaignIds = affectedCampaignIds.filter((campaignId) => !visibleCounts[campaignId]);
+    const hiddenCampaigns = await campaignsRepositoryDependency.hideByIds(emptyCampaignIds);
+
+    return {
+      hidden_logs_count: hiddenLogs.length,
+      hidden_campaigns_count: hiddenCampaigns.length,
+    };
+  }
+
   return {
     createLog,
+    hideByDateRange,
     listByCampaign,
     listByGroup,
     listForReport,

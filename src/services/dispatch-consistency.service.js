@@ -245,6 +245,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       neverRepeatVideo,
       forcedNextVideoId,
       scheduledAt,
+      whatsappInstanceId,
     } = options;
 
     writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.started", {
@@ -427,7 +428,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         video_id: videoId,
         log_id: log.id,
       });
-      await dispatchLogsRepositoryDependency.updateStatus(log.id, "enviado");
+      await dispatchLogsRepositoryDependency.updateStatus(log.id, "enviado", null, whatsappInstanceId || null);
       writeStageLog(logger, "info", "dispatch_consistency.mark_sent.completed", {
         campaign_id: campaignId,
         group_id: groupId,
@@ -473,7 +474,12 @@ function createDispatchConsistencyService(dependencies = {}) {
         error_message: error.message || String(error),
       });
       await markCampaignFailed(campaignId);
-      await dispatchLogsRepositoryDependency.updateStatus(log.id, "falhou", error.message || String(error));
+      await dispatchLogsRepositoryDependency.updateStatus(
+        log.id,
+        "falhou",
+        error.message || String(error),
+        whatsappInstanceId || null
+      );
       throw error;
     }
   }

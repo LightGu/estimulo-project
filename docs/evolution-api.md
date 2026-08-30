@@ -263,20 +263,21 @@ nesse caso a mensagem ja saiu e a midia ja subiu, entao reenviar duplicaria o
 conteudo no grupo sem chance de mudar o ACK. Isso tambem protege os logs
 falso-negativo gravados antes desta correcao.
 
-## Exclusividade entre disparo pontual e campanha de video
+## Disparo pontual e campanha de video rodam em filas independentes
 
-As duas coisas usam a mesma sessao do WhatsApp. Mensagem pontual nao sai enquanto
-houver campanha de video em voo, e a regra nao olha grupo nenhum
-(`src/services/dispatch-exclusivity.js`):
+`mensagens-dispatch` (disparo pontual) e a fila de disparo de campanha de video
+sao filas separadas e nao se bloqueiam entre si: um disparo pontual pode
+acontecer entremeado com uma campanha de video em andamento normalmente.
 
-- **Ao agendar** (`POST /mensagens/dispatch/schedule`): janela que cruza a de uma
-  campanha de video ativa e recusada com HTTP 409.
-- **Ao enviar agora** (`POST /mensagens/dispatch`): recusado com HTTP 409 durante
-  a campanha.
-- **No worker**: a campanha pode ter sido criada depois do agendamento, entao a
-  checagem e refeita no momento do envio. Se houver campanha em voo, o job e
-  reenfileirado para o fim da janela dela (mais um minuto de folga) e o log volta
-  para `pendente` com o novo horario planejado, ate o limite de 12 adiamentos.
+O que continua proibido (`src/services/campaign-window-conflict.js`,
+`assertNoCampaignWindowConflict`) e duas campanhas **do mesmo tipo** (pontual
+x pontual, ou video x video) disputarem os **mesmos grupos** na **mesma
+janela**: as duas resolveriam o "proximo envio" daquele grupo na mesma fila e
+uma atropelaria a outra. Pontual x campanha de video nos mesmos grupos e
+janela e permitido, mesmo com grupos identicos - cada tipo roda na sua propria
+fila (`mensagens-dispatch` ou `dispatch`) e resolve seu proprio "proximo" sem
+disputa. Janelas que se cruzam para grupos diferentes tambem sao sempre
+permitidas, independente do tipo.
 
 ## Ver logs e encerrar
 

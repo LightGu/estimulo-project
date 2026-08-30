@@ -19,7 +19,8 @@ async function findById(id, client) {
 async function findAll(client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
-    .select("*");
+    .select("*")
+    .is("hidden_at", null);
 
   if (error) {
     throw error;
@@ -32,7 +33,8 @@ async function listActive(client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
     .select("*")
-    .eq("ativo", true);
+    .eq("ativo", true)
+    .is("hidden_at", null);
 
   if (error) {
     throw error;
@@ -152,12 +154,36 @@ async function remove(id, client) {
   return data || null;
 }
 
+// Usado quando "apagar registros do relatorio por periodo" esvazia todos os
+// logs visiveis de uma campanha: a campanha some das listagens junto (findAll/
+// listActive ja filtram hidden_at), sem apagar a linha - so o historico do
+// relatorio (logs) que motivou a ocultacao e removido, nunca a campanha em si.
+async function hideByIds(campaignIds, client) {
+  if (!Array.isArray(campaignIds) || campaignIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await getClient(client)
+    .from("campaigns")
+    .update({ hidden_at: new Date().toISOString() })
+    .in("id", campaignIds)
+    .is("hidden_at", null)
+    .select("id");
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 module.exports = {
   claimTriggerFired,
   create,
   delete: remove,
   findAll,
   findById,
+  hideByIds,
   listActive,
   listActiveOverlappingWindow,
   listByStatusOlderThan,

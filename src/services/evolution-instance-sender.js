@@ -19,7 +19,11 @@ const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-ins
 // agendada (queues/mensagens-dispatch.js) precisa da mesma resolucao, e
 // importar dispatch.js de la arrastaria Google Drive e ffmpeg para dentro de um
 // worker que so envia texto.
-async function resolveInstanceSender(whatsappInstanceId, options = {}) {
+// Mesma resolucao de resolveInstanceSender, mas devolvendo tambem a instancia
+// escolhida - para quem precisa saber qual numero foi de fato usado (ex.: o
+// disparo imediato/teste, que grava o log so depois do envio e por isso nao
+// tem um whatsapp_instance_id previo para gravar nele).
+async function resolveInstance(whatsappInstanceId, options = {}) {
   const repository = options.whatsappInstancesRepository || defaultWhatsappInstancesRepository;
 
   async function resolveDefaultActiveInstance() {
@@ -46,16 +50,40 @@ async function resolveInstanceSender(whatsappInstanceId, options = {}) {
     // Nenhuma instancia cadastrada no banco: ultimo recurso, mantem o
     // comportamento historico (evolutionConfig.instanceName) para nao quebrar
     // uma instalacao que nunca migrou para a tabela whatsapp_instances.
-    return sendToEvolution;
+    return { instance: null, sender: sendToEvolution };
   }
 
   const provider = new EvolutionDeliveryProvider({
     config: { ...evolutionConfig, instanceName: instance.instance_name },
   });
 
-  return (params) => provider.send(params);
+  return { instance, sender: (params) => provider.send(params) };
+}
+
+// Resolve o sender a ser usado em um envio: com whatsapp_instance_id valido,
+// monta um EvolutionDeliveryProvider apontando para essa instancia; sem id
+// (instalacoes com um unico numero, disparo de teste, ou compatibilidade
+// retroativa) ou com um id que nao existe mais, cai para a PRIMEIRA instancia
+// ativa por prioridade - nunca para o nome fixo em EVOLUTION_INSTANCE_NAME.
+//
+// Antes o fallback era `sendToEvolution` puro, que usa evolutionConfig.instanceName
+// (o default do .env, historicamente "estimulo-mvp"). Assim que essa instancia
+// era removida da Evolution (o caso normal ao trocar de numero), todo envio sem
+// instance_id explicito - inclusive o botao "Enviar teste para este grupo" -
+// quebrava com 404 "instance does not exist", mesmo havendo um numero
+// perfeitamente configurado e conectado no banco.
+//
+// Vive fora de queues/dispatch.js porque o caminho de mensagem pontual
+// agendada (queues/mensagens-dispatch.js) precisa da mesma resolucao, e
+// importar dispatch.js de la arrastaria Google Drive e ffmpeg para dentro de um
+// worker que so envia texto.
+async function resolveInstanceSender(whatsappInstanceId, options = {}) {
+  const { sender } = await resolveInstance(whatsappInstanceId, options);
+
+  return sender;
 }
 
 module.exports = {
+  resolveInstance,
   resolveInstanceSender,
 };

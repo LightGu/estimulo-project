@@ -3,10 +3,9 @@ const campaignsRepository = require("../repositories/campaigns.repository");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const { sendToEvolution } = require("./evolution");
-const { resolveInstanceSender } = require("./evolution-instance-sender");
+const { resolveInstance, resolveInstanceSender } = require("./evolution-instance-sender");
 const { assertDeliveryConfirmed, confirmProviderDelivery, extractProviderDelivery } = require("./delivery-confirmation");
 const { assertNoCampaignWindowConflict } = require("./campaign-window-conflict");
-const { assertNoVideoCampaignInWindow, resolveAdHocDispatchBlock } = require("./dispatch-exclusivity");
 const { resolveLogScheduledAt } = require("./dispatch-staleness");
 const { buildJitteredDispatchSchedule, resolveInstanceForOrder } = require("../queues/dispatch-jitter");
 const { addMensagensDispatchJob } = require("../queues/mensagens-dispatch");
@@ -323,37 +322,7 @@ function createMensagensService(dependencies = {}) {
     });
   }
 
-  // "Enviar agora" tambem disputa a sessao do WhatsApp com a campanha de video
-  // em andamento. Aqui o bloqueio e duro (e nao um adiamento como no job
-  // agendado) porque a acao e explicita e sincrona: o usuario precisa saber na
-  // hora que aquele nao e o momento, em vez de ver um envio aceito e sem entrega.
-  async function assertNoVideoCampaignInFlight() {
-    const block = await resolveAdHocDispatchBlock({ campaignsRepository: campaigns, at: new Date() });
-
-    if (!block) {
-      return;
-    }
-
-    const error = new Error(
-      `Nao e possivel disparar agora: ha ${block.reason}. ` +
-        `O disparo pontual usa o mesmo numero de WhatsApp da campanha; tente novamente apos ${new Date(
-          block.resumeAt
-        ).toLocaleString("pt-BR")} ou agende a mensagem.`
-    );
-
-    error.code = "CAMPAIGN_WINDOW_CONFLICT";
-    error.conflicts = block.campaigns.map((campaign) => ({
-      campaign_id: campaign.id,
-      trilha: campaign.trilha,
-      window_start: campaign.window_start,
-      window_end: campaign.window_end,
-      group_ids: [],
-    }));
-
-    throw error;
-  }
-
-  async function dispatchAdHoc(payload = {}) {
+  async function dispatchAdHoc(payload = {}, context = {}) {
     const groupIds = normalizeGroupIds(payload);
 
     if (!groupIds.length) {
@@ -362,7 +331,17 @@ function createMensagensService(dependencies = {}) {
 
     const { texto, content, tipoConteudo } = normalizeContent(payload);
 
-    await assertNoVideoCampaignInFlight();
+    // Resolvida uma vez fora do loop so para saber qual instancia registrar no
+    // log: o disparo imediato nao associa grupo a instancia (ver comentario em
+    // `send`, acima), entao todo grupo desta chamada cai na mesma resolucao -
+    // nao interfere no envio em si, que continua indo por `send`. Pulado
+    // quando sendToEvolution ou resolveInstanceSender foram injetados
+    // explicitamente (uso em teste): nesses casos o real resolveInstance
+    // consultaria uma instancia diferente da que o sender injetado usa.
+    const resolvedInstanceId =
+      dependencies.sendToEvolution || dependencies.resolveInstanceSender
+        ? null
+        : (await resolveInstance(undefined, { whatsappInstancesRepository: whatsappInstances })).instance?.id || null;
 
     const results = await Promise.all(
       groupIds.map(async (groupId) => {
@@ -401,7 +380,14 @@ function createMensagensService(dependencies = {}) {
             context: { group_id: groupId, group_nome: group.nome },
           });
 
-          return { group_id: groupId, group_nome: group.nome, ok: true, response, organization_id: group.organization_id };
+          return {
+            group_id: groupId,
+            group_nome: group.nome,
+            ok: true,
+            response,
+            organization_id: group.organization_id,
+            whatsapp_instance_id: resolvedInstanceId,
+          };
         } catch (error) {
           const group = await repository.findById(groupId).catch(() => null);
           return {
@@ -442,6 +428,8 @@ function createMensagensService(dependencies = {}) {
               video_id: null,
               status: result.ok ? "enviado" : "falhou",
               mensagem_erro: result.ok ? null : result.error,
+              usuario_responsavel_id: context.userId || null,
+              whatsapp_instance_id: result.whatsapp_instance_id || null,
             });
 
             if (result.ok) {
@@ -463,7 +451,7 @@ function createMensagensService(dependencies = {}) {
     return { enviados, falhas, results };
   }
 
-  async function scheduleAdHoc(payload = {}) {
+  async function scheduleAdHoc(payload = {}, context = {}) {
     const groupIds = normalizeGroupIds(payload);
 
     if (!groupIds.length) {
@@ -525,19 +513,12 @@ function createMensagensService(dependencies = {}) {
       ? scheduleSettings.max_interval_min * 60000
       : undefined;
 
-    // Campanha de video na mesma janela bloqueia independente de grupo: e o
-    // mesmo numero de WhatsApp atendendo as duas coisas. Vem antes do conflito
-    // por grupo porque e a regra mais abrangente das duas.
-    await assertNoVideoCampaignInWindow({
-      campaignsRepository: campaigns,
-      windowStart: payload.window_start,
-      windowEnd: payload.window_end,
-      timezone: payload.timezone || scheduleSettings.timezone,
-    });
-
-    // Antes de sortear horarios e persistir qualquer coisa: um pontual agendado
-    // por cima da janela de outra campanha nos mesmos grupos e o mesmo conflito
-    // que o caminho de video ja bloqueia.
+    // Um pontual agendado por cima da janela de outro pontual nos mesmos
+    // grupos e o mesmo conflito que o caminho de video ja bloqueia entre
+    // videos: os dois resolveriam o "proximo" daquele grupo na mesma fila
+    // (mensagens-dispatch) e um atropelaria o outro. Pontual x campanha de
+    // video nos mesmos grupos/janela e permitido - sao filas independentes
+    // (mensagens-dispatch x dispatch), cada uma resolve seu proprio "proximo".
     await assertNoCampaignWindowConflict({
       campaignsRepository: campaigns,
       campaignGroupsRepository: campaignGroups,
@@ -545,6 +526,7 @@ function createMensagensService(dependencies = {}) {
       windowStart: payload.window_start,
       windowEnd: payload.window_end,
       timezone: payload.timezone || scheduleSettings.timezone,
+      campaignType: "pontual",
     });
 
     const instanceRotation = await resolveInstanceRotation();
@@ -607,6 +589,7 @@ function createMensagensService(dependencies = {}) {
             video_id: null,
             status: "pendente",
             horario_envio_planejado: item.scheduled_at,
+            usuario_responsavel_id: context.userId || null,
           });
           dispatchLogId = log.id;
         } catch (error) {

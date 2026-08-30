@@ -80,9 +80,15 @@ body {
   /* Rede de seguranca da regra "nada rola horizontalmente": mesmo que uma tela
      futura introduza um elemento largo demais, a pagina nao ganha barra lateral.
      Sem height:100% fixo: com ele, um .shell mais alto que a viewport (min-height:100vh)
-     transborda o body e cria um segundo scroll (body) alem do da janela. */
+     transborda o body e cria um segundo scroll (body) alem do da janela.
+     "clip" em vez de "hidden": o spec de overflow forca o eixo Y a virar "auto"
+     quando X e "hidden" e Y fica "visible", o que transforma html/body num
+     scroll container e quebra o position:sticky da .sidebar (ela sai da tela ao
+     rolar em vez de ficar fixa). "clip" fica isento dessa coercao e ainda
+     bloqueia o scroll horizontal. */
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 body {

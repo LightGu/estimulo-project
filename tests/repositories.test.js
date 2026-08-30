@@ -284,7 +284,7 @@ async function main() {
     await groupVideoProgressRepository.hasDuplicate("group-1", "video-1", client);
 
     await dispatchLogsRepository.createLog({ campaign_id: "camp-1", group_id: "group-1", video_id: "video-1", status: "pendente" }, client);
-    await dispatchLogsRepository.updateStatus("log-1", "enviado", null, client);
+    await dispatchLogsRepository.updateStatus("log-1", "enviado", null, undefined, client);
     await dispatchLogsRepository.listByCampaign("camp-1", client);
     await dispatchLogsRepository.listByGroup("group-1", client);
     await dispatchLogsRepository.listRecent(5, client);

@@ -75,10 +75,16 @@ async function createLog(payload, client) {
   return data;
 }
 
-async function updateStatus(id, status, mensagemErro = null, client) {
+async function updateStatus(id, status, mensagemErro = null, whatsappInstanceId, client) {
+  const update = { status, mensagem_erro: mensagemErro };
+
+  if (whatsappInstanceId !== undefined) {
+    update.whatsapp_instance_id = whatsappInstanceId;
+  }
+
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
-    .update({ status, mensagem_erro: mensagemErro })
+    .update(update)
     .eq("id", id)
     .select("*")
     .single();
@@ -299,8 +305,9 @@ async function listWithFilters(filters = {}, client) {
   let query = getClient(client)
     .from(LOGS_TABLE)
     .select(
-      "*, campaigns(id, trilha, data_envio, horario_envio, tipo, possui_midia, link_conteudo), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo)"
+      "*, campaigns(id, trilha, data_envio, horario_envio, tipo, possui_midia, link_conteudo), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo), whatsapp_instances(id, instance_name, phone_number)"
     )
+    .is("hidden_at", null)
     .order("criado_em", { ascending: false });
 
   if (filters.startDate) {
@@ -361,14 +368,65 @@ async function listFailedForRetry(options = {}, client) {
   return data || [];
 }
 
+// Usado pelo endpoint "apagar registros do relatorio por periodo": nunca
+// remove a linha - so marca hidden_at, que listWithFilters (o relatorio) ja
+// passa a excluir. Devolve os logs afetados para o service decidir quais
+// campanhas ficaram com todos os logs ocultos.
+async function hideByDateRange(startDate, endDate, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .update({ hidden_at: new Date().toISOString() })
+    .gte("criado_em", startDate)
+    .lte("criado_em", endDate)
+    .is("hidden_at", null)
+    .select("id, campaign_id");
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
+// Conta, por campanha, quantos logs ainda estao visiveis (hidden_at nulo).
+// Usado apos hideByDateRange para saber quais das campanhas afetadas nao tem
+// mais nenhum log visivel e por isso devem ser ocultadas junto.
+async function countVisibleByCampaignIds(campaignIds, client) {
+  if (!Array.isArray(campaignIds) || campaignIds.length === 0) {
+    return {};
+  }
+
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .select("campaign_id")
+    .in("campaign_id", campaignIds)
+    .is("hidden_at", null);
+
+  if (error) {
+    throw error;
+  }
+
+  const counts = {};
+  for (const campaignId of campaignIds) {
+    counts[campaignId] = 0;
+  }
+  for (const row of data || []) {
+    counts[row.campaign_id] = (counts[row.campaign_id] || 0) + 1;
+  }
+
+  return counts;
+}
+
 module.exports = {
   DEFAULT_FAILED_RETRY_BATCH_SIZE,
   DEFAULT_MAX_RETRY_COUNT,
   cancelIfPending,
   cancelPendingByCampaign,
   claimForSend,
+  countVisibleByCampaignIds,
   createLog,
   findById,
+  hideByDateRange,
   listByCampaign,
   listByGroup,
   listFailedForRetry,
