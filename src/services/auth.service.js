@@ -63,6 +63,7 @@ async function createUser({ username, password, active = true, is_admin = false 
     password_hash: hashPassword(password),
     active,
     is_admin: Boolean(is_admin),
+    display_name: normalizedUsername,
   });
 
   return sanitizeUser(user);
@@ -71,6 +72,18 @@ async function createUser({ username, password, active = true, is_admin = false 
 async function listUsers(deps = {}) {
   const repository = deps.appUsersRepository || appUsersRepositoryDefault;
   return repository.findAll();
+}
+
+// Usado pelo /access/status para ler o display_name sempre atualizado - a
+// sessao (ate 7 dias de validade) so guarda userId/username/isAdmin, entao
+// sem esse lookup ao vivo o chip continuaria com o nome antigo ate a pessoa
+// deslogar e logar de novo, mesmo depois de editar o proprio nome.
+async function getUserById(id, deps = {}) {
+  const repository = deps.appUsersRepository || appUsersRepositoryDefault;
+  if (!id) return null;
+
+  const user = await repository.findById(id);
+  return sanitizeUser(user);
 }
 
 async function updatePassword(id, password, deps = {}) {
@@ -90,6 +103,21 @@ async function setActive(id, active, deps = {}) {
 async function setAdmin(id, isAdmin, deps = {}) {
   const repository = deps.appUsersRepository || appUsersRepositoryDefault;
   const user = await repository.update(id, { is_admin: Boolean(isAdmin) });
+  return sanitizeUser(user);
+}
+
+// Nome exibido no user-chip (canto superior direito) - propriedade da PROPRIA
+// conta, ao contrario do antigo settings.profile_name (uma linha global unica
+// que todo mundo compartilhava e via mudar quando qualquer pessoa editava).
+async function updateDisplayName(id, displayName, deps = {}) {
+  const repository = deps.appUsersRepository || appUsersRepositoryDefault;
+  const trimmed = String(displayName || "").trim();
+
+  if (!trimmed) {
+    throw new Error("Informe um nome de exibicao.");
+  }
+
+  const user = await repository.update(id, { display_name: trimmed });
   return sanitizeUser(user);
 }
 
@@ -131,9 +159,11 @@ async function removeUser(id, { currentUserId } = {}, deps = {}) {
 module.exports = {
   authenticate,
   createUser,
+  getUserById,
   listUsers,
   removeUser,
   setActive,
   setAdmin,
+  updateDisplayName,
   updatePassword,
 };

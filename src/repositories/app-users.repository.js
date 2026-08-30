@@ -2,7 +2,7 @@ function getClient(client) {
   return client || require("../database/client");
 }
 
-const PUBLIC_COLUMNS = "id, username, active, is_admin, created_at, updated_at, last_login_at";
+const PUBLIC_COLUMNS = "id, username, display_name, active, is_admin, created_at, updated_at, last_login_at";
 
 async function findByUsername(username, client) {
   const { data, error } = await getClient(client)

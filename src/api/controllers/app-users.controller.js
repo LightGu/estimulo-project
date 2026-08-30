@@ -72,7 +72,31 @@ function createAppUsersController(dependencies = {}) {
     }
   }
 
-  return { list, create, setActive, remove };
+  // Sem authGate.requireAdmin de proposito: qualquer sessao valida pode mudar
+  // o PROPRIO nome (req.user.id vem da sessao, nunca de req.params/req.body -
+  // ninguem consegue editar o nome de outra pessoa por aqui).
+  async function updateOwnDisplayName(req, res) {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ error: "Sessao invalida." });
+      }
+
+      const { display_name } = req.body || {};
+      const user = await authService.updateDisplayName(req.user.id, display_name);
+
+      return res.status(200).json(user);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Informe um nome de exibicao.") {
+        return res.status(400).json({ error: message });
+      }
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  return { list, create, setActive, remove, updateOwnDisplayName };
 }
 
 module.exports = createAppUsersController;

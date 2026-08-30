@@ -33,7 +33,6 @@ function pad2(value) {
   return String(value).padStart(2, "0");
 }
 
-const DEFAULT_PROFILE_NAME = "Lina Chaim";
 const DEFAULT_SCHEDULE_TIMEZONE = "America/Sao_Paulo";
 const DEFAULT_SCHEDULE_MIN_INTERVAL_MIN = 4;
 const DEFAULT_SCHEDULE_MAX_INTERVAL_MIN = 12;
@@ -208,26 +207,6 @@ function createSettingsService(dependencies = {}) {
     await scheduleIndexJob({ cron_expression: cronExpression, timezone });
 
     return getDriveSettings();
-  }
-
-  async function getProfileSettings() {
-    const settings = await repository.getSettings();
-
-    return {
-      profile_name: (settings && settings.profile_name) || DEFAULT_PROFILE_NAME,
-    };
-  }
-
-  async function updateProfileSettings(input = {}) {
-    const profileName = String(input.profile_name || "").trim();
-
-    if (!profileName) {
-      throw new Error("profile_name is required");
-    }
-
-    await repository.updateSettings({ profile_name: profileName });
-
-    return getProfileSettings();
   }
 
   const TIME_OF_DAY_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -548,7 +527,6 @@ function createSettingsService(dependencies = {}) {
     getDispatchRulesSettings,
     getDriveSettings,
     getNotificationSettings,
-    getProfileSettings,
     getScheduleSettings,
     reindexDriveNow,
     testDatabaseConnection,
@@ -558,7 +536,6 @@ function createSettingsService(dependencies = {}) {
     updateDriveIndexSchedule,
     updateDriveRootFolder,
     updateNotificationSettings,
-    updateProfileSettings,
     updateScheduleSettings,
   };
 }

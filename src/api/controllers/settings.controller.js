@@ -107,32 +107,6 @@ function createSettingsController(dependencies = {}) {
     }
   }
 
-  async function getProfileSettings(req, res) {
-    try {
-      const settings = await settingsService.getProfileSettings();
-
-      return res.status(200).json(settings);
-    } catch (error) {
-      return res.status(500).json({ error: "Internal server error" });
-    }
-  }
-
-  async function updateProfileSettings(req, res) {
-    try {
-      const settings = await settingsService.updateProfileSettings(req.body || {});
-
-      return res.status(200).json(settings);
-    } catch (error) {
-      const message = error?.message || "Internal server error";
-
-      if (message === "profile_name is required") {
-        return res.status(400).json({ error: message });
-      }
-
-      return res.status(500).json({ error: "Internal server error" });
-    }
-  }
-
   async function getAIAgentsSettings(req, res) {
     try {
       const settings = await settingsService.getAIAgentsSettings();
@@ -234,7 +208,6 @@ function createSettingsController(dependencies = {}) {
     getDispatchRulesSettings,
     getDriveSettings,
     getNotificationSettings,
-    getProfileSettings,
     getScheduleSettings,
     reindexNow,
     testConnection,
@@ -244,7 +217,6 @@ function createSettingsController(dependencies = {}) {
     updateDriveRootFolder,
     updateDriveSchedule,
     updateNotificationSettings,
-    updateProfileSettings,
     updateScheduleSettings,
   };
 }

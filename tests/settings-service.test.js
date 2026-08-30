@@ -83,36 +83,6 @@ async function main() {
     await assert.rejects(() => service.updateDriveIndexSchedule({ hour: 0, minute: 60 }), /minute must be an integer/);
   }
 
-  // ---------- getProfileSettings / updateProfileSettings ----------
-  {
-    const defaultService = createSettingsService({
-      settingsRepository: { getSettings: async () => ({}) },
-    });
-
-    const defaultSettings = await defaultService.getProfileSettings();
-    assert.equal(defaultSettings.profile_name, "Lina Chaim");
-
-    const updateCalls = [];
-    const settingsRepository = {
-      getSettings: async () => ({ profile_name: "Ana Souza" }),
-      updateSettings: async (payload) => {
-        updateCalls.push(payload);
-        return payload;
-      },
-    };
-
-    const service = createSettingsService({ settingsRepository });
-
-    const settings = await service.getProfileSettings();
-    assert.equal(settings.profile_name, "Ana Souza");
-
-    await service.updateProfileSettings({ profile_name: "  Bruno Lima  " });
-    assert.equal(updateCalls[0].profile_name, "Bruno Lima");
-
-    await assert.rejects(() => service.updateProfileSettings({}), /profile_name is required/);
-    await assert.rejects(() => service.updateProfileSettings({ profile_name: "   " }), /profile_name is required/);
-  }
-
   // ---------- testDriveConnection ----------
   {
     const settingsRepository = {
