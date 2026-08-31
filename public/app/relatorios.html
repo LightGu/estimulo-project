@@ -381,7 +381,7 @@
             const grupo = r.groups?.nome || "—";
             const campanha = campaignLabel(r.campaigns);
             const conteudo = r.video_catalog?.nome_do_arquivo || "—";
-            const numero = r.whatsapp_instances?.phone_number || r.whatsapp_instances?.instance_name || "—";
+            const numero = r.whatsapp_instances?.instance_name || r.whatsapp_instances?.phone_number || "—";
             const { label: statusLabel, badgeClass } = dispatchStatusPresentation(r);
             return `
             <tr>
@@ -514,7 +514,7 @@
               r.groups?.nome || "",
               campaignLabel(r.campaigns),
               r.video_catalog?.nome_do_arquivo || "",
-              r.whatsapp_instances?.phone_number || r.whatsapp_instances?.instance_name || "",
+              r.whatsapp_instances?.instance_name || r.whatsapp_instances?.phone_number || "",
               dispatchStatusPresentation(r).label,
               r.provider_message_id || "",
             ]

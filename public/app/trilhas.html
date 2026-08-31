@@ -186,6 +186,11 @@
             <input id="newTrailNome" type="text" placeholder="Ex.: 2.3 Como Cuidar das Finanças">
           </div>
           <div class="field">
+            <label for="newTrailMergeSearch">Juntar vídeos de outras trilhas (opcional)</label>
+            <input id="newTrailMergeSearch" type="text" placeholder="Buscar trilha pelo nome">
+            <div class="unclassified-list" id="newTrailMergeList" style="max-height:140px;"></div>
+          </div>
+          <div class="field">
             <label for="newTrailVideoSearch">Buscar vídeo</label>
             <input id="newTrailVideoSearch" type="text" placeholder="Filtrar pelo nome do arquivo">
           </div>
@@ -350,6 +355,10 @@
       // video e depois filtrar por outro nome desmarcava o primeiro (o
       // checkbox dele saia do DOM junto com o resto da lista filtrada).
       let newTrailSelectedVideoIds = new Set();
+      // Trilhas marcadas em "Juntar videos de outras trilhas": marcar adiciona todos
+      // os videos dela em newTrailSelectedVideoIds, desmarcar remove todos eles -
+      // e' uma acao em lote, nao um vinculo persistente entre a trilha e o video.
+      let newTrailMergeSelectedIds = new Set();
       let newVideoSelectedVideoIds = new Set();
       let moveReleaseTrap = null;
       let renameReleaseTrap = null;
@@ -1598,16 +1607,72 @@
       });
       document.getElementById("newTrailVideoSearch").addEventListener("input", renderNewTrailVideosList);
 
+      // Junta trilhas ja existentes na nova trilha: marcar uma trilha aqui so
+      // adiciona os ids dos videos dela em newTrailSelectedVideoIds (lista unica
+      // usada no submit) - a pessoa ainda pode ajustar video a video depois, tanto
+      // os que vieram da fusao quanto os selecionados manualmente.
+      function renderNewTrailMergeList() {
+        const list = document.getElementById("newTrailMergeList");
+        const search = document.getElementById("newTrailMergeSearch").value.trim().toLowerCase();
+
+        const candidates = state.trails.filter((t) => {
+          if (!search) return true;
+          return `${t.macrotema} ${t.trilha}`.toLowerCase().includes(search);
+        });
+
+        if (!candidates.length) {
+          list.innerHTML = '<div class="unclassified-item text-faint">Nenhuma trilha encontrada.</div>';
+          return;
+        }
+
+        list.innerHTML = candidates
+          .map((t) => {
+            const checked = newTrailMergeSelectedIds.has(t.id) ? "checked" : "";
+            const videoCount = (t.videos || []).length;
+            return `
+              <label class="unclassified-item">
+                <input type="checkbox" data-merge-trilha value="${escapeHtml(t.id)}" ${checked}>
+                <span>${escapeHtml(t.macrotema)} · ${escapeHtml(t.trilha)}</span>
+                <span class="text-faint">${videoCount} vídeo(s)</span>
+              </label>`;
+          })
+          .join("");
+      }
+
+      document.getElementById("newTrailMergeList").addEventListener("change", (event) => {
+        const checkbox = event.target.closest("[data-merge-trilha]");
+        if (!checkbox) return;
+
+        const trail = state.trails.find((t) => t.id === checkbox.value);
+        if (!trail) return;
+
+        const videoIds = (trail.videos || []).map((v) => v.id);
+
+        if (checkbox.checked) {
+          newTrailMergeSelectedIds.add(trail.id);
+          videoIds.forEach((id) => newTrailSelectedVideoIds.add(id));
+        } else {
+          newTrailMergeSelectedIds.delete(trail.id);
+          videoIds.forEach((id) => newTrailSelectedVideoIds.delete(id));
+        }
+
+        renderNewTrailVideosList();
+      });
+      document.getElementById("newTrailMergeSearch").addEventListener("input", renderNewTrailMergeList);
+
       document.getElementById("newTrailButton").addEventListener("click", async () => {
         renderNewTrailPerfilCheckboxes();
         renderNewTrailMacrotemaSelect();
         document.getElementById("newTrailMacrotemaNovo").value = "";
         document.getElementById("newTrailNome").value = "";
         document.getElementById("newTrailVideoSearch").value = "";
+        document.getElementById("newTrailMergeSearch").value = "";
         document.getElementById("newTrailStatus").textContent = "";
         document.getElementById("newTrailStatus").className = "status-line";
         newTrailSelectedVideoIds = new Set();
+        newTrailMergeSelectedIds = new Set();
         renderNewTrailVideosList();
+        renderNewTrailMergeList();
         newTrailOverlay.hidden = false;
         newTrailReleaseTrap = window.estimuloTrapFocus(newTrailOverlay);
 

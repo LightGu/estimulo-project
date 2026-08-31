@@ -304,7 +304,7 @@
       function instanceLabel(instanceId) {
         const instance = state.whatsappInstances.find((item) => item.id === instanceId);
         if (!instance) return instanceId;
-        return instance.phone_number || instance.instance_name;
+        return instance.instance_name || instance.phone_number;
       }
 
       function instanceCell(group) {
@@ -401,7 +401,7 @@
         const tabs = [{ id: "todos", label: "Todos" }].concat(
           state.whatsappInstances.map((instance) => ({
             id: instance.id,
-            label: instance.phone_number || instance.instance_name,
+            label: instance.instance_name || instance.phone_number,
           }))
         );
 
