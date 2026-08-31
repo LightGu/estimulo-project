@@ -83,6 +83,56 @@ function createWhatsappInstancesController(dependencies = {}) {
     }
   }
 
+  // PATCH .../:id/pause com { paused: true|false }. Nao toca na Evolution API:
+  // a instancia continua conectada, so deixa (ou volta) a ser usada nos envios.
+  async function setPaused(req, res) {
+    try {
+      const paused = (req.body || {}).paused;
+
+      if (typeof paused !== "boolean") {
+        return res.status(400).json({ error: "paused must be a boolean" });
+      }
+
+      const instance = await service.setInstancePaused(req.params.id, paused);
+
+      return res.status(200).json(instance);
+    } catch (error) {
+      const message = error?.message || "Internal server error";
+
+      if (message === "Instance not found") {
+        return res.status(404).json({ error: message });
+      }
+
+      // 42703 = undefined_column no Postgres. Acontece quando a migration
+      // 202608310001_add_whatsapp_instances_paused.sql ainda nao rodou neste
+      // banco: sem ela a coluna paused_at nao existe e o UPDATE estoura. Sem
+      // esta ramificacao o erro chegava na tela como um "Internal server error"
+      // opaco, sem indicar o que fazer.
+      if (error?.code === "42703" || /paused_at/.test(message)) {
+        console.error(
+          JSON.stringify({
+            event: "whatsapp_instances.set_paused.missing_column",
+            error_message: message,
+          })
+        );
+
+        return res.status(503).json({
+          error:
+            "A coluna paused_at ainda nao existe neste banco. Aplique a migration 202608310001_add_whatsapp_instances_paused.sql para habilitar a pausa de numeros.",
+        });
+      }
+
+      console.error(
+        JSON.stringify({
+          event: "whatsapp_instances.set_paused.failed",
+          error_message: message,
+        })
+      );
+
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
   async function reorder(req, res) {
     try {
       const result = await service.reorderPriority((req.body || {}).ordered_ids || []);
@@ -143,6 +193,7 @@ function createWhatsappInstancesController(dependencies = {}) {
     register,
     remove,
     reorder,
+    setPaused,
     testConnection,
     updateRotation,
   };

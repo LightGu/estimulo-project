@@ -1287,7 +1287,7 @@
             try {
               await applyTrilhaChange(recommended.trilha_id, recommended.profile_id);
             } catch (error) {
-              window.estimuloAlert(error.message);
+              window.estimuloTratarErro(error.message);
               useRecommendedTrilhaButton.disabled = false;
             }
           });
@@ -1304,7 +1304,7 @@
             try {
               await applyTrilhaChange(el.dataset.selectStepTrilha, group.profile_id);
             } catch (error) {
-              window.estimuloAlert(error.message);
+              window.estimuloTratarErro(error.message);
               el.dataset.selecting = "0";
             }
           };
@@ -1325,7 +1325,7 @@
           await loadProgressForGroup(groupId);
           renderDetail();
         } catch (error) {
-          window.estimuloAlert(error.message);
+          window.estimuloTratarErro(error.message);
         }
       }
 
@@ -1694,7 +1694,7 @@ function parseDateOnly(value) {
           closeCaptionModal();
           await refreshCaptionProgress();
         } catch (error) {
-          window.estimuloAlert(error.message);
+          window.estimuloTratarErro(error.message);
         } finally {
           saveButton.disabled = false;
         }

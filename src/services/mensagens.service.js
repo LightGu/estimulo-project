@@ -107,6 +107,31 @@ function createMensagensService(dependencies = {}) {
     return Promise.all(groupIds.map((groupId) => repository.findById(groupId)));
   }
 
+  // Com TODOS os numeros pausados nao ha por onde enviar. Sem esta checagem o
+  // disparador aceitaria a requisicao e so falharia la na frente, no envio de
+  // cada grupo - ou pior, cairia no sender fixo do .env e furaria a pausa.
+  // Falha cedo, com mensagem que diz o que fazer.
+  async function assertAnyInstanceDispatchable() {
+    if (typeof whatsappInstancesService.listDispatchableInstances !== "function") {
+      return;
+    }
+
+    const [dispatchable, all] = await Promise.all([
+      whatsappInstancesService.listDispatchableInstances(),
+      typeof whatsappInstances.listActive === "function" ? whatsappInstances.listActive() : [],
+    ]);
+
+    if ((dispatchable || []).length > 0 || (all || []).length === 0) {
+      return;
+    }
+
+    const error = new Error(
+      "Todos os números de WhatsApp estão pausados. Despause ao menos um número em Configurações para enviar mensagens."
+    );
+    error.code = "ALL_INSTANCES_PAUSED";
+    throw error;
+  }
+
   // Mesma regra do caminho de video (filterGroupsMissingInstanceCoverage em
   // queues/campaign-trigger.js): com 2+ numeros ativos, um grupo que nao esteja
   // vinculado a todos eles pode cair, no rodizio, em um numero que nao participa
@@ -152,11 +177,17 @@ function createMensagensService(dependencies = {}) {
     }
   }
 
-  // Instancias ativas (ordenadas por prioridade) e o N global de rodizio, para
-  // que buildJitteredDispatchSchedule resolva a instancia de cada grupo.
+  // Instancias disponiveis para disparo (ordenadas por prioridade) e o N global
+  // de rodizio, para que buildJitteredDispatchSchedule resolva a instancia de
+  // cada grupo. listDispatchable exclui numeros pausados - eles seguem
+  // conectados, mas nao entram no rodizio do disparador pontual.
   async function resolveInstanceRotation() {
     const [instances, rotationSettings] = await Promise.all([
-      typeof whatsappInstances.listActive === "function" ? whatsappInstances.listActive() : [],
+      typeof whatsappInstances.listDispatchable === "function"
+        ? whatsappInstances.listDispatchable()
+        : typeof whatsappInstances.listActive === "function"
+          ? whatsappInstances.listActive()
+          : [],
       typeof whatsappInstancesService.getRotationSettings === "function"
         ? whatsappInstancesService.getRotationSettings()
         : {},
@@ -331,6 +362,8 @@ function createMensagensService(dependencies = {}) {
 
     const { texto, content, tipoConteudo } = normalizeContent(payload);
 
+    await assertAnyInstanceDispatchable();
+
     // Resolvida uma vez fora do loop so para saber qual instancia registrar no
     // log: o disparo imediato nao associa grupo a instancia (ver comentario em
     // `send`, acima), entao todo grupo desta chamada cai na mesma resolucao -
@@ -499,6 +532,7 @@ function createMensagensService(dependencies = {}) {
       );
     }
 
+    await assertAnyInstanceDispatchable();
     await assertInstanceCoverage(groups);
 
     const scheduleSettings = await resolveScheduleSettings();

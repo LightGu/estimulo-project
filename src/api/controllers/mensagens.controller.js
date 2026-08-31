@@ -65,6 +65,13 @@ function respondWithError(res, error) {
     return res.status(409).json({ error: message, conflicts: error.conflicts });
   }
 
+  // Todos os numeros pausados: nao e erro de validacao do que o usuario digitou,
+  // e um estado da configuracao que ele mesmo pode resolver despausando um
+  // numero - por isso 409 com a mensagem original, e nao um 500 opaco.
+  if (error?.code === "ALL_INSTANCES_PAUSED") {
+    return res.status(409).json({ error: message });
+  }
+
   if (isValidationError(message)) {
     return res.status(400).json({ error: message });
   }

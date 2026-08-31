@@ -1132,3 +1132,105 @@ td.mono {
   from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Erro inesperado — caixa dedicada para falhas de servidor (5xx) e API fora do ar.
+   Separada de .modal/estimuloAlert de proposito: aquele e' o aviso generico
+   ("Aviso" + texto), e um 500 cru dentro dele so mostrava "Falha na requisicao
+   (500)", que nao diz ao operador nem que o problema foi do nosso lado nem o
+   que fazer. Aqui o tom e' de desculpa, a causa tecnica fica recolhida em
+   <details> e a acao primaria e' tentar de novo. */
+.modal-erro {
+  width: min(440px, 100%);
+  text-align: center;
+  padding: 30px 26px 24px;
+}
+
+.modal-erro-icone {
+  width: 62px;
+  height: 62px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--danger-bg);
+  color: var(--danger);
+  animation: modal-erro-pop 0.25s ease;
+}
+
+/* Icone desenhado em SVG (nao glifo de fonte): mantem o traco nitido em
+   qualquer zoom e herda --danger via currentColor nos dois temas. */
+.modal-erro-icone svg {
+  width: 30px;
+  height: 30px;
+}
+
+.modal-erro h3 {
+  margin: 0 0 8px;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-tight);
+  color: var(--text);
+}
+
+.modal-erro p {
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  color: var(--text-muted);
+}
+
+/* Detalhe tecnico (mensagem/status vindos da API). Fechado por padrao: o
+   operador nao precisa dele, mas quem for abrir um chamado precisa. */
+.modal-erro-detalhe {
+  margin-top: 18px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.modal-erro-detalhe > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  list-style: none;
+}
+
+.modal-erro-detalhe > summary::-webkit-details-marker { display: none; }
+
+.modal-erro-detalhe > summary::before {
+  content: "▸ ";
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+.modal-erro-detalhe[open] > summary::before { content: "▾ "; }
+
+.modal-erro-detalhe > summary:hover { color: var(--text); }
+
+.modal-erro-detalhe pre {
+  margin: 0;
+  padding: 0 12px 10px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.modal-erro-acoes {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+@keyframes modal-erro-pop {
+  from { opacity: 0; transform: scale(0.82); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal-erro-icone { animation: none; }
+}

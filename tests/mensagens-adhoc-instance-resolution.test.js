@@ -65,6 +65,11 @@ function buildHarness(overrides = {}) {
         return overrides.instances || [];
       },
     },
+    whatsappInstancesService: overrides.whatsappInstancesService || {
+      async listDispatchableInstances() {
+        return (overrides.instances || []).filter((instance) => !instance.paused_at);
+      },
+    },
     // Espiao no lugar do resolveInstanceSender real: prova que dispatchAdHoc
     // passa por ele, sem depender de rede nem do client HTTP da Evolution.
     resolveInstanceSender: async (whatsappInstanceId, options) => {
@@ -159,9 +164,60 @@ async function testSendToEvolutionExplicitoIgnoraOResolvedor() {
   assert.equal(result.results[0].ok, true);
 }
 
+// Todos os numeros pausados: o disparador pontual precisa recusar ANTES de
+// tentar enviar, com mensagem acionavel - e nao criar log nem chamar o sender.
+async function testDisparadorPontualBloqueiaComTodosOsNumerosPausados() {
+  const { service, resolveInstanceSenderCalls } = buildHarness({
+    instances: [
+      { id: "instance-1", instance_name: "TesteLucas", priority: 0, paused_at: "2026-08-31T10:00:00.000Z" },
+      { id: "instance-2", instance_name: "Outro", priority: 1, paused_at: "2026-08-31T10:05:00.000Z" },
+    ],
+  });
+
+  await assert.rejects(
+    () => service.dispatchAdHoc({ group_ids: ["group-1"], texto: "oi" }),
+    (error) => error.code === "ALL_INSTANCES_PAUSED" && /pausados/i.test(error.message)
+  );
+
+  assert.equal(resolveInstanceSenderCalls.length, 0, "nao pode nem chegar a resolver o sender");
+}
+
+// Um unico numero, pausado: mesmo bloqueio.
+async function testDisparadorPontualBloqueiaComUnicoNumeroPausado() {
+  const { service } = buildHarness({
+    instances: [
+      { id: "instance-1", instance_name: "TesteLucas", priority: 0, paused_at: "2026-08-31T10:00:00.000Z" },
+    ],
+  });
+
+  await assert.rejects(
+    () => service.dispatchAdHoc({ group_ids: ["group-1"], texto: "oi" }),
+    (error) => error.code === "ALL_INSTANCES_PAUSED"
+  );
+}
+
+// Com um numero ativo entre os pausados, o envio segue normalmente.
+async function testDisparadorPontualSegueComAoMenosUmNumeroAtivo() {
+  const { service, sentParams } = buildHarness({
+    instances: [
+      { id: "instance-1", instance_name: "Pausado", priority: 0, paused_at: "2026-08-31T10:00:00.000Z" },
+      { id: "instance-2", instance_name: "TesteLucas", priority: 1 },
+    ],
+  });
+
+  const result = await service.dispatchAdHoc({ group_ids: ["group-1"], texto: "oi" });
+
+  assert.equal(result.results[0].ok, true);
+  assert.equal(sentParams.length, 1);
+}
+
 async function main() {
   await testDispatchAdHocPassaPeloResolvedorDeInstanciaSemSendToEvolutionInjetado();
   await testSendToEvolutionExplicitoIgnoraOResolvedor();
+  await testDisparadorPontualBloqueiaComTodosOsNumerosPausados();
+  await testDisparadorPontualBloqueiaComUnicoNumeroPausado();
+  await testDisparadorPontualSegueComAoMenosUmNumeroAtivo();
+
   console.log("mensagens dispatch ad-hoc instance resolution tests OK");
 }
 

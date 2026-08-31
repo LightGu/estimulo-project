@@ -180,6 +180,23 @@ async function remove(id, client) {
   return data || null;
 }
 
+// Remove varios grupos de uma vez. Usado ao desconectar um numero da Evolution
+// API: os grupos que so eram visiveis por aquele numero deixam de ser
+// alcancaveis por qualquer disparo, entao saem do banco junto com ele.
+async function removeMany(ids, client) {
+  if (!ids || ids.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await getClient(client).from("groups").delete().in("id", ids).select("*");
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function countByTrilhaId(trilhaId, client) {
   const { count, error } = await getClient(client)
     .from("groups")
@@ -205,6 +222,7 @@ module.exports = {
   listVideoEnabled,
   listWithoutSegment,
   remove,
+  removeMany,
   update,
   updateTrilhaIfCurrent,
 };

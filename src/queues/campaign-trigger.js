@@ -269,15 +269,21 @@ function buildDispatchParams(jobData, dispatchGroups, options = {}) {
   };
 }
 
-// Carrega, uma vez por execucao do trigger, as instancias ativas (ordenadas por
-// prioridade) e o N global de rodizio - usados tanto no caminho com jitter
-// (dispatch-jitter.js resolve por grupo) quanto no caminho sem jitter abaixo.
+// Carrega, uma vez por execucao do trigger, as instancias disponiveis para
+// disparo (ordenadas por prioridade) e o N global de rodizio - usados tanto no
+// caminho com jitter (dispatch-jitter.js resolve por grupo) quanto no caminho
+// sem jitter abaixo.
+//
+// listDispatchable, nao listActive: numero pausado continua conectado, mas fica
+// de fora do rodizio do envio automatizado ate ser despausado.
 async function resolveActiveInstancesAndRotation(dependencies = {}) {
   const instancesRepository = dependencies.whatsappInstancesRepository || defaultWhatsappInstancesRepository;
   const instancesService = dependencies.whatsappInstancesService || defaultWhatsappInstancesService;
 
   const [whatsappInstances, rotationSettings] = await Promise.all([
-    instancesRepository.listActive(),
+    typeof instancesRepository.listDispatchable === "function"
+      ? instancesRepository.listDispatchable()
+      : instancesRepository.listActive(),
     instancesService.getRotationSettings(),
   ]);
 
@@ -340,15 +346,53 @@ async function filterGroupsMissingInstanceCoverage(dispatchGroups, dependencies 
   return dispatchGroups.filter((group) => !ineligibleSet.has(group.progress_group_id));
 }
 
+// Distingue "todos os numeros pausados" (bloqueia o disparo) de "nenhum numero
+// cadastrado" (instalacao legada que nunca migrou para whatsapp_instances - o
+// sender historico do .env ainda se aplica, entao segue o fluxo normal).
+async function areAllInstancesPaused(dispatchableInstances, dependencies = {}) {
+  if ((dispatchableInstances || []).length > 0) {
+    return false;
+  }
+
+  const instancesRepository = dependencies.whatsappInstancesRepository || defaultWhatsappInstancesRepository;
+
+  if (typeof instancesRepository.listActive !== "function") {
+    return false;
+  }
+
+  const registered = await instancesRepository.listActive();
+
+  return Boolean(registered && registered.length);
+}
+
 async function enqueueResolvedDispatchJobs(jobData, dispatchGroups, dependencies = {}) {
   const addSingleDispatchJob = dependencies.addDispatchJob || addDispatchJob;
   const addManyJitteredDispatchJobs = dependencies.addJitteredDispatchJobs || addJitteredDispatchJobs;
+  const logger = dependencies.logger || console;
 
   if (dispatchGroups.length === 0) {
     return [];
   }
 
   const { whatsappInstances, rotationGroupCount } = await resolveActiveInstancesAndRotation(dependencies);
+
+  // Todos os numeros pausados: nao ha por onde enviar. Nao enfileira nada em vez
+  // de criar jobs que iriam falhar (ou, pior, cair no sender fixo do .env e
+  // furar a pausa) - a campanha simplesmente nao dispara nesta rodada e volta a
+  // disparar sozinha quando algum numero for despausado. O evento fica no log
+  // para nao virar um "sumico" silencioso.
+  if (await areAllInstancesPaused(whatsappInstances, dependencies)) {
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "dispatch.skipped_all_instances_paused",
+          campaign_id: jobData && jobData.campaign_id,
+          groups: dispatchGroups.length,
+        })
+      );
+
+    return [];
+  }
   const precomputedByGroup = resolvePrecomputedScheduleByGroup(jobData);
   // So reaproveita o sorteio da confirmacao se ele cobrir todos os grupos desta
   // execucao; se a lista mudou no meio do caminho (grupo pausado, video novo),
@@ -1167,6 +1211,7 @@ module.exports = {
   buildCampaignTriggerJobData,
   buildCampaignVideoFlowRepository,
   createPendingDispatchLogsForCampaign,
+  enqueueResolvedDispatchJobs,
   extractCampaignGroup,
   filterGroupsMissingInstanceCoverage,
   formatScheduledDateTime,

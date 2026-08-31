@@ -118,6 +118,15 @@ function createGroupsController(dependencies = {}) {
         return res.status(409).json({ error: message, group_ids: error.groupIds });
       }
 
+      // Envio de teste com todos os numeros pausados: estado de configuracao que
+      // o usuario resolve despausando um numero, nao falha interna.
+      if (error?.code === "ALL_INSTANCES_PAUSED") {
+        return res.status(409).json({
+          error:
+            "Todos os números de WhatsApp estão pausados. Despause ao menos um número em Configurações para enviar mensagens.",
+        });
+      }
+
       return res.status(500).json({ error: "Internal server error" });
     }
   }

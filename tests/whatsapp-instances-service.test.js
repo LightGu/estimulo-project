@@ -121,6 +121,7 @@ async function main() {
     const reorderCalls = [];
     const repository = {
       findById: async () => ({ id: "instance-1", instance_name: "estimulo-mvp" }),
+      findAll: async () => [{ id: "instance-1" }, { id: "instance-2" }, { id: "instance-3" }],
       delete: async (id) => {
         deleteCalls.push(id);
         return { id };
@@ -135,6 +136,11 @@ async function main() {
 
     const service = createWhatsappInstancesService({
       repository,
+      groupLinksRepository: {
+        listGroupIdsForInstance: async () => [],
+        listGroupIdsForInstances: async () => [],
+      },
+      groupsRepository: { removeMany: async () => [] },
       deleteEvolutionInstance: async (instanceName) => {
         evolutionDeleteCalledWith = instanceName;
         return { status: 200, data: {} };
@@ -146,6 +152,110 @@ async function main() {
     assert.equal(evolutionDeleteCalledWith, "estimulo-mvp");
     assert.deepEqual(deleteCalls, ["instance-1"]);
     assert.deepEqual(reorderCalls[0], ["instance-2", "instance-3"]);
+  }
+
+  // ---------- removeInstance: limpeza de grupos orfaos ----------
+  // Unico numero cadastrado: nao sobra ninguem pra cobrir nada, entao todos os
+  // grupos daquele numero saem do banco.
+  {
+    const removeManyCalls = [];
+    const repository = {
+      findById: async () => ({ id: "instance-1", instance_name: "estimulo-mvp" }),
+      findAll: async () => [{ id: "instance-1" }],
+      delete: async (id) => ({ id }),
+      listActive: async () => [],
+      reorderPriorities: async () => [],
+    };
+
+    const service = createWhatsappInstancesService({
+      repository,
+      groupLinksRepository: {
+        listGroupIdsForInstance: async () => ["group-a", "group-b"],
+        listGroupIdsForInstances: async () => {
+          throw new Error("nao deveria ser chamado quando nao sobra instancia");
+        },
+      },
+      groupsRepository: {
+        removeMany: async (ids) => {
+          removeManyCalls.push(ids);
+          return ids.map((id) => ({ id }));
+        },
+      },
+      deleteEvolutionInstance: async () => ({ status: 200, data: {} }),
+    });
+
+    const result = await service.removeInstance("instance-1");
+    assert.deepEqual(removeManyCalls[0], ["group-a", "group-b"]);
+    assert.deepEqual(result.removed_group_ids, ["group-a", "group-b"]);
+    assert.equal(result.removed_groups_count, 2);
+  }
+
+  // Dois numeros: so os grupos exclusivos do removido saem; os comuns ficam para
+  // o numero que permanece continuar disparando neles.
+  {
+    const removeManyCalls = [];
+    let listedSurvivorIds;
+    const repository = {
+      findById: async () => ({ id: "instance-1", instance_name: "estimulo-mvp" }),
+      findAll: async () => [{ id: "instance-1" }, { id: "instance-2" }],
+      delete: async (id) => ({ id }),
+      listActive: async () => [{ id: "instance-2" }],
+      reorderPriorities: async () => [],
+    };
+
+    const service = createWhatsappInstancesService({
+      repository,
+      groupLinksRepository: {
+        listGroupIdsForInstance: async () => ["group-comum", "group-so-do-removido"],
+        listGroupIdsForInstances: async (ids) => {
+          listedSurvivorIds = ids;
+          return ["group-comum", "group-so-do-outro"];
+        },
+      },
+      groupsRepository: {
+        removeMany: async (ids) => {
+          removeManyCalls.push(ids);
+          return ids.map((id) => ({ id }));
+        },
+      },
+      deleteEvolutionInstance: async () => ({ status: 200, data: {} }),
+    });
+
+    const result = await service.removeInstance("instance-1");
+    assert.deepEqual(listedSurvivorIds, ["instance-2"]);
+    assert.deepEqual(removeManyCalls[0], ["group-so-do-removido"]);
+    assert.deepEqual(result.removed_group_ids, ["group-so-do-removido"]);
+    assert.equal(result.removed_groups_count, 1);
+  }
+
+  // Instancia sem nenhum grupo vinculado: nada a apagar.
+  {
+    let removeManyCalled = false;
+    const service = createWhatsappInstancesService({
+      repository: {
+        findById: async () => ({ id: "instance-1", instance_name: "estimulo-mvp" }),
+        findAll: async () => [{ id: "instance-1" }, { id: "instance-2" }],
+        delete: async (id) => ({ id }),
+        listActive: async () => [{ id: "instance-2" }],
+        reorderPriorities: async () => [],
+      },
+      groupLinksRepository: {
+        listGroupIdsForInstance: async () => [],
+        listGroupIdsForInstances: async () => [],
+      },
+      groupsRepository: {
+        removeMany: async (ids) => {
+          removeManyCalled = true;
+          return ids.map((id) => ({ id }));
+        },
+      },
+      deleteEvolutionInstance: async () => ({ status: 200, data: {} }),
+    });
+
+    const result = await service.removeInstance("instance-1");
+    assert.deepEqual(result.removed_group_ids, []);
+    assert.equal(result.removed_groups_count, 0);
+    assert.equal(removeManyCalled, true, "removeMany e chamado com lista vazia (no-op no repositorio)");
   }
 
   // ---------- reorderPriority ----------
@@ -225,6 +335,172 @@ async function main() {
     const filtered = await service.filterDispatchableGroups(["group-1", "group-2"]);
     assert.deepEqual(filtered.eligible, ["group-1"]);
     assert.deepEqual(filtered.ineligible, ["group-2"]);
+  }
+
+  // ---------- pauseInstance / resumeInstance ----------
+  {
+    const updateCalls = [];
+    let evolutionTouched = false;
+    const repository = {
+      findById: async () => ({ id: "instance-1", instance_name: "estimulo-mvp", paused_at: null }),
+      update: async (id, payload) => {
+        updateCalls.push({ id, payload });
+        return { id, ...payload };
+      },
+    };
+
+    const service = createWhatsappInstancesService({
+      repository,
+      deleteEvolutionInstance: async () => {
+        evolutionTouched = true;
+      },
+      createEvolutionInstance: async () => {
+        evolutionTouched = true;
+      },
+    });
+
+    const paused = await service.pauseInstance("instance-1");
+    assert.ok(paused.paused_at, "pausar grava o timestamp");
+
+    const resumed = await service.resumeInstance("instance-1");
+    assert.equal(resumed.paused_at, null, "despausar limpa o timestamp");
+
+    assert.equal(evolutionTouched, false, "pausar nao mexe na Evolution API - a instancia segue conectada");
+    assert.equal(updateCalls.length, 2);
+
+    const notFoundService = createWhatsappInstancesService({ repository: { findById: async () => null } });
+    await assert.rejects(() => notFoundService.pauseInstance("missing"), /Instance not found/);
+  }
+
+  // Numero pausado nao entra na checagem de cobertura: sem isso, todo grupo que
+  // ele nao enxerga viraria falso "grupo dessincronizado" e bloquearia o disparo.
+  {
+    const repository = {
+      listActive: async () => [{ id: "instance-1" }, { id: "instance-2" }],
+      listDispatchable: async () => [{ id: "instance-1" }],
+    };
+    const groupLinksRepository = {
+      listInstanceIdsByGroupIds: async () =>
+        new Map([
+          ["group-1", new Set(["instance-1", "instance-2"])],
+          ["group-2", new Set(["instance-1"])],
+        ]),
+    };
+    const service = createWhatsappInstancesService({ repository, groupLinksRepository });
+
+    // Com instance-2 pausada sobra so uma instancia disparavel, entao nada e exigido.
+    await service.assertGroupsDispatchable(["group-1", "group-2"]);
+    const filtered = await service.filterDispatchableGroups(["group-1", "group-2"]);
+    assert.deepEqual(filtered.eligible, ["group-1", "group-2"]);
+    assert.deepEqual(filtered.ineligible, []);
+  }
+
+  // Tres numeros com um pausado: a cobertura passa a ser exigida apenas dos dois
+  // que continuam disparando.
+  {
+    const repository = {
+      listActive: async () => [{ id: "instance-1" }, { id: "instance-2" }, { id: "instance-3" }],
+      listDispatchable: async () => [{ id: "instance-1" }, { id: "instance-2" }],
+    };
+    const groupLinksRepository = {
+      listInstanceIdsByGroupIds: async () =>
+        new Map([
+          ["group-1", new Set(["instance-1", "instance-2"])],
+          ["group-2", new Set(["instance-1", "instance-3"])],
+        ]),
+    };
+    const service = createWhatsappInstancesService({ repository, groupLinksRepository });
+
+    const filtered = await service.filterDispatchableGroups(["group-1", "group-2"]);
+    assert.deepEqual(filtered.eligible, ["group-1"], "group-1 cobre os dois numeros ativos");
+    assert.deepEqual(filtered.ineligible, ["group-2"], "group-2 so e visto por um ativo e pelo pausado");
+  }
+
+  // Fallback para repositorios/stubs sem listDispatchable: filtra paused_at em memoria.
+  {
+    const service = createWhatsappInstancesService({
+      repository: {
+        listActive: async () => [
+          { id: "instance-1", paused_at: null },
+          { id: "instance-2", paused_at: "2026-08-31T10:00:00.000Z" },
+        ],
+      },
+    });
+
+    const dispatchable = await service.listDispatchableInstances();
+    assert.deepEqual(
+      dispatchable.map((instance) => instance.id),
+      ["instance-1"]
+    );
+  }
+
+  // ---------- controller: PATCH /:id/pause ----------
+  {
+    const createController = require("../src/api/controllers/whatsapp-instances.controller");
+
+    function createRes() {
+      return {
+        statusCode: null,
+        body: null,
+        status(code) {
+          this.statusCode = code;
+          return this;
+        },
+        json(payload) {
+          this.body = payload;
+          return this;
+        },
+      };
+    }
+
+    // paused precisa ser boolean explicito - sem isso um body vazio viraria
+    // "despausar" silenciosamente.
+    const validationController = createController({
+      whatsappInstancesService: {
+        setInstancePaused: async () => {
+          throw new Error("nao deveria ser chamado com body invalido");
+        },
+      },
+    });
+    const invalidRes = createRes();
+    await validationController.setPaused({ params: { id: "instance-1" }, body: {} }, invalidRes);
+    assert.equal(invalidRes.statusCode, 400);
+
+    const okController = createController({
+      whatsappInstancesService: {
+        setInstancePaused: async (id, paused) => ({ id, paused_at: paused ? "2026-08-31T10:00:00.000Z" : null }),
+      },
+    });
+    const okRes = createRes();
+    await okController.setPaused({ params: { id: "instance-1" }, body: { paused: true } }, okRes);
+    assert.equal(okRes.statusCode, 200);
+    assert.ok(okRes.body.paused_at);
+
+    const notFoundController = createController({
+      whatsappInstancesService: {
+        setInstancePaused: async () => {
+          throw new Error("Instance not found");
+        },
+      },
+    });
+    const notFoundRes = createRes();
+    await notFoundController.setPaused({ params: { id: "missing" }, body: { paused: true } }, notFoundRes);
+    assert.equal(notFoundRes.statusCode, 404);
+
+    // Migration nao aplicada: 503 com instrucao, em vez de 500 opaco.
+    const missingColumnController = createController({
+      whatsappInstancesService: {
+        setInstancePaused: async () => {
+          const error = new Error('column "paused_at" of relation "whatsapp_instances" does not exist');
+          error.code = "42703";
+          throw error;
+        },
+      },
+    });
+    const missingColumnRes = createRes();
+    await missingColumnController.setPaused({ params: { id: "instance-1" }, body: { paused: true } }, missingColumnRes);
+    assert.equal(missingColumnRes.statusCode, 503);
+    assert.match(missingColumnRes.body.error, /migration/i);
   }
 
   console.log("whatsapp instances service tests OK");

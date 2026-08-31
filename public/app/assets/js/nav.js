@@ -724,6 +724,136 @@
     });
   };
 
+  // ---------- Erro inesperado ----------
+  // Caixa dedicada para falha de servidor (5xx) ou API fora do ar. Antes esses
+  // casos caiam no estimuloAlert generico e o operador via so "Falha na
+  // requisicao (500)" sob o titulo "Aviso" — nao dava para saber se ele tinha
+  // errado algum campo ou se o problema era nosso. Aqui a mensagem assume a
+  // falha, o detalhe tecnico fica em <details> para o chamado, e a acao
+  // primaria e' tentar de novo.
+  // Usage: window.estimuloErroInesperado(error, { onRetry: () => carregar() });
+  let erroOverlay = null;
+  let erroReleaseTrap = null;
+  let erroRetryHandler = null;
+
+  function ensureErroModal() {
+    if (erroOverlay) return erroOverlay;
+
+    erroOverlay = document.createElement("div");
+    erroOverlay.className = "overlay";
+    erroOverlay.id = "estimuloErroOverlay";
+    erroOverlay.hidden = true;
+    erroOverlay.innerHTML = `
+      <div class="modal modal-erro" role="alertdialog" aria-modal="true" aria-labelledby="estimuloErroTitulo" aria-describedby="estimuloErroTexto">
+        <div class="modal-erro-icone" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9" opacity=".35"></circle>
+            <path d="M12 7.5v5.5"></path>
+            <path d="M12 16.5v.01"></path>
+          </svg>
+        </div>
+        <h3 id="estimuloErroTitulo">Ops... algo inesperado aconteceu</h3>
+        <p id="estimuloErroTexto"></p>
+        <details class="modal-erro-detalhe" id="estimuloErroDetalhe" hidden>
+          <summary>Detalhes técnicos</summary>
+          <pre id="estimuloErroDetalheTexto"></pre>
+        </details>
+        <div class="modal-erro-acoes">
+          <button class="btn btn-secondary" type="button" data-action="fechar">Fechar</button>
+          <button class="btn" type="button" data-action="retry">Tentar novamente</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(erroOverlay);
+
+    const fechar = () => {
+      erroOverlay.hidden = true;
+      if (erroReleaseTrap) {
+        erroReleaseTrap();
+        erroReleaseTrap = null;
+      }
+    };
+
+    erroOverlay.querySelector('[data-action="fechar"]').addEventListener("click", fechar);
+    erroOverlay.querySelector('[data-action="retry"]').addEventListener("click", () => {
+      const retry = erroRetryHandler;
+      fechar();
+      if (retry) retry();
+    });
+    erroOverlay.addEventListener("click", (event) => {
+      if (event.target === erroOverlay) fechar();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !erroOverlay.hidden) fechar();
+    });
+
+    return erroOverlay;
+  }
+
+  // Texto tecnico que vai para o <details>: mensagem crua + status HTTP, quando
+  // o requestJson da pagina tiver anexado um.
+  function detalheTecnico(error) {
+    if (!error) return "";
+    const partes = [];
+    if (error.status) partes.push(`HTTP ${error.status}`);
+    const mensagem = typeof error === "string" ? error : error.message;
+    if (mensagem) partes.push(mensagem);
+    return partes.join(" — ");
+  }
+
+  window.estimuloErroInesperado = function estimuloErroInesperado(error, options) {
+    const opts = options || {};
+    const overlay = ensureErroModal();
+
+    overlay.querySelector("#estimuloErroTitulo").textContent =
+      opts.title || "Ops... algo inesperado aconteceu";
+    overlay.querySelector("#estimuloErroTexto").textContent =
+      opts.message ||
+      "Não conseguimos concluir sua ação agora. O problema foi do nosso lado, não seu — tente novamente em instantes. Se continuar, avise a equipe.";
+
+    // textContent, nunca innerHTML: o detalhe vem de error.message, que carrega
+    // texto devolvido pelo servidor.
+    const detalhe = detalheTecnico(error);
+    const detalheEl = overlay.querySelector("#estimuloErroDetalhe");
+    detalheEl.open = false;
+    detalheEl.hidden = !detalhe;
+    overlay.querySelector("#estimuloErroDetalheTexto").textContent = detalhe;
+
+    erroRetryHandler = typeof opts.onRetry === "function" ? opts.onRetry : null;
+    const botaoRetry = overlay.querySelector('[data-action="retry"]');
+    botaoRetry.hidden = !erroRetryHandler;
+
+    overlay.hidden = false;
+    (erroRetryHandler ? botaoRetry : overlay.querySelector('[data-action="fechar"]')).focus();
+    erroReleaseTrap = window.estimuloTrapFocus(overlay);
+  };
+
+  // Um erro merece a caixa de "erro inesperado" quando a culpa nao e' do que o
+  // usuario digitou: 5xx, API inalcancavel, ou falta de status (TypeError etc).
+  // 4xx continua indo para estimuloAlert/toast, que e' onde a mensagem de
+  // validacao vinda da API faz sentido.
+  // Usage: if (window.estimuloEhErroDeServidor(error)) { ... }
+  window.estimuloEhErroDeServidor = function estimuloEhErroDeServidor(error) {
+    if (!error) return false;
+    if (error.isApiUnreachable) return true;
+    if (typeof error.status === "number") return error.status >= 500;
+    return true;
+  };
+
+  // Ponto unico para tratar um erro vindo de requestJson: 5xx / API fora do ar
+  // vao para a caixa de "erro inesperado"; o resto (4xx, validacao) continua no
+  // alerta comum, onde a mensagem da API e' a informacao util.
+  // Usage: window.estimuloTratarErro(error, { onRetry: () => carregar() });
+  window.estimuloTratarErro = function estimuloTratarErro(error, options) {
+    const opts = options || {};
+    if (window.estimuloEhErroDeServidor(error)) {
+      window.estimuloErroInesperado(error, opts);
+      return;
+    }
+    const mensagem = (error && error.message) || "Não foi possível concluir a ação.";
+    return window.estimuloAlert(mensagem, opts.alertOptions);
+  };
+
   // ---------- Prompt modal ----------
   // Replaces window.prompt() with an in-app modal with a text field.
   let promptOverlay = null;

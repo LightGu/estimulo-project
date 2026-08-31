@@ -29,6 +29,26 @@ async function listActive(client) {
   return data || [];
 }
 
+// Instancias que a plataforma pode de fato usar para enviar: ativas E nao
+// pausadas. Todo caminho de disparo (envio automatizado, disparador pontual,
+// rodizio, checagem de cobertura de grupos) deve ler daqui, nunca de listActive
+// - um numero pausado continua conectado e listado na tela, mas nao envia nada
+// e nao entra na conta de cobertura, para nao virar "grupo dessincronizado".
+async function listDispatchable(client) {
+  const { data, error } = await getClient(client)
+    .from("whatsapp_instances")
+    .select("*")
+    .eq("active", true)
+    .is("paused_at", null)
+    .order("priority", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function findById(id, client) {
   const { data, error } = await getClient(client)
     .from("whatsapp_instances")
@@ -121,6 +141,7 @@ module.exports = {
   findById,
   findByInstanceName,
   listActive,
+  listDispatchable,
   remove,
   reorderPriorities,
   update,

@@ -55,6 +55,26 @@ async function listGroupIdsForInstance(whatsappInstanceId, client) {
   return (data || []).map((row) => row.group_id);
 }
 
+// Retorna os group_ids vinculados a QUALQUER uma das instancias informadas, em
+// uma unica query. Usado ao remover um numero para descobrir quais grupos ainda
+// tem cobertura pelos numeros restantes.
+async function listGroupIdsForInstances(whatsappInstanceIds, client) {
+  if (!whatsappInstanceIds || whatsappInstanceIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await getClient(client)
+    .from("group_whatsapp_instances")
+    .select("group_id")
+    .in("whatsapp_instance_id", whatsappInstanceIds);
+
+  if (error) {
+    throw error;
+  }
+
+  return [...new Set((data || []).map((row) => row.group_id))];
+}
+
 // Retorna, para uma lista de grupos, o conjunto de instancias vinculadas a cada um
 // (Map<group_id, Set<whatsapp_instance_id>>), em uma unica query.
 async function listInstanceIdsByGroupIds(groupIds, client) {
@@ -87,6 +107,7 @@ async function listInstanceIdsByGroupIds(groupIds, client) {
 module.exports = {
   linkGroupToInstance,
   listGroupIdsForInstance,
+  listGroupIdsForInstances,
   listInstanceIdsByGroupIds,
   unlinkGroupsNotIn,
 };

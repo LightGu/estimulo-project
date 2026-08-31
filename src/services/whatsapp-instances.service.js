@@ -1,6 +1,7 @@
 const whatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
 const groupWhatsappInstancesRepository = require("../repositories/group-whatsapp-instances.repository");
 const settingsRepository = require("../repositories/settings.repository");
+const groupsRepository = require("../repositories/groups.repository");
 const {
   createEvolutionInstance,
   connectEvolutionInstance,
@@ -31,6 +32,7 @@ function createWhatsappInstancesService(dependencies = {}) {
   const repository = dependencies.repository || whatsappInstancesRepository;
   const groupLinksRepository = dependencies.groupLinksRepository || groupWhatsappInstancesRepository;
   const settingsRepo = dependencies.settingsRepository || settingsRepository;
+  const groupsRepo = dependencies.groupsRepository || groupsRepository;
   const createInstance = dependencies.createEvolutionInstance || createEvolutionInstance;
   const connectInstance = dependencies.connectEvolutionInstance || connectEvolutionInstance;
   const getConnectionState = dependencies.getEvolutionConnectionState || getEvolutionConnectionState;
@@ -39,6 +41,19 @@ function createWhatsappInstancesService(dependencies = {}) {
 
   async function list() {
     return repository.findAll();
+  }
+
+  // Stubs de teste e repositorios antigos podem nao ter listDispatchable; nesse
+  // caso cai para listActive e filtra paused_at em memoria, preservando a
+  // semantica de pausa sem exigir que todo mock implemente o metodo novo.
+  async function listDispatchableInstances() {
+    if (typeof repository.listDispatchable === "function") {
+      return repository.listDispatchable();
+    }
+
+    const active = await repository.listActive();
+
+    return (active || []).filter((instance) => !instance.paused_at);
   }
 
   async function testConnection() {
@@ -164,6 +179,56 @@ function createWhatsappInstancesService(dependencies = {}) {
     return repository.update(id, updatePayload);
   }
 
+  // Pausar mantem a instancia conectada na Evolution (nenhuma chamada e feita
+  // la fora): so marca no banco que a plataforma nao deve mais usar esse numero
+  // para enviar. Despausar e o inverso, e o numero volta ao rodizio na mesma
+  // prioridade que ja tinha - por isso a prioridade nao e mexida aqui.
+  async function setInstancePaused(id, paused) {
+    const instance = await repository.findById(id);
+
+    if (!instance) {
+      throw new Error("Instance not found");
+    }
+
+    return repository.update(id, { paused_at: paused ? new Date().toISOString() : null });
+  }
+
+  async function pauseInstance(id) {
+    return setInstancePaused(id, true);
+  }
+
+  async function resumeInstance(id) {
+    return setInstancePaused(id, false);
+  }
+
+  // Grupos so existem no banco porque algum numero conectado enxerga eles. Ao
+  // desconectar um numero, os grupos que SO ele enxergava ficam orfaos: nenhum
+  // numero restante consegue disparar neles. Esta funcao devolve exatamente esse
+  // conjunto - os grupos vinculados a instancia removida menos os que tambem
+  // estao vinculados a alguma instancia que permanece (os "comuns", que o outro
+  // numero continua acessando). Com um unico numero cadastrado, nao sobra
+  // ninguem para cobrir nada e todos os grupos dele entram na lista.
+  async function resolveOrphanGroupIds(removedInstanceId) {
+    const linkedToRemoved = await groupLinksRepository.listGroupIdsForInstance(removedInstanceId);
+
+    if (linkedToRemoved.length === 0) {
+      return [];
+    }
+
+    const allInstances = await repository.findAll();
+    const survivingIds = allInstances
+      .map((row) => row.id)
+      .filter((instanceId) => instanceId !== removedInstanceId);
+
+    if (survivingIds.length === 0) {
+      return linkedToRemoved;
+    }
+
+    const coveredBySurvivors = new Set(await groupLinksRepository.listGroupIdsForInstances(survivingIds));
+
+    return linkedToRemoved.filter((groupId) => !coveredBySurvivors.has(groupId));
+  }
+
   async function removeInstance(id) {
     const instance = await repository.findById(id);
 
@@ -171,16 +236,30 @@ function createWhatsappInstancesService(dependencies = {}) {
       throw new Error("Instance not found");
     }
 
+    // Resolvido ANTES do delete: o ON DELETE CASCADE em
+    // group_whatsapp_instances.whatsapp_instance_id apaga os vinculos junto com a
+    // instancia, e depois disso nao da mais pra saber quais grupos eram dela.
+    const orphanGroupIds = await resolveOrphanGroupIds(id);
+
     await deleteInstance(instance.instance_name);
 
     // ON DELETE CASCADE em group_whatsapp_instances.whatsapp_instance_id remove
     // automaticamente os vinculos dessa instancia com qualquer grupo.
     await repository.delete(id);
 
+    // Os grupos sem cobertura saem do banco; os comuns a outro numero ficam,
+    // para que o numero restante continue disparando neles.
+    const removedGroups = await groupsRepo.removeMany(orphanGroupIds);
+
     const remaining = await repository.listActive();
     await repository.reorderPriorities(remaining.map((row) => row.id));
 
-    return { removed: true, instance_id: id };
+    return {
+      removed: true,
+      instance_id: id,
+      removed_group_ids: orphanGroupIds,
+      removed_groups_count: Array.isArray(removedGroups) ? removedGroups.length : orphanGroupIds.length,
+    };
   }
 
   async function reorderPriority(orderedIds) {
@@ -211,8 +290,12 @@ function createWhatsappInstancesService(dependencies = {}) {
     return getRotationSettings();
   }
 
+  // Le listDispatchable (nao listActive) de proposito: um numero pausado nao
+  // envia nada, entao exigir que os grupos estejam vinculados a ele tambem so
+  // produziria falso "grupo dessincronizado" e bloquearia disparos que os
+  // numeros ativos conseguiriam fazer sem problema.
   async function resolveMissingCoverage(groupIds) {
-    const activeInstances = await repository.listActive();
+    const activeInstances = await listDispatchableInstances();
 
     if (activeInstances.length <= 1) {
       return { activeInstances, missing: [] };
@@ -264,9 +347,14 @@ function createWhatsappInstancesService(dependencies = {}) {
     generateQrCode,
     getRotationSettings,
     list,
+    listDispatchableInstances,
+    pauseInstance,
     registerInstance,
     removeInstance,
     reorderPriority,
+    resolveOrphanGroupIds,
+    resumeInstance,
+    setInstancePaused,
     testConnection,
     updateRotationSettings,
   };

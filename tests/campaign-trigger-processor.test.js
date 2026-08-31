@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   buildCampaignVideoFlowRepository,
   createCampaignTriggerProcessor,
+  enqueueResolvedDispatchJobs,
   ensurePendingDispatchLogs,
 } = require("../src/queues/campaign-trigger");
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
@@ -533,6 +534,73 @@ async function testProcessorSurvivesNotificationFailure() {
   assert.equal(result.status, "processed");
 }
 
+// Envio automatizado com TODOS os numeros pausados: nao enfileira nada. Sem esta
+// trava os jobs seriam criados e cairiam no sender fixo do .env, furando a pausa.
+async function testDoesNotEnqueueWhenAllInstancesArePaused() {
+  const addedJobs = [];
+  const warnings = [];
+
+  const jobs = await enqueueResolvedDispatchJobs(
+    { campaign_id: "campaign-1" },
+    [{ progress_group_id: "group-1", evolution_group_id: "evo-1" }],
+    {
+      whatsappInstancesRepository: {
+        listDispatchable: async () => [],
+        listActive: async () => [{ id: "instance-1", paused_at: "2026-08-31T10:00:00.000Z" }],
+      },
+      whatsappInstancesService: {
+        getRotationSettings: async () => ({ whatsapp_rotation_group_count: 1 }),
+      },
+      addDispatchJob: async (payload) => {
+        addedJobs.push(payload);
+        return { id: "job-1" };
+      },
+      addJitteredDispatchJobs: async (payloads) => {
+        addedJobs.push(...payloads);
+        return [];
+      },
+      logger: { warn: (line) => warnings.push(line) },
+    }
+  );
+
+  assert.deepEqual(jobs, [], "nenhum job deve ser enfileirado");
+  assert.equal(addedJobs.length, 0, "nao pode chamar addDispatchJob com tudo pausado");
+  assert.ok(
+    warnings.some((line) => line.includes("dispatch.skipped_all_instances_paused")),
+    "deve registrar o motivo do skip para nao virar sumico silencioso"
+  );
+}
+
+// Contraste: nenhuma instancia cadastrada (instalacao legada) segue enfileirando
+// normalmente - so "tudo pausado" bloqueia.
+async function testStillEnqueuesWhenNoInstancesAreRegistered() {
+  const addedJobs = [];
+
+  const jobs = await enqueueResolvedDispatchJobs(
+    { campaign_id: "campaign-1" },
+    [{ progress_group_id: "group-1", evolution_group_id: "evo-1" }],
+    {
+      whatsappInstancesRepository: {
+        listDispatchable: async () => [],
+        listActive: async () => [],
+      },
+      whatsappInstancesService: {
+        getRotationSettings: async () => ({ whatsapp_rotation_group_count: 1 }),
+      },
+      addDispatchJob: async (payload) => {
+        addedJobs.push(payload);
+        return { id: "job-1" };
+      },
+      addJitteredDispatchJobs: async (payloads) => {
+        addedJobs.push(...payloads);
+        return payloads.map((_, index) => ({ id: `job-${index}` }));
+      },
+    }
+  );
+
+  assert.ok(jobs.length > 0 || addedJobs.length > 0, "instalacao legada deve continuar enfileirando");
+}
+
 async function main() {
   await testVideoFlowRepositoryUsesGroupProgress();
   await testProcessorFiltersVideoEnabledGroupsAndEnqueuesDispatch();
@@ -545,6 +613,8 @@ async function main() {
   await testProcessorNotifiesCampaignStartedWhenDispatchesEnqueued();
   await testProcessorSkipsNotificationWhenNoDispatchesEnqueued();
   await testProcessorSurvivesNotificationFailure();
+  await testDoesNotEnqueueWhenAllInstancesArePaused();
+  await testStillEnqueuesWhenNoInstancesAreRegistered();
 
   console.log("campaign-trigger-processor tests OK");
 }

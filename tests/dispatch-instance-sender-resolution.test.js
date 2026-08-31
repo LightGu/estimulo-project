@@ -93,12 +93,130 @@ async function testDoesNotThrowWhenRepositoryHasNoListActive() {
   assert.equal(sender, sendToEvolution);
 }
 
+// Job ja agendado carregando o whatsapp_instance_id de um numero que foi
+// PAUSADO depois: nao pode enviar por ele. Cai para o primeiro numero
+// disponivel, senao a pausa so valeria para campanhas novas e os jobs ja na
+// fila continuariam saindo pelo numero pausado.
+async function testSkipsPausedPinnedInstanceAndFallsBackToDispatchable() {
+  const listDispatchableCalls = [];
+  const sender = await resolveDispatchSender("instance-paused", {
+    whatsappInstancesRepository: {
+      findById: async (id) => ({
+        id,
+        instance_name: "numero-pausado",
+        paused_at: "2026-08-31T10:00:00.000Z",
+      }),
+      listDispatchable: async () => {
+        listDispatchableCalls.push(true);
+        return [{ id: "instance-2", instance_name: "TesteLucas", priority: 0 }];
+      },
+      listActive: async () => {
+        throw new Error("deve preferir listDispatchable quando disponivel");
+      },
+    },
+  });
+
+  assert.notEqual(sender, sendToEvolution);
+  assert.equal(typeof sender, "function");
+  assert.equal(listDispatchableCalls.length, 1, "instancia pausada deve ser tratada como nao-resolvida");
+}
+
+// Numero pausado sendo o unico cadastrado: sem ninguem disponivel, nada de
+// promover o pausado - cai no sender fixo, como qualquer outro caso sem
+// instancia disparavel.
+async function testDoesNotUsePausedInstanceWhenItIsTheOnlyOne() {
+  const sender = await resolveDispatchSender("instance-paused", {
+    whatsappInstancesRepository: {
+      findById: async (id) => ({ id, instance_name: "numero-pausado", paused_at: "2026-08-31T10:00:00.000Z" }),
+      listDispatchable: async () => [],
+    },
+  });
+
+  assert.equal(sender, sendToEvolution);
+}
+
+// Fallback sem instance id continua ignorando pausados via listDispatchable.
+async function testDefaultResolutionPrefersDispatchableList() {
+  let usedDispatchable = false;
+  const sender = await resolveDispatchSender(undefined, {
+    whatsappInstancesRepository: {
+      findById: async () => {
+        throw new Error("nao deveria ser chamado sem whatsapp_instance_id");
+      },
+      listDispatchable: async () => {
+        usedDispatchable = true;
+        return [{ id: "instance-2", instance_name: "TesteLucas", priority: 0 }];
+      },
+      listActive: async () => {
+        throw new Error("deve preferir listDispatchable quando disponivel");
+      },
+    },
+  });
+
+  assert.notEqual(sender, sendToEvolution);
+  assert.equal(usedDispatchable, true);
+}
+
+// Todos os numeros cadastrados pausados: nao pode cair no sender fixo do .env,
+// que enviaria pelo EVOLUTION_INSTANCE_NAME e furaria a pausa em silencio.
+async function testThrowsWhenEveryRegisteredInstanceIsPaused() {
+  await assert.rejects(
+    () =>
+      resolveDispatchSender(undefined, {
+        whatsappInstancesRepository: {
+          findById: async () => null,
+          listDispatchable: async () => [],
+          listActive: async () => [
+            { id: "instance-1", paused_at: "2026-08-31T10:00:00.000Z" },
+            { id: "instance-2", paused_at: "2026-08-31T10:05:00.000Z" },
+          ],
+        },
+      }),
+    (error) => error.code === "ALL_INSTANCES_PAUSED"
+  );
+}
+
+// Um unico numero, pausado: mesmo bloqueio.
+async function testThrowsWhenTheOnlyInstanceIsPaused() {
+  await assert.rejects(
+    () =>
+      resolveDispatchSender("instance-1", {
+        whatsappInstancesRepository: {
+          findById: async (id) => ({ id, instance_name: "estimulo-novo", paused_at: "2026-08-31T10:00:00.000Z" }),
+          listDispatchable: async () => [],
+          listActive: async () => [{ id: "instance-1", paused_at: "2026-08-31T10:00:00.000Z" }],
+        },
+      }),
+    (error) => error.code === "ALL_INSTANCES_PAUSED"
+  );
+}
+
+// Contraste: nenhuma instancia CADASTRADA (instalacao legada) continua caindo no
+// sender historico. So "tudo pausado" bloqueia.
+async function testStillFallsBackWhenNothingIsRegistered() {
+  const sender = await resolveDispatchSender(undefined, {
+    whatsappInstancesRepository: {
+      findById: async () => null,
+      listDispatchable: async () => [],
+      listActive: async () => [],
+    },
+  });
+
+  assert.equal(sender, sendToEvolution);
+}
+
 async function main() {
   await testFallsBackToDefaultSenderWhenNoInstanceIdAndNoneActive();
   await testResolvesInstanceScopedSenderWhenInstanceIdProvided();
   await testFallsBackToFirstActiveInstanceWhenNoInstanceIdProvided();
   await testFallsBackToFirstActiveInstanceWhenInstanceMissing();
   await testDoesNotThrowWhenRepositoryHasNoListActive();
+  await testSkipsPausedPinnedInstanceAndFallsBackToDispatchable();
+  await testDoesNotUsePausedInstanceWhenItIsTheOnlyOne();
+  await testDefaultResolutionPrefersDispatchableList();
+  await testThrowsWhenEveryRegisteredInstanceIsPaused();
+  await testThrowsWhenTheOnlyInstanceIsPaused();
+  await testStillFallsBackWhenNothingIsRegistered();
 
   console.log("dispatch instance sender resolution tests OK");
 }

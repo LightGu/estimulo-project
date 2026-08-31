@@ -272,6 +272,7 @@ function createApp(dependencies = {}) {
   app.get("/settings/whatsapp/instances/:id/qr", whatsappInstancesController.getQrCode);
   app.get("/settings/whatsapp/instances/:id/status", whatsappInstancesController.getStatus);
   app.delete("/settings/whatsapp/instances/:id", whatsappInstancesController.remove);
+  app.patch("/settings/whatsapp/instances/:id/pause", whatsappInstancesController.setPaused);
   app.post("/settings/whatsapp/instances/reorder", whatsappInstancesController.reorder);
   app.get("/settings/whatsapp/rotation", whatsappInstancesController.getRotation);
   app.patch("/settings/whatsapp/rotation", whatsappInstancesController.updateRotation);

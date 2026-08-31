@@ -29,6 +29,10 @@ function createMockClient(result) {
       calls.push({ type: "eq", column, value });
       return this;
     },
+    is(column, value) {
+      calls.push({ type: "is", column, value });
+      return this;
+    },
     in(column, values) {
       calls.push({ type: "in", column, values });
       return Promise.resolve({ data: result, error: null });
@@ -72,6 +76,22 @@ async function main() {
     assert.equal(instances.length, 2);
     assert.ok(client.__calls.some((call) => call.type === "from" && call.tableName === "whatsapp_instances"));
     assert.ok(client.__calls.some((call) => call.type === "eq" && call.column === "active" && call.value === true));
+  }
+
+  // listDispatchable = ativas E nao pausadas. E a consulta que todo caminho de
+  // disparo usa; um numero pausado continua conectado e visivel na tela, mas
+  // nao pode aparecer aqui.
+  {
+    const client = createMockClient([{ id: "instance-1", paused_at: null }]);
+
+    const instances = await whatsappInstancesRepository.listDispatchable(client);
+    assert.equal(instances.length, 1);
+    assert.ok(client.__calls.some((call) => call.type === "eq" && call.column === "active" && call.value === true));
+    assert.ok(client.__calls.some((call) => call.type === "is" && call.column === "paused_at" && call.value === null));
+    assert.ok(
+      client.__calls.some((call) => call.type === "order" && call.column === "priority"),
+      "mantem a ordenacao por prioridade usada pelo rodizio"
+    );
   }
 
   {

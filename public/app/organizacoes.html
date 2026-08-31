@@ -141,7 +141,13 @@
         const payload = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-          throw new Error(payload.error || `Falha na requisicao (${response.status})`);
+          // O status vai junto porque estimuloTratarErro usa ele para separar
+          // erro de servidor (5xx -> caixa "algo inesperado") de erro de
+          // validacao (4xx -> aviso com a mensagem da API).
+          const error = new Error(payload.error || `Falha na requisicao (${response.status})`);
+          error.status = response.status;
+          error.payload = payload;
+          throw error;
         }
 
         return payload;

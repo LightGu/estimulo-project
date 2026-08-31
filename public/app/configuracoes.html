@@ -122,7 +122,7 @@
             <div class="card">
               <div class="card-header"><h3><span class="section-num">3.</span>Evolution API (WhatsApp)</h3></div>
               <div class="card-body">
-                <p class="text-muted" style="margin-bottom:14px;">Números conectados à Evolution API compartilhada. A ordem define a prioridade de disparo.</p>
+                <p class="text-muted" style="margin-bottom:14px;">Números conectados à Evolution API compartilhada. A ordem define a prioridade de disparo. Um número pausado continua conectado, mas não é usado em nenhum envio.</p>
                 <div class="table-wrap">
                   <table>
                     <thead><tr><th></th><th>Prioridade</th><th>Número</th><th>Instância</th><th>Status</th><th>Ações</th></tr></thead>
@@ -514,6 +514,14 @@
         return '<span class="badge badge-danger">Desconectado</span>';
       }
 
+      // Um numero pausado continua conectado; o que muda e que a plataforma para
+      // de enviar por ele. Por isso a coluna mostra os dois selos juntos, em vez
+      // de a pausa esconder o estado real da conexao.
+      function instanceStatusBadges(instance) {
+        const connection = connectionStateBadge(instance.connection_state);
+        return instance.paused_at ? `${connection} <span class="badge badge-neutral">Pausado</span>` : connection;
+      }
+
       function renderWhatsappInstances() {
         document.getElementById("whatsappInstancesBody").innerHTML = whatsappInstances
           .map(
@@ -527,9 +535,10 @@
             <td>${index + 1}</td>
             <td class="strong">${escapeHtml(instance.phone_number || "-")}</td>
             <td class="mono">${escapeHtml(instance.instance_name)}</td>
-            <td>${connectionStateBadge(instance.connection_state)}</td>
+            <td>${instanceStatusBadges(instance)}</td>
             <td>
               ${instance.connection_state !== "open" ? `<button class="btn btn-secondary btn-sm" data-connect-instance="${escapeHtml(instance.id)}">Conectar</button>` : ""}
+              <button class="btn btn-secondary btn-sm" data-toggle-pause-instance="${escapeHtml(instance.id)}" data-paused="${instance.paused_at ? "true" : "false"}" title="${instance.paused_at ? "Voltar a enviar mensagens por este número" : "Manter conectado, mas parar de enviar mensagens por este número"}">${instance.paused_at ? "Despausar" : "Pausar"}</button>
               <button class="btn btn-secondary btn-sm" data-remove-instance="${escapeHtml(instance.id)}">Remover</button>
             </td>
           </tr>`
@@ -541,6 +550,11 @@
         );
         document.querySelectorAll("[data-connect-instance]").forEach((button) =>
           button.addEventListener("click", () => startQrFlow(button.dataset.connectInstance))
+        );
+        document.querySelectorAll("[data-toggle-pause-instance]").forEach((button) =>
+          button.addEventListener("click", () =>
+            toggleInstancePaused(button.dataset.togglePauseInstance, button.dataset.paused !== "true")
+          )
         );
         document.querySelectorAll("[data-move-instance-up]").forEach((button) =>
           button.addEventListener("click", () => moveInstance(button.dataset.moveInstanceUp, -1))
@@ -689,21 +703,76 @@
         }
       }
 
-      async function removeInstance(id) {
-        const confirmed = await window.estimuloConfirm("Remover este número? A instância será desconectada da Evolution API.", { title: "Remover número", confirmLabel: "Remover" });
-        if (!confirmed) return;
+      // Pausar/despausar nao mexe na Evolution API - a instancia segue conectada.
+      // So alterna se a plataforma usa esse numero nos envios.
+      async function toggleInstancePaused(id, paused) {
+        // Pausar o ultimo numero disponivel deixa a plataforma sem nenhum meio de
+        // enviar: as campanhas nao falham com erro, simplesmente nao sai nada.
+        // Como isso e silencioso, o aviso e explicito antes de confirmar.
+        if (paused) {
+          const stillDispatchable = whatsappInstances.filter(
+            (instance) => instance.id !== id && !instance.paused_at
+          );
 
-        setEvoStatus("Removendo número…");
+          if (stillDispatchable.length === 0) {
+            const confirmed = await window.estimuloConfirm(
+              "Se você pausar esse número, não poderá enviar nenhuma mensagem, pois existe somente ele. O envio automatizado e o disparador pontual ficarão sem nenhum número disponível até você despausá-lo.",
+              { title: "Pausar o único número", confirmLabel: "Pausar mesmo assim" }
+            );
+
+            if (!confirmed) return;
+          }
+        }
+
+        setEvoStatus(paused ? "Pausando número…" : "Despausando número…");
         try {
-          const response = await fetch(`/settings/whatsapp/instances/${encodeURIComponent(id)}`, { method: "DELETE" });
+          const response = await fetch(`/settings/whatsapp/instances/${encodeURIComponent(id)}/pause`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paused }),
+          });
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.error || "Falha ao remover número");
-          setEvoStatus("Número removido.", "var(--success)");
+          if (!response.ok) throw new Error(data.error || "Falha ao atualizar a pausa do número");
+          setEvoStatus(
+            paused
+              ? "Número pausado. Ele segue conectado, mas não será usado nos envios."
+              : "Número despausado. Ele volta a ser usado nos envios.",
+            "var(--success)"
+          );
           await loadWhatsappInstances();
         } catch (error) {
           setEvoStatus(error.message, "var(--danger)");
         }
-        setTimeout(() => setEvoStatus(""), 3000);
+        setTimeout(() => setEvoStatus(""), 4000);
+      }
+
+      async function removeInstance(id) {
+        const confirmed = await window.estimuloConfirm(
+          "Remover este número? A instância será desconectada da Evolution API e os grupos que só este número enxergava serão excluídos. Grupos em comum com outro número conectado são mantidos.",
+          { title: "Remover número", confirmLabel: "Remover" }
+        );
+        if (!confirmed) return;
+
+        setEvoStatus("Removendo número…");
+        window.estimuloShowLoading();
+        try {
+          const response = await fetch(`/settings/whatsapp/instances/${encodeURIComponent(id)}`, { method: "DELETE" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "Falha ao remover número");
+          const removedGroups = Number(data.removed_groups_count) || 0;
+          setEvoStatus(
+            removedGroups > 0
+              ? `Número removido. ${removedGroups} ${removedGroups === 1 ? "grupo excluído" : "grupos excluídos"}.`
+              : "Número removido.",
+            "var(--success)"
+          );
+          await loadWhatsappInstances();
+        } catch (error) {
+          setEvoStatus(error.message, "var(--danger)");
+        } finally {
+          window.estimuloHideLoading();
+        }
+        setTimeout(() => setEvoStatus(""), 4000);
       }
 
       function stopQrPolling() {
@@ -821,6 +890,13 @@
         if (!instanceName) return;
 
         setEvoStatus("Registrando instância…");
+        // Criar a instância e pedir o primeiro QR sao duas chamadas reais pra
+        // Evolution API e levam alguns segundos. Sem cobrir esse intervalo, a tela
+        // fica aparentemente parada depois do prompt. Usa a mesma cortina de
+        // carregamento das guias ainda carregando; ela sai assim que o QR aparece
+        // (startQrFlow resolve ao renderizar a imagem - a partir dai quem manda no
+        // feedback e o contador de 45s dentro da modal).
+        window.estimuloShowLoading();
         try {
           const response = await fetch("/settings/whatsapp/instances", {
             method: "POST",
@@ -835,6 +911,8 @@
         } catch (error) {
           setEvoStatus(error.message, "var(--danger)");
           setTimeout(() => setEvoStatus(""), 3000);
+        } finally {
+          window.estimuloHideLoading();
         }
       });
 
@@ -1195,7 +1273,7 @@
               if (rule.withMinutes) {
                 document.querySelector(`[data-rule-minutes-wrap="${rule.id}"]`).style.display = previousChecked ? "block" : "none";
               }
-              window.estimuloAlert(error.message);
+              window.estimuloTratarErro(error.message);
             }
           })
         );
@@ -1214,7 +1292,7 @@
             } catch (error) {
               rule.minutes = previousMinutes;
               input.value = previousMinutes;
-              window.estimuloAlert(error.message);
+              window.estimuloTratarErro(error.message);
             }
           })
         );
@@ -1223,7 +1301,13 @@
       function requestJsonConfig(url, options) {
         return fetch(url, options).then(async (response) => {
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.error || `Falha na requisição (${response.status})`);
+          if (!response.ok) {
+            // status/payload anexados para estimuloTratarErro separar 5xx de 4xx.
+            const error = new Error(data.error || `Falha na requisição (${response.status})`);
+            error.status = response.status;
+            error.payload = data;
+            throw error;
+          }
           return data;
         });
       }
