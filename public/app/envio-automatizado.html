@@ -55,7 +55,8 @@
       .time-picker-trigger { appearance: none; -webkit-appearance: none; display: flex; align-items: center; gap: 8px; width: 100%; height: 38px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); cursor: pointer; font: inherit; color: var(--text); }
       .time-picker-trigger:hover, .time-picker-trigger.is-open { border-color: var(--brand-blue); }
       .time-picker-trigger .ico { width: 15px; height: 15px; color: var(--text-faint); flex: none; }
-      .time-picker-value { flex: 1; text-align: left; font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-md); letter-spacing: 0.02em; }
+      .time-picker-value { flex: 1; text-align: left; font-variant-numeric: tabular-nums; font-weight: 600; font-size: var(--fs-md); letter-spacing: 0.02em; border: none; background: transparent; padding: 0; margin: 0; outline: none; font-family: inherit; color: inherit; min-width: 0; }
+      .time-picker-value:focus { outline: none; }
       .time-picker-toggle { flex: none; color: var(--text-faint); }
       .time-picker-toggle .ico { width: 14px; height: 14px; }
 
@@ -430,7 +431,7 @@
 
         container.innerHTML = `
           <div class="time-picker-trigger" role="button" tabindex="0">
-            <span class="time-picker-value"></span>
+            <input class="time-picker-value" type="text" inputmode="numeric" autocomplete="off" />
             <span class="time-picker-toggle">${icon("chevronUpDown")}</span>
           </div>
           <div class="time-picker-panel" hidden>${units.map(buildColumn).join("")}</div>
@@ -441,8 +442,47 @@
         const panel = container.querySelector(".time-picker-panel");
 
         function refreshValue() {
-          valueEl.textContent = units.map((u) => pad2(state[u.key])).join(sep);
+          valueEl.value = units.map((u) => pad2(state[u.key])).join(sep);
         }
+
+        // Permite digitar o horario direto (ex.: "1430"), alem de rolar as colunas
+        // - a rolagem sozinha estava "travando" para quem preferia so teclar o valor.
+        function applyTypedValue(raw) {
+          const parts = String(raw).split(/[^0-9]+/).filter(Boolean);
+          if (parts.length !== units.length || parts.some((p) => !Number.isFinite(Number(p)))) {
+            refreshValue();
+            return;
+          }
+
+          const next = {};
+          units.forEach((unit, i) => {
+            next[unit.key] = Math.max(0, Math.min(unit.max, Number(parts[i])));
+          });
+
+          Object.assign(state, next);
+          units.forEach((unit) => {
+            const col = container.querySelector(`.time-picker-col[data-unit="${unit.key}"]`);
+            col.querySelectorAll(".time-picker-opt").forEach((opt) => {
+              opt.classList.toggle("is-selected", Number(opt.dataset.value) === state[unit.key]);
+            });
+            scrollColumnTo(col, state[unit.key], false);
+          });
+          refreshValue();
+          onChange({ ...state });
+        }
+
+        valueEl.addEventListener("keydown", (event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            event.stopPropagation();
+            valueEl.blur();
+          } else if (event.key === "Escape") {
+            event.stopPropagation();
+            refreshValue();
+            valueEl.blur();
+          }
+        });
+        valueEl.addEventListener("blur", () => applyTypedValue(valueEl.value));
 
         function scrollColumnTo(col, index, smooth) {
           const list = col.querySelector(".time-picker-list");
@@ -485,7 +525,11 @@
           });
         });
 
-        trigger.addEventListener("click", () => {
+        trigger.addEventListener("click", (event) => {
+          // Clique no proprio campo de texto so deve focar/editar, sem abrir ou
+          // fechar o painel de rolagem por baixo do cursor.
+          if (event.target === valueEl) return;
+
           const willOpen = panel.hidden;
           document.querySelectorAll(".time-picker-panel").forEach((p) => (p.hidden = true));
           document.querySelectorAll(".time-picker-trigger").forEach((t) => t.classList.remove("is-open"));
