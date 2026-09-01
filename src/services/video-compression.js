@@ -330,6 +330,25 @@ async function compressVideoToFitBase64Budget(downloadedVideo, options = {}) {
       throw new Error("Nao foi possivel determinar a duracao do video para calcular o bitrate de compressao");
     }
 
+    // Piso de bitrate x duracao: abaixo de DEFAULT_MIN_VIDEO_BITRATE_KBPS o
+    // resolveVideoBitrateKbps para de obedecer ao alvo, entao as tentativas
+    // seguintes produzem exatamente o mesmo arquivo. Detectar isso aqui evita
+    // gastar `maxAttempts` passadas de ffmpeg (minutos cada) para falhar do
+    // mesmo jeito, e deixa o erro dizer o que fazer.
+    const menorTamanhoPossivelBytes =
+      (((DEFAULT_MIN_VIDEO_BITRATE_KBPS + audioBitrateKbps) * 1000) / 8) * durationSeconds;
+
+    if (menorTamanhoPossivelBytes > maxRawBytes) {
+      const duracaoMaximaSegundos = maxRawBytes / (((DEFAULT_MIN_VIDEO_BITRATE_KBPS + audioBitrateKbps) * 1000) / 8);
+
+      throw new Error(
+        `Video de ${Math.round(durationSeconds)}s e longo demais para caber em ` +
+          `${Math.round(maxRawBytes / 1024 / 1024)} MB mantendo qualidade minima. ` +
+          `Com este alvo o limite e de cerca de ${Math.floor(duracaoMaximaSegundos / 60)} minutos. ` +
+          "Encurte o video ou aumente ADHOC_VIDEO_TARGET_BYTES"
+      );
+    }
+
     let targetBytes = Math.floor(maxRawBytes * TARGET_FILL_RATIO);
     let lastBytes = null;
 

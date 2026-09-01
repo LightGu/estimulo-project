@@ -1,6 +1,7 @@
 const { EvolutionDeliveryProvider, sendToEvolution } = require("./evolution");
 const { evolutionConfig } = require("../config/evolution");
 const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-instances.repository");
+const { resolveInstanceNames } = require("./evolution-instance-resolver");
 
 // Resolve o sender a ser usado em um envio: com whatsapp_instance_id valido,
 // monta um EvolutionDeliveryProvider apontando para essa instancia; sem id
@@ -101,11 +102,54 @@ async function resolveInstance(whatsappInstanceId, options = {}) {
     return { instance: null, sender: sendToEvolution };
   }
 
-  const provider = new EvolutionDeliveryProvider({
-    config: { ...evolutionConfig, instanceName: instance.instance_name },
-  });
+  // Injetavel para teste; em producao e' sempre o provider real.
+  const createProvider =
+    options.createDeliveryProvider ||
+    ((instanceName) => new EvolutionDeliveryProvider({ config: { ...evolutionConfig, instanceName } }));
+  const provider = createProvider(instance.instance_name);
 
-  return { instance, sender: (params) => provider.send(params) };
+  // Nome divergente entre o nosso banco e a Evolution derruba o envio com
+  // 404 "instance does not exist" mesmo com o numero conectado (ver
+  // services/evolution-instance-resolver.js). Descobre o nome real, reenvia e
+  // grava a correcao - sem isso o numero fica inutilizavel ate alguem editar o
+  // cadastro na mao. So o 404 entra aqui: qualquer outro erro sobe como antes.
+  async function send(params) {
+    try {
+      return await provider.send(params);
+    } catch (error) {
+      if (Number(error?.status) !== 404) {
+        throw error;
+      }
+
+      const resolveNames = options.resolveInstanceNames || resolveInstanceNames;
+      let remoteName = null;
+
+      try {
+        const [resolved] = await resolveNames([instance], { config: evolutionConfig });
+
+        remoteName = resolved && resolved.remoteName;
+      } catch (resolveError) {
+        throw error;
+      }
+
+      if (!remoteName || remoteName === instance.instance_name) {
+        throw error;
+      }
+
+      const retryProvider = createProvider(remoteName);
+      const result = await retryProvider.send(params);
+
+      if (typeof repository.update === "function") {
+        await repository.update(instance.id, { instance_name: remoteName }).catch(() => null);
+      }
+
+      instance.instance_name = remoteName;
+
+      return result;
+    }
+  }
+
+  return { instance, sender: send };
 }
 
 // Resolve o sender a ser usado em um envio: com whatsapp_instance_id valido,

@@ -79,6 +79,32 @@ function createWhatsappInstancesController(dependencies = {}) {
         return res.status(404).json({ error: message });
       }
 
+      // Sem este log, uma falha aqui chegava na tela apenas como
+      // "Internal server error", sem nenhum rastro de qual passo quebrou
+      // (delete na Evolution, delete local, limpeza de grupos ou reordenacao).
+      console.error(
+        JSON.stringify({
+          event: "whatsapp_instances.remove.failed",
+          instance_id: req.params.id,
+          error_message: message,
+          error_code: error?.code,
+        })
+      );
+
+      // 23503 = foreign_key_violation. Acontece quando a migration
+      // 202609010001_fix_logs_whatsapp_instance_fk_on_delete.sql ainda nao
+      // rodou neste banco: a FK logs.whatsapp_instance_id foi criada sem
+      // ON DELETE, entao qualquer numero que ja disparou alguma mensagem fica
+      // travado (numeros novos, sem historico, removiam normalmente - o que
+      // mascarava a causa). Sem esta ramificacao o erro chegava na tela como um
+      // "Internal server error" opaco, sem indicar o que fazer.
+      if (error?.code === "23503") {
+        return res.status(503).json({
+          error:
+            "Este numero tem historico de disparos e a FK logs.whatsapp_instance_id ainda bloqueia a remocao. Aplique a migration 202609010001_fix_logs_whatsapp_instance_fk_on_delete.sql para liberar.",
+        });
+      }
+
       return res.status(500).json({ error: "Internal server error" });
     }
   }

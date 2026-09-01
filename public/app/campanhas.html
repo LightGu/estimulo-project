@@ -130,6 +130,7 @@
     <div id="toastContainer" aria-live="polite"></div>
 
     <script src="assets/js/dom-utils.js"></script>
+    <script src="assets/js/error-messages.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -145,22 +146,10 @@
       // de um tempo, mas tambem pode ser fechada na hora.
 
 
-      async function requestJson(url, options) {
-        const response = await fetch(url, options);
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          // O status vai junto porque estimuloTratarErro usa ele para separar
-          // erro de servidor (5xx -> caixa "algo inesperado") de erro de
-          // validacao (4xx -> aviso com a mensagem da API).
-          const error = new Error(payload.error || `Falha na requisicao (${response.status})`);
-          error.status = response.status;
-          error.payload = payload;
-          throw error;
-        }
-
-        return payload;
-      }
+      // Implementacao unica em assets/js/error-messages.js (era copia
+      // byte-a-byte nesta e em outras oito telas). O alias local mantem as
+      // chamadas existentes desta pagina funcionando sem alteracao.
+      const requestJson = (url, options) => window.estimuloRequestJson(url, options);
 
       function campaignName(campaign) {
         return campaign.trilha || campaign.nome || "Campanha";
@@ -314,7 +303,7 @@
 
       function renderLoadError(error) {
         document.getElementById("campaignsBody").innerHTML = `
-          <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar campanhas</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+          <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar campanhas</strong><span>${escapeHtml(window.estimuloErroEmLinha(error))}</span></div></td></tr>`;
       }
 
       const campaignDetailOverlay = document.getElementById("campaignDetailOverlay");
@@ -360,11 +349,9 @@
             await openCampaignDetail(state.currentCampaignId);
           }
         } catch (error) {
-          if (window.estimuloEhErroDeServidor(error)) {
-            window.estimuloErroInesperado(error);
-          } else {
-            window.estimuloToast(error.message || "Não foi possível concluir a ação.");
-          }
+          // Antes o 4xx caia num toast que sumia em 8s levando a mensagem
+          // embora; estimuloTratarErro cuida das duas faixas na mesma caixa.
+          window.estimuloTratarErro(error);
           button.disabled = false;
           button.textContent = originalText;
         }
@@ -477,7 +464,7 @@
           });
         } catch (error) {
           document.getElementById("campaignGroupsBody").innerHTML = `
-            <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+            <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(window.estimuloErroEmLinha(error))}</span></div></td></tr>`;
         }
       }
 

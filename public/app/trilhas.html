@@ -321,6 +321,7 @@
     </div>
 
     <script src="assets/js/dom-utils.js"></script>
+    <script src="assets/js/error-messages.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -365,22 +366,10 @@
       let addSequenceTrilhaReleaseTrap = null;
 
 
-      async function requestJson(url, options) {
-        const response = await fetch(url, options);
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          // O status vai junto porque estimuloTratarErro usa ele para separar
-          // erro de servidor (5xx -> caixa "algo inesperado") de erro de
-          // validacao (4xx -> aviso com a mensagem da API).
-          const error = new Error(payload.error || `Falha na requisicao (${response.status})`);
-          error.status = response.status;
-          error.payload = payload;
-          throw error;
-        }
-
-        return payload;
-      }
+      // Implementacao unica em assets/js/error-messages.js (era copia
+      // byte-a-byte nesta e em outras oito telas). O alias local mantem as
+      // chamadas existentes desta pagina funcionando sem alteracao.
+      const requestJson = (url, options) => window.estimuloRequestJson(url, options);
 
       function macrotemaKey(trail) {
         return trail.macrotema;
@@ -609,7 +598,7 @@
 
           await initialize();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         }
       }
 
@@ -655,7 +644,7 @@
 
             await initialize();
           } catch (error) {
-            status.textContent = error.message;
+            status.textContent = window.estimuloErroEmLinha(error);
             status.className = "status-line error";
           } finally {
             button.disabled = false;
@@ -678,7 +667,7 @@
 
           renderTrailDetail();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         }
       }
 
@@ -855,7 +844,7 @@
           renderSequenceSetorFilter();
           renderSequenceBody();
         } catch (error) {
-          body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar sequência</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+          body.innerHTML = `<tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar sequência</strong><span>${escapeHtml(window.estimuloErroEmLinha(error))}</span></div></td></tr>`;
         }
       }
 
@@ -1023,7 +1012,7 @@
           await applySetorPathEdit(setor, newPath);
           await loadSequenceForProfile();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
           await loadSequenceForProfile();
         }
       }
@@ -1041,7 +1030,7 @@
           await applySetorPathEdit(setor, newPath);
           await loadSequenceForProfile();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
           await loadSequenceForProfile();
         }
       }
@@ -1113,7 +1102,7 @@
               await applySetorPathEdit(setor, newPath);
               await loadSequenceForProfile();
             } catch (error) {
-              window.estimuloTratarErro(error.message);
+              window.estimuloTratarErro(error);
               await loadSequenceForProfile();
             }
           });
@@ -1212,7 +1201,7 @@
           state.sequence = Array.isArray(updated) ? updated : state.sequence;
           renderSequenceBody();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         }
       }
 
@@ -1244,7 +1233,7 @@
           state.sequence = Array.isArray(updated) ? updated : state.sequence;
           renderSequenceBody();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         }
       }
 
@@ -1374,7 +1363,7 @@
 
           await loadSequenceForProfile();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
           await loadSequenceForProfile();
         }
       }
@@ -1403,7 +1392,7 @@
 
           await loadSequenceForProfile();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
           await loadSequenceForProfile();
         }
       }
@@ -1419,7 +1408,7 @@
           await requestJson(`/trilhas/desvios/${encodeURIComponent(id)}`, { method: "DELETE" });
           await loadSequenceForProfile();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         }
       }
 
@@ -1506,7 +1495,7 @@
           closeAddSequenceTrilhaModal();
           await loadSequenceForProfile();
         } catch (error) {
-          status.textContent = error.message;
+          status.textContent = window.estimuloErroEmLinha(error);
           status.className = "status-line error";
         } finally {
           button.disabled = false;
@@ -1731,7 +1720,7 @@
           closeNewTrailOverlay();
           await initialize();
         } catch (error) {
-          status.textContent = error.message;
+          status.textContent = window.estimuloErroEmLinha(error);
           status.className = "status-line error";
         } finally {
           button.disabled = false;
@@ -1815,7 +1804,7 @@
           state.selectableVideos = await requestJson("/trilhas/selectable-videos");
         } catch (error) {
           state.selectableVideos = [];
-          document.getElementById("newVideoStatusLine").textContent = error.message;
+          document.getElementById("newVideoStatusLine").textContent = window.estimuloErroEmLinha(error);
           document.getElementById("newVideoStatusLine").className = "status-line error";
         }
 
@@ -1880,7 +1869,7 @@
           closeNewVideoOverlay();
           await initialize();
         } catch (error) {
-          status.textContent = error.message;
+          status.textContent = window.estimuloErroEmLinha(error);
           status.className = "status-line error";
         } finally {
           button.disabled = false;
@@ -1970,7 +1959,7 @@
           closeMoveOverlay();
           await initialize();
         } catch (error) {
-          status.textContent = error.message;
+          status.textContent = window.estimuloErroEmLinha(error);
           status.className = "status-line error";
         } finally {
           button.disabled = false;
@@ -1979,7 +1968,7 @@
 
       function renderLoadError(error) {
         document.getElementById("macrotemaGrid").innerHTML = `
-          <div class="empty-state"><strong>Falha ao carregar trilhas</strong><span>${escapeHtml(error.message)}</span></div>`;
+          <div class="empty-state"><strong>Falha ao carregar trilhas</strong><span>${escapeHtml(window.estimuloErroEmLinha(error))}</span></div>`;
       }
 
       // Revisar legenda
@@ -2004,7 +1993,7 @@
           renderCaptionList(captions);
         } catch (error) {
           document.getElementById("captionList").innerHTML = "";
-          document.getElementById("captionStatus").textContent = error.message;
+          document.getElementById("captionStatus").textContent = window.estimuloErroEmLinha(error);
           document.getElementById("captionStatus").className = "status-line error";
         }
       }
@@ -2083,7 +2072,7 @@
 
           closeCaptionOverlay();
         } catch (error) {
-          status.textContent = error.message;
+          status.textContent = window.estimuloErroEmLinha(error);
           status.className = "status-line error";
         } finally {
           button.disabled = false;
@@ -2132,7 +2121,7 @@
           selectedTrilhaKey = null;
           await initialize();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         }
       }
 
@@ -2227,7 +2216,7 @@
           closeRenameOverlay();
           await initialize();
         } catch (error) {
-          status.textContent = error.message;
+          status.textContent = window.estimuloErroEmLinha(error);
           status.className = "status-line error";
         } finally {
           button.disabled = false;

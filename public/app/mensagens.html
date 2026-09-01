@@ -109,7 +109,8 @@
                   <div class="field">
                     <label for="msgMidia">Imagem ou vídeo (opcional)</label>
                     <input id="msgMidia" type="file" accept="image/*,video/*">
-                    <p class="text-faint" style="font-size: var(--fs-xs);margin:4px 0 0;">O arquivo é enviado direto para os grupos e não fica salvo no sistema — só o texto e os metadados do disparo ficam registrados.</p>
+                    <p id="msgMidiaInfo" style="font-size: var(--fs-xs);margin:4px 0 0;display:none;"></p>
+                    <p class="text-faint" style="font-size: var(--fs-xs);margin:4px 0 0;">O arquivo é enviado direto para os grupos e não fica salvo no sistema — só o texto e os metadados do disparo ficam registrados. Vídeos acima de 16 MB são compactados automaticamente antes do envio (limite do WhatsApp para vídeo com preview), o que pode levar alguns minutos.</p>
                   </div>
 
                   <div class="field">
@@ -241,6 +242,7 @@
     </div>
 
     <script src="assets/js/dom-utils.js"></script>
+    <script src="assets/js/error-messages.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -389,22 +391,10 @@
       });
 
 
-      async function requestJson(url, options) {
-        const response = await fetch(url, options);
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          // O status vai junto porque estimuloTratarErro usa ele para separar
-          // erro de servidor (5xx -> caixa "algo inesperado") de erro de
-          // validacao (4xx -> aviso com a mensagem da API).
-          const error = new Error(payload.error || `Falha na requisicao (${response.status})`);
-          error.status = response.status;
-          error.payload = payload;
-          throw error;
-        }
-
-        return payload;
-      }
+      // Implementacao unica em assets/js/error-messages.js (era copia
+      // byte-a-byte nesta e em outras oito telas). O alias local mantem as
+      // chamadas existentes desta pagina funcionando sem alteracao.
+      const requestJson = (url, options) => window.estimuloRequestJson(url, options);
 
       // new Date("YYYY-MM-DDTHH:mm:00") e interpretado no horario local do navegador;
       // convertemos para ISO UTC para o backend (que pode rodar em outro fuso) nao
@@ -494,7 +484,12 @@
       });
 
       function populateTestGroupSelect() {
-        document.getElementById("testGroup").innerHTML = state.groups
+        const testOrg = state.organizations.find((org) => (org.nome || "").trim().toLowerCase() === "testes");
+        const testGroups = testOrg
+          ? state.groups.filter((g) => g.organization_id === testOrg.id)
+          : state.groups;
+
+        document.getElementById("testGroup").innerHTML = testGroups
           .map((g) => `<option value="${g.id}">${escapeHtml(g.nome)}</option>`)
           .join("");
       }
@@ -677,7 +672,64 @@
       ["msgTitulo", "msgTexto", "msgData"].forEach((id) =>
         document.getElementById(id).addEventListener("input", updatePreview)
       );
-      document.getElementById("msgMidia").addEventListener("change", updatePreview);
+      // Limites espelhados do backend (config/evolution.js). O aviso aqui e so
+      // para a pessoa nao esperar um upload de centenas de MB terminar para
+      // descobrir que o arquivo foi recusado - quem decide de fato e a API.
+      const MEDIA_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+      const IMAGE_MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
+      const VIDEO_TARGET_BYTES = 16 * 1024 * 1024;
+
+      function formatMegabytes(bytes) {
+        const mb = bytes / 1024 / 1024;
+        return mb >= 10 ? Math.round(mb) + " MB" : mb.toFixed(1) + " MB";
+      }
+
+      function renderMediaInfo() {
+        const info = document.getElementById("msgMidiaInfo");
+        const file = attachedMediaFile();
+
+        if (!file) {
+          info.style.display = "none";
+          info.textContent = "";
+          return;
+        }
+
+        const isVideo = String(file.type || "").startsWith("video/");
+        const isImage = String(file.type || "").startsWith("image/");
+        info.style.display = "";
+
+        if (file.size > MEDIA_MAX_UPLOAD_BYTES) {
+          info.style.color = "var(--danger)";
+          info.textContent =
+            "Arquivo tem " + formatMegabytes(file.size) + " e excede o maximo de " +
+            formatMegabytes(MEDIA_MAX_UPLOAD_BYTES) + ". Escolha outro arquivo.";
+          return;
+        }
+
+        if (isImage && file.size > IMAGE_MAX_UPLOAD_BYTES) {
+          info.style.color = "var(--danger)";
+          info.textContent =
+            "Imagem tem " + formatMegabytes(file.size) + " e excede o maximo de " +
+            formatMegabytes(IMAGE_MAX_UPLOAD_BYTES) + " (imagens nao sao compactadas).";
+          return;
+        }
+
+        if (isVideo && file.size > VIDEO_TARGET_BYTES) {
+          info.style.color = "var(--text-muted)";
+          info.textContent =
+            "Video de " + formatMegabytes(file.size) + " sera compactado para cerca de " +
+            formatMegabytes(VIDEO_TARGET_BYTES) + " antes do envio.";
+          return;
+        }
+
+        info.style.color = "var(--text-muted)";
+        info.textContent = "Arquivo de " + formatMegabytes(file.size) + ".";
+      }
+
+      document.getElementById("msgMidia").addEventListener("change", () => {
+        renderMediaInfo();
+        updatePreview();
+      });
 
       function currentContentPayload() {
         return {
@@ -704,6 +756,42 @@
         return formData;
       }
 
+      // Acompanha o teste ja enfileirado ate o log sair de "pendente". Um grupo
+      // so leva milissegundos no worker, entao o primeiro poll quase sempre ja
+      // volta finalizado; o intervalo curto existe para o resultado aparecer
+      // "na hora" na tela, e nao so no proximo segundo cheio.
+      // Devolve null se estourar o teto - o envio segue valendo na fila, apenas
+      // nao da para afirmar o resultado aqui.
+      const TEST_POLL_INTERVAL_MS = 400;
+      const TEST_POLL_TIMEOUT_MS = 60000;
+      // Com video, o backend responde 202 antes de comprimir (para a requisicao
+      // nao estourar o timeout do proxy) e so enfileira quando o ffmpeg termina.
+      // O polling precisa cobrir essa espera, senao a tela desiste no meio de um
+      // envio que esta indo bem.
+      const TEST_POLL_TIMEOUT_WITH_VIDEO_MS = 15 * 60 * 1000;
+
+      async function pollTestDispatch(campaignId, timeoutMs = TEST_POLL_TIMEOUT_MS) {
+        if (!campaignId) {
+          return null;
+        }
+
+        const deadline = Date.now() + timeoutMs;
+
+        for (;;) {
+          const snapshot = await requestJson(`/mensagens/dispatch/status/${campaignId}`);
+
+          if (snapshot.finalizado) {
+            return snapshot;
+          }
+
+          if (Date.now() >= deadline) {
+            return null;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, TEST_POLL_INTERVAL_MS));
+        }
+      }
+
       document.getElementById("sendTestButton").addEventListener("click", async () => {
         const groupId = document.getElementById("testGroup").value;
         const group = state.groups.find((g) => g.id === groupId);
@@ -720,34 +808,58 @@
 
         try {
           const mediaFile = attachedMediaFile();
-          let result;
+          let enqueued;
 
+          // Rotas /async: o backend responde 202 assim que o job entra na fila,
+          // sem segurar a conexao ate a Evolution responder. O envio sincrono
+          // podia passar de 3 minutos com midia e o navegador derrubava a
+          // requisicao com "Failed to fetch" - as vezes com a mensagem ja
+          // entregue no grupo.
           if (mediaFile) {
             const formData = buildMediaFormData(
               { group_ids: [groupId], texto: document.getElementById("msgTexto").value.trim() },
               mediaFile
             );
-            result = await requestJson("/mensagens/dispatch/media", { method: "POST", body: formData });
+            enqueued = await requestJson("/mensagens/dispatch/async/media", { method: "POST", body: formData });
           } else {
             const payload = { group_ids: [groupId], ...currentContentPayload() };
-            result = await requestJson("/mensagens/dispatch", {
+            enqueued = await requestJson("/mensagens/dispatch/async", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             });
           }
 
-          const detail = result.results[0];
+          const isVideo = Boolean(mediaFile) && String(mediaFile.type || "").startsWith("video/");
 
-          if (detail.ok) {
+          if (isVideo) {
+            status.textContent = "Compactando o video e enviando teste… isso pode levar alguns minutos.";
+          }
+
+          const final = await pollTestDispatch(
+            enqueued.campaign_id,
+            isVideo ? TEST_POLL_TIMEOUT_WITH_VIDEO_MS : TEST_POLL_TIMEOUT_MS
+          );
+
+          if (!final) {
+            status.textContent =
+              `O envio para "${group.nome}" foi enfileirado, mas ainda nao confirmou. ` +
+              "Verifique o relatorio operacional em instantes.";
+            status.style.color = "var(--text-muted)";
+            return;
+          }
+
+          const detail = final.results[0];
+
+          if (detail && detail.ok) {
             status.textContent = `Teste enviado para "${group.nome}" via Evolution API.`;
             status.style.color = "var(--success)";
           } else {
-            status.textContent = `Falha ao enviar para "${group.nome}": ${detail.error}`;
+            status.textContent = `Falha ao enviar para "${group.nome}": ${(detail && detail.error) || "erro desconhecido"}`;
             status.style.color = "var(--danger)";
           }
         } catch (error) {
-          status.textContent = `Erro: ${error.message}`;
+          status.textContent = window.estimuloErroEmLinha(error);
           status.style.color = "var(--danger)";
         }
       });
@@ -773,6 +885,7 @@
         document.getElementById("msgTitulo").value = "";
         document.getElementById("msgTexto").value = "";
         document.getElementById("msgMidia").value = "";
+        renderMediaInfo();
         state.selectedGroupIds.clear();
         document.querySelectorAll(".group-check:checked").forEach((cb) => (cb.checked = false));
         clearQuickPeriodSelection();
@@ -785,18 +898,34 @@
         const msg = collectMessageFromForm();
         const mediaFile = attachedMediaFile();
 
+        // Validacao local passa pela mesma caixa central do painel que os erros
+        // vindos da API: o window.alert do browser aparecia com o endereco do
+        // site no topo, sem dizer o proximo passo, e destoava de todo o resto.
         if (!msg.grupos.length) {
-          window.alert("Selecione ao menos um grupo destinatário.");
+          window.estimuloErroInesperado(null, {
+            title: "Nenhum grupo selecionado",
+            message: "A mensagem precisa de pelo menos um grupo para ser enviada.",
+            action: "Marque os grupos que devem receber essa mensagem.",
+          });
           return;
         }
 
         if (!msg.texto && !msg.link && !mediaFile) {
-          window.alert("Informe um texto ou anexe uma imagem/vídeo para a mensagem.");
+          window.estimuloErroInesperado(null, {
+            title: "Falta o conteudo da mensagem",
+            message: "A mensagem esta vazia - sem texto, link ou midia nao ha o que enviar.",
+            action: "Escreva o texto ou anexe uma imagem ou video.",
+          });
           return;
         }
 
         if (!msg.data || !msg.inicio || !msg.fim) {
-          window.alert("Preencha data, início e fim da janela de envio.");
+          window.estimuloErroInesperado(null, {
+            title: "Falta a janela de envio",
+            message:
+              "O painel espalha os envios entre o horario de inicio e o de fim, entao precisa dos dois.",
+            action: "Preencha a data, o horario de inicio e o de fim.",
+          });
           return;
         }
 
@@ -804,7 +933,11 @@
         const windowEndIso = localDateTimeToUtcIso(msg.data, msg.fim);
 
         if (new Date(windowStartIso).getTime() <= Date.now()) {
-          window.alert("A data e o horário de início precisam ser posteriores ao momento atual.");
+          window.estimuloErroInesperado(null, {
+            title: "A janela de envio esta no passado",
+            message: "Nao da para programar um envio para um horario que ja passou.",
+            action: "Escolha uma data e um horario de inicio futuros.",
+          });
           return;
         }
 
@@ -847,7 +980,7 @@
           msg.status = "programado";
         } catch (error) {
           msg.status = "erro";
-          msg.detalhes = [{ ok: false, error: error.message }];
+          msg.detalhes = [{ ok: false, error: window.estimuloErroEmLinha(error) }];
         }
 
         sentMessages.unshift(msg);
@@ -908,7 +1041,7 @@
             const groups = await requestJson("/groups/search");
             state.groups = groups.filter((g) => Boolean(g.segmento));
           } catch (error) {
-            document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(error.message)}</span>`;
+            document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(window.estimuloErroEmLinha(error))}</span>`;
           }
           try {
             const organizations = await requestJson("/organizations");

@@ -21,11 +21,51 @@ async function main() {
     });
 
     const created = await service.registerInstance({ instance_name: "estimulo-numero-2" });
-    assert.equal(created.instance_name, "estimulo-numero-2");
+    assert.equal(created.instance_name, "estimuloNumero2");
     assert.equal(createCalls[0].priority, 1);
     assert.equal(createCalls[0].connection_state, "pending");
 
     await assert.rejects(() => service.registerInstance({}), /instance_name is required/);
+  }
+
+  // Nome com espaco/acento e' normalizado para camelCase antes de ir para o
+  // banco E para a Evolution - e' esse mesmo texto que a Evolution usa cru no
+  // path de toda rota, entao acento/espaco divergindo entre os dois lados e' o
+  // que produzia o 404 "instance does not exist" (ver
+  // evolution-instance-resolver.js).
+  {
+    const createCalls = [];
+    const evolutionCreateCalls = [];
+    const repository = {
+      findByInstanceName: async () => null,
+      findAll: async () => [],
+      create: async (payload) => {
+        createCalls.push(payload);
+        return { id: "instance-3", ...payload };
+      },
+    };
+
+    const service = createWhatsappInstancesService({
+      repository,
+      createEvolutionInstance: async (instanceName) => {
+        evolutionCreateCalls.push(instanceName);
+        return { status: 201, data: {} };
+      },
+    });
+
+    const created = await service.registerInstance({ instance_name: "Lina Estímulo Business" });
+    assert.equal(created.instance_name, "linaEstimuloBusiness");
+    assert.equal(createCalls[0].instance_name, "linaEstimuloBusiness");
+    // A Evolution recebe o MESMO nome normalizado - e' o que impede o
+    // descompasso entre o nome que ela guarda e o que fica no nosso banco.
+    assert.deepEqual(evolutionCreateCalls, ["linaEstimuloBusiness"]);
+  }
+
+  // So pontuacao/espaco (nada alfanumerico sobra) e' tratado como nome vazio.
+  {
+    const service = createWhatsappInstancesService({ repository: {} });
+
+    await assert.rejects(() => service.registerInstance({ instance_name: "   !!!   " }), /instance_name is required/);
   }
 
   {
@@ -152,6 +192,69 @@ async function main() {
     assert.equal(evolutionDeleteCalledWith, "estimulo-mvp");
     assert.deepEqual(deleteCalls, ["instance-1"]);
     assert.deepEqual(reorderCalls[0], ["instance-2", "instance-3"]);
+  }
+
+  // ---------- removeInstance: Evolution indisponivel nao trava a remocao ----------
+  // Antes, qualquer erro do delete na Evolution (fora do ar, timeout, 500)
+  // subia e o controller devolvia "Internal server error": o numero ficava
+  // impossivel de remover pela tela. A remocao local precisa concluir e apenas
+  // reportar que a instancia continua existindo na Evolution.
+  {
+    const deleteCalls = [];
+    const repository = {
+      findById: async () => ({ id: "instance-1", instance_name: "estimuloSophiaDeFreitas" }),
+      findAll: async () => [{ id: "instance-1" }, { id: "instance-2" }],
+      delete: async (id) => {
+        deleteCalls.push(id);
+        return { id };
+      },
+      listActive: async () => [{ id: "instance-2" }],
+      reorderPriorities: async () => [],
+    };
+
+    const service = createWhatsappInstancesService({
+      repository,
+      groupLinksRepository: {
+        listGroupIdsForInstance: async () => [],
+        listGroupIdsForInstances: async () => [],
+      },
+      groupsRepository: { removeMany: async () => [] },
+      deleteEvolutionInstance: async () => {
+        const error = new Error("Evolution API indisponivel ou sem resposta");
+        error.code = "EVOLUTION_NO_RESPONSE";
+        throw error;
+      },
+    });
+
+    const result = await service.removeInstance("instance-1");
+
+    // A linha local saiu mesmo com a Evolution fora do ar.
+    assert.equal(result.removed, true);
+    assert.deepEqual(deleteCalls, ["instance-1"]);
+    // E o motivo volta para a tela avisar que sobrou uma instancia la.
+    assert.match(result.evolution_delete_error, /indisponivel/);
+  }
+
+  // Caminho feliz nao inventa aviso de erro.
+  {
+    const service = createWhatsappInstancesService({
+      repository: {
+        findById: async () => ({ id: "instance-1", instance_name: "estimuloMvp" }),
+        findAll: async () => [{ id: "instance-1" }],
+        delete: async (id) => ({ id }),
+        listActive: async () => [],
+        reorderPriorities: async () => [],
+      },
+      groupLinksRepository: {
+        listGroupIdsForInstance: async () => [],
+        listGroupIdsForInstances: async () => [],
+      },
+      groupsRepository: { removeMany: async () => [] },
+      deleteEvolutionInstance: async () => ({ status: 200, data: {} }),
+    });
+
+    const result = await service.removeInstance("instance-1");
+    assert.equal(result.evolution_delete_error, null);
   }
 
   // ---------- removeInstance: limpeza de grupos orfaos ----------
@@ -501,6 +604,38 @@ async function main() {
     await missingColumnController.setPaused({ params: { id: "instance-1" }, body: { paused: true } }, missingColumnRes);
     assert.equal(missingColumnRes.statusCode, 503);
     assert.match(missingColumnRes.body.error, /migration/i);
+
+    // ---------- controller: DELETE /:id ----------
+    // FK logs.whatsapp_instance_id sem ON DELETE (migration 202609010001 ainda
+    // nao aplicada) trava a remocao de qualquer numero que ja disparou. Precisa
+    // dizer isso, nao "Internal server error".
+    const fkController = createController({
+      whatsappInstancesService: {
+        removeInstance: async () => {
+          const error = new Error(
+            'update or delete on table "whatsapp_instances" violates foreign key constraint "logs_whatsapp_instance_id_fkey" on table "logs"'
+          );
+          error.code = "23503";
+          throw error;
+        },
+      },
+    });
+    const fkRes = createRes();
+    await fkController.remove({ params: { id: "instance-1" } }, fkRes);
+    assert.equal(fkRes.statusCode, 503);
+    assert.match(fkRes.body.error, /migration/i);
+
+    // Numero inexistente continua 404.
+    const removeNotFoundController = createController({
+      whatsappInstancesService: {
+        removeInstance: async () => {
+          throw new Error("Instance not found");
+        },
+      },
+    });
+    const removeNotFoundRes = createRes();
+    await removeNotFoundController.remove({ params: { id: "missing" } }, removeNotFoundRes);
+    assert.equal(removeNotFoundRes.statusCode, 404);
   }
 
   console.log("whatsapp instances service tests OK");

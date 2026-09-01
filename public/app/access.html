@@ -189,7 +189,19 @@
 
             goNext();
           } catch (error) {
-            showError(error.message || "Usuario ou senha incorretos");
+            // A faixa de erro fica no proprio formulario (e nao na caixa central
+            // do painel): num login, tirar o foco do campo de senha para fechar
+            // um modal atrapalha mais do que ajuda. O unico caso que precisa de
+            // traducao aqui e' a falha de rede - "Failed to fetch" nao diz ao
+            // usuario que o problema e' a conexao, e nao a senha dele.
+            const semRede = /failed to fetch|networkerror|load failed|network request failed/i.test(
+              error.message || ""
+            );
+            showError(
+              semRede
+                ? "Nao conseguimos falar com o servidor. Confira sua conexao e tente novamente."
+                : error.message || "Usuario ou senha incorretos"
+            );
             input.select();
           } finally {
             button.disabled = false;

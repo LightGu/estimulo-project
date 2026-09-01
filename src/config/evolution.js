@@ -23,6 +23,23 @@ const evolutionConfig = {
   // video de ~102 MB ja estoura o limite. Mantemos o numero aqui para poder barrar
   // o envio antes de gastar upload, e para saber quando recomprimir o video.
   maxMediaPayloadBytes: Number(process.env.EVOLUTION_API_MAX_MEDIA_PAYLOAD_BYTES || 136 * 1024 * 1024),
+  // Anexo do Disparador Pontual: o arquivo que o usuario sobe agora e' aceito
+  // grande e reduzido antes do envio (ver services/adhoc-media.js), entao o teto
+  // de upload nao precisa mais espelhar o limite da Evolution. Ele existe so para
+  // barrar um arquivo absurdo antes de ocupar RAM: o upload usa multer
+  // memoryStorage, logo o arquivo inteiro fica no processo da API durante o
+  // request. Subir muito acima disso exige conferir a memoria do container.
+  adhocMediaMaxUploadBytes: Number(process.env.ADHOC_MEDIA_MAX_UPLOAD_BYTES || 500 * 1024 * 1024),
+  // Imagem nao passa pelo pipeline de compressao (ffmpeg aqui e' de video), entao
+  // continua com um teto proprio, baixo: acima disso o envio e' recusado no upload
+  // em vez de falhar depois na Evolution.
+  adhocImageMaxUploadBytes: Number(process.env.ADHOC_IMAGE_MAX_UPLOAD_BYTES || 16 * 1024 * 1024),
+  // Alvo de bytes crus para o video do Disparador Pontual. 16 MB e' o limite que o
+  // WhatsApp entrega como video inline (com preview e play no grupo); acima disso
+  // ele recompacta por conta propria ou nao exibe. Comprimir para esse alvo e' o
+  // que faz o video chegar com qualidade previsivel - mirar no teto da Evolution
+  // (~102 MB) so gastaria upload num arquivo que o WhatsApp degradaria depois.
+  adhocVideoTargetBytes: Number(process.env.ADHOC_VIDEO_TARGET_BYTES || 16 * 1024 * 1024),
 };
 
 // Confirmacao de entrega: a resposta HTTP da Evolution so diz que ela aceitou a
