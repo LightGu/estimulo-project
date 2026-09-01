@@ -101,6 +101,14 @@ function createDispatchLogsService(dependencies = {}) {
     return repository.updatePlannedSchedule(id, horarioEnvioPlanejado);
   }
 
+  async function updateInstance(id, whatsappInstanceId) {
+    if (!id) {
+      throw new Error("Dispatch log id is required");
+    }
+
+    return repository.updateInstance(id, whatsappInstanceId || null);
+  }
+
   async function listByCampaign(campaignId) {
     if (!campaignId) {
       throw new Error("Campaign id is required");
@@ -185,6 +193,7 @@ function createDispatchLogsService(dependencies = {}) {
     listByGroup,
     listForReport,
     listRecent,
+    updateInstance,
     updatePlannedSchedule,
     updateStatus,
   };

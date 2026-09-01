@@ -400,6 +400,9 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
       // Derivado do job (e nao uma data fixa): o horario planejado do log vem
       // do execution_at, que agora e relativo ao "agora" do teste.
       horario_envio_planejado: job.updates[0].execution_at,
+      // Sem whatsapp_instances cadastradas neste teste, resolveInstanceForOrder
+      // nao tem o que atribuir.
+      whatsapp_instance_id: null,
     },
   ]);
 }

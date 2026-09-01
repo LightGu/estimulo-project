@@ -110,7 +110,7 @@
                     <label for="msgMidia">Imagem ou vídeo (opcional)</label>
                     <input id="msgMidia" type="file" accept="image/*,video/*">
                     <p id="msgMidiaInfo" style="font-size: var(--fs-xs);margin:4px 0 0;display:none;"></p>
-                    <p class="text-faint" style="font-size: var(--fs-xs);margin:4px 0 0;">O arquivo é enviado direto para os grupos e não fica salvo no sistema — só o texto e os metadados do disparo ficam registrados. Vídeos acima de 16 MB são compactados automaticamente antes do envio (limite do WhatsApp para vídeo com preview), o que pode levar alguns minutos.</p>
+                    <p class="text-faint" style="font-size: var(--fs-xs);margin:4px 0 0;">O arquivo é enviado direto para os grupos e não fica salvo no sistema — só o texto e os metadados do disparo ficam registrados. Vídeos acima de 64 MB são compactados automaticamente antes do envio, o que pode levar alguns minutos.</p>
                   </div>
 
                   <div class="field">
@@ -677,7 +677,7 @@
       // descobrir que o arquivo foi recusado - quem decide de fato e a API.
       const MEDIA_MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
       const IMAGE_MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
-      const VIDEO_TARGET_BYTES = 16 * 1024 * 1024;
+      const VIDEO_TARGET_BYTES = 64 * 1024 * 1024;
 
       function formatMegabytes(bytes) {
         const mb = bytes / 1024 / 1024;

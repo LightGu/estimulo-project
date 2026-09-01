@@ -133,6 +133,21 @@ async function updatePlannedSchedule(id, horarioEnvioPlanejado, client) {
   return data;
 }
 
+async function updateInstance(id, whatsappInstanceId, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .update({ whatsapp_instance_id: whatsappInstanceId })
+    .eq("id", id)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
 // Usado pelo worker de "reprocessar falhas automaticamente": reaproveita o log
 // falhou existente em vez de deixar dispatch-consistency criar um novo attempt
 // log, evitando duplicar historico para o mesmo par campaign/group/video.
@@ -435,6 +450,7 @@ module.exports = {
   listWithFilters,
   markRetrying,
   updateDispatchJobId,
+  updateInstance,
   updatePlannedSchedule,
   updateProviderDelivery,
   updateStatus,

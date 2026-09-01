@@ -1,6 +1,11 @@
 const DISPATCH_INITIAL_STATUS = "pending";
 const TIME_ONLY_PATTERN = /^(\d{2}):(\d{2})(?::(\d{2}))?$/;
 const DEFAULT_DISPATCH_TIMEZONE = "America/Bahia";
+// O primeiro envio do periodo deve sair logo apos "Disparar campanha", nao
+// depois de um sorteio de ate "delay maximo" (5 min, 10 min...) como se fosse
+// o intervalo entre grupos. O delay aleatorio configurado (min/max) continua
+// valendo para o espacamento ENTRE grupos - so o primeiro usa este lead fixo.
+const FIRST_SEND_LEAD_MS = 60 * 1000;
 
 // Mesma cadeia de resolucao de campaign-trigger.js (getCampaignTimezone): sem
 // isto, um HH:mm de janela virava instante via `Date#setHours`, que resolve no
@@ -292,7 +297,10 @@ function buildJitteredDispatchSchedule(params = {}) {
 
   const windowStart = window.start.getTime();
   const windowEnd = window.end.getTime();
-  const minRequiredDelay = groups.length * effectiveMinDelay;
+  // O primeiro grupo usa o lead fixo (nao o jitter minimo); so os grupos
+  // seguintes precisam do espacamento minimo entre si.
+  const firstLeadMs = Math.min(FIRST_SEND_LEAD_MS, jitter.max_ms);
+  const minRequiredDelay = firstLeadMs + (groups.length - 1) * effectiveMinDelay;
 
   if (windowStart + minRequiredDelay > windowEnd) {
     throw windowTooShortError(
@@ -313,19 +321,24 @@ function buildJitteredDispatchSchedule(params = {}) {
   return groups.map((group, index) => {
     let jitterDelayMs = 0;
 
-    const groupsAfterCurrent = groups.length - index - 1;
-    const remainingWindow = windowEnd - scheduledTime;
-    const requiredForRest = groupsAfterCurrent * effectiveMinDelay;
-    const maxAllowedDelay = Math.min(jitter.max_ms, remainingWindow - requiredForRest);
+    if (index === 0) {
+      jitterDelayMs = firstLeadMs;
+    } else {
+      const groupsAfterCurrent = groups.length - index - 1;
+      const remainingWindow = windowEnd - scheduledTime;
+      const requiredForRest = groupsAfterCurrent * effectiveMinDelay;
+      const maxAllowedDelay = Math.min(jitter.max_ms, remainingWindow - requiredForRest);
 
-    if (maxAllowedDelay < effectiveMinDelay) {
-      throw windowTooShortError("janela da campanha nao comporta todos os grupos com o jitter configurado", {
-        groups_count: groups.length,
-        available_window_ms: windowEnd - windowStart,
-      });
+      if (maxAllowedDelay < effectiveMinDelay) {
+        throw windowTooShortError("janela da campanha nao comporta todos os grupos com o jitter configurado", {
+          groups_count: groups.length,
+          available_window_ms: windowEnd - windowStart,
+        });
+      }
+
+      jitterDelayMs = randomIntegerBetween(effectiveMinDelay, maxAllowedDelay, random);
     }
 
-    jitterDelayMs = randomIntegerBetween(effectiveMinDelay, maxAllowedDelay, random);
     cumulativeDelayMs += jitterDelayMs;
     scheduledTime += jitterDelayMs;
 

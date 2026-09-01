@@ -13,10 +13,15 @@
   gravado em disco alem do scratch que o proprio ffmpeg cria em os.tmpdir() e
   apaga num `finally`.
 
-  Por que comprimir: o WhatsApp entrega video inline ate ~16 MB; acima disso ele
-  recompacta por conta propria ou simplesmente nao exibe. Reduzir para o alvo
-  antes de enviar e o que faz o video chegar com qualidade previsivel, em vez de
-  o disparo falhar (HTTP 413) ou o video sumir no grupo.
+  Por que comprimir: sem isso, video acima do limite de corpo da Evolution
+  (136 MB, +33% do base64) tomava HTTP 413 na hora do envio. O alvo por padrao
+  fica bem acima dos ~16 MB que o WhatsApp entrega sem recompactar por conta
+  propria - ou seja, o WhatsApp ainda pode reduzir o arquivo do lado dele. A
+  troca e deliberada: preferimos deixar essa decisao para o WhatsApp a
+  comprimir agressivamente aqui e degradar todo video, mesmo os que caberiam
+  com folga em qualidade melhor. So entra ffmpeg quando o arquivo realmente
+  excede o orcamento (ADHOC_VIDEO_TARGET_BYTES) - nunca para baixar resolucao
+  de um video que ja cabe.
 */
 const { evolutionConfig } = require("../config/evolution");
 const { isDispatchVideoCompressionEnabled } = require("../queues/dispatch-media");
@@ -78,6 +83,11 @@ async function prepareAdHocMediaContent(content, options = {}) {
     config = evolutionConfig,
     logger = console,
     normalizeContainer = normalizeVideoContainerToMp4,
+    // 1080p em vez do padrao de video-compression.js (720p, pensado para o
+    // limite antigo de 16 MB). Com o orcamento maior do Disparador Pontual nao
+    // ha necessidade de cortar resolucao so para caber - o corte de bitrate ja
+    // resolve a maioria dos casos, e o video sai nitido.
+    maxHeight = 1080,
   } = options;
 
   if (!isVideoContent(content)) {
@@ -127,6 +137,7 @@ async function prepareAdHocMediaContent(content, options = {}) {
     // mirando este mesmo orcamento, entao o video pode sair daqui pronto.
     const normalized = await normalizeContainer(video, {
       logger,
+      maxHeight,
       maxBase64Bytes: maxBase64Bytes || base64Length(originalBytes),
     });
 
@@ -139,7 +150,7 @@ async function prepareAdHocMediaContent(content, options = {}) {
   }
 
   if (maxBase64Bytes && base64Length(video.bytes.length) > maxBase64Bytes) {
-    const compressed = await compressVideo(video, { logger, maxBase64Bytes });
+    const compressed = await compressVideo(video, { logger, maxHeight, maxBase64Bytes });
 
     if (compressed !== video) {
       video.bytes = undefined;

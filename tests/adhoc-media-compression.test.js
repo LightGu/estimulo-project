@@ -95,12 +95,14 @@ async function testLargeVideoIsCompressedToTarget() {
   const content = buildVideoContent(originalBytes);
   const compressedBytes = Buffer.alloc(32 * 1024, 7);
   let receivedBudget = null;
+  let receivedMaxHeight = null;
 
   const result = await prepareAdHocMediaContent(content, {
     logger: silentLogger,
     normalizeContainer: failingCompressor("mp4 nao deve ser remuxado"),
     compressVideo(video, options) {
       receivedBudget = options.maxBase64Bytes;
+      receivedMaxHeight = options.maxHeight;
 
       return { ...video, bytes: compressedBytes, mime_type: "video/mp4" };
     },
@@ -109,6 +111,26 @@ async function testLargeVideoIsCompressedToTarget() {
   assert.equal(receivedBudget, base64Length(64 * 1024), "o compressor deve receber o orcamento derivado do alvo");
   assert.equal(Buffer.from(result.base64, "base64").length, compressedBytes.length);
   assert.equal(result.type, "video");
+}
+
+// A resolucao nao pode ser cortada so porque o alvo padrao do modulo de
+// compressao e 720p (pensado para o limite antigo de 16 MB) - o Disparador
+// Pontual usa um orcamento maior e so quer reduzir bitrate, nao resolucao.
+async function testUsaResolucaoMaiorQueOPadraoDoCompressor() {
+  const content = buildVideoContent(200 * 1024);
+  let receivedMaxHeight = null;
+
+  await prepareAdHocMediaContent(content, {
+    logger: silentLogger,
+    normalizeContainer: failingCompressor("mp4 nao deve ser remuxado"),
+    compressVideo(video, options) {
+      receivedMaxHeight = options.maxHeight;
+
+      return { ...video, bytes: Buffer.alloc(1024, 1), mime_type: "video/mp4" };
+    },
+  });
+
+  assert.equal(receivedMaxHeight, 1080, "o preparo do Disparador Pontual deve pedir 1080p, nao o padrao de 720p");
 }
 
 async function testCompressionDisabledSkipsFfmpeg() {
@@ -186,6 +208,7 @@ async function main() {
   await testSmallMp4VideoIsNotTouched();
   await testMovIsNormalizedEvenWhenSmall();
   await testLargeVideoIsCompressedToTarget();
+  await testUsaResolucaoMaiorQueOPadraoDoCompressor();
   await testCompressionDisabledSkipsFfmpeg();
   await testCompressionFailurePropagates();
   testPisoDeBitrateDefineDuracaoMaxima();

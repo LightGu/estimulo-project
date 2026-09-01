@@ -447,6 +447,13 @@ function extractDispatchLogPayloadFromJob(job) {
     status: "pendente",
     mensagem_erro: null,
     horario_envio_planejado: data.scheduled_at || null,
+    // Mesmo criterio do disparador pontual (mensagens.service.js): a instancia
+    // ja foi resolvida (rodizio) no momento em que o job foi montado, entao o
+    // relatorio nao precisa esperar o envio terminar para mostrar o numero.
+    // Sem isto, todo log "pendente" de video nascia com whatsapp_instance_id
+    // nulo e so era preenchido no updateStatus final - deixando o relatorio com
+    // "-" na coluna numero enquanto o disparo nao concluia.
+    whatsapp_instance_id: data.whatsapp_instance_id || null,
   };
 }
 
@@ -536,6 +543,33 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
             })
           );
       }
+
+      // Mesmo raciocinio: um log criado antes da instancia estar resolvida (ou
+      // por um caminho legado) nao pode deixar a coluna numero do relatorio
+      // presa em "-" para sempre - sincroniza aqui, quando o job efetivo (com
+      // whatsapp_instance_id ja resolvido pelo rodizio) esta disponivel.
+      if (
+        payload.whatsapp_instance_id &&
+        existingLog.id &&
+        !existingLog.whatsapp_instance_id &&
+        typeof dispatchLogs.updateInstance === "function"
+      ) {
+        const updatedLog = await dispatchLogs.updateInstance(existingLog.id, payload.whatsapp_instance_id);
+        Object.assign(existingLog, updatedLog || { whatsapp_instance_id: payload.whatsapp_instance_id });
+
+        logger.info &&
+          logger.info(
+            JSON.stringify({
+              event: "dispatch_log.instance_synchronized",
+              campaign_id: payload.campaign_id,
+              group_id: payload.group_id,
+              video_id: payload.video_id,
+              log_id: existingLog.id,
+              whatsapp_instance_id: payload.whatsapp_instance_id,
+            })
+          );
+      }
+
       await recordDispatchJobId(dispatchLogs, existingLog, job, logger);
       continue;
     }
@@ -774,18 +808,30 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
     logger
   );
   const plannedScheduleByKey = new Map(
-    plannedSchedule.map((item) => [`${item.group_id}::${item.video_id}`, item.scheduled_at])
+    plannedSchedule.map((item) => [`${item.group_id}::${item.video_id}`, item])
   );
+  // A instancia (numero) e resolvida aqui, na confirmacao do disparo, e nao so
+  // no worker que efetivamente envia - senao o log "pendente" nascia sem
+  // whatsapp_instance_id e o relatorio mostrava "-" na coluna numero ate o
+  // envio terminar. Mesmo rodizio usado em enqueueResolvedDispatchJobs, para o
+  // numero exibido no relatorio ja bater com quem vai enviar de fato.
+  const { whatsappInstances, rotationGroupCount } = await resolveActiveInstancesAndRotation(options);
   const logPayloads = dispatchableGroups
-    .map((group) => ({
-      campaign_id: campaignId,
-      group_id: group.progress_group_id,
-      video_id: group.video_id,
-      status: "pendente",
-      mensagem_erro: null,
-      horario_envio_planejado: plannedScheduleByKey.get(`${group.progress_group_id}::${group.video_id}`) || null,
-      usuario_responsavel_id: options.usuario_responsavel_id || null,
-    }))
+    .map((group, index) => {
+      const planned = plannedScheduleByKey.get(`${group.progress_group_id}::${group.video_id}`);
+      const dispatchOrder = (planned && planned.dispatch_order) || index + 1;
+
+      return {
+        campaign_id: campaignId,
+        group_id: group.progress_group_id,
+        video_id: group.video_id,
+        status: "pendente",
+        mensagem_erro: null,
+        horario_envio_planejado: (planned && planned.scheduled_at) || null,
+        usuario_responsavel_id: options.usuario_responsavel_id || null,
+        whatsapp_instance_id: resolveInstanceForOrder(dispatchOrder, whatsappInstances, rotationGroupCount),
+      };
+    })
     .filter((payload) => payload.group_id && payload.video_id);
 
   const existingLogs = typeof dispatchLogs.listByCampaign === "function"

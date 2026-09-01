@@ -34,12 +34,15 @@ const evolutionConfig = {
   // continua com um teto proprio, baixo: acima disso o envio e' recusado no upload
   // em vez de falhar depois na Evolution.
   adhocImageMaxUploadBytes: Number(process.env.ADHOC_IMAGE_MAX_UPLOAD_BYTES || 16 * 1024 * 1024),
-  // Alvo de bytes crus para o video do Disparador Pontual. 16 MB e' o limite que o
-  // WhatsApp entrega como video inline (com preview e play no grupo); acima disso
-  // ele recompacta por conta propria ou nao exibe. Comprimir para esse alvo e' o
-  // que faz o video chegar com qualidade previsivel - mirar no teto da Evolution
-  // (~102 MB) so gastaria upload num arquivo que o WhatsApp degradaria depois.
-  adhocVideoTargetBytes: Number(process.env.ADHOC_VIDEO_TARGET_BYTES || 16 * 1024 * 1024),
+  // Alvo de bytes crus para o video do Disparador Pontual. 16 MB e' o limite que
+  // o WhatsApp entrega como video inline sem recompactar por conta propria, mas
+  // mirar nele forcava um bitrate baixo demais em qualquer video acima de ~1 min
+  // e a qualidade saia visivelmente pior (usuario reportou). 64 MB da folga para
+  // manter 1080p com bitrate decente em videos de alguns minutos, mesmo que
+  // acima disso o WhatsApp possa recomprimir do lado dele - preferimos deixar
+  // essa decisao para o WhatsApp a degradar tudo aqui. Ainda fica bem abaixo do
+  // teto da Evolution (~102 MB), entao nunca estoura o limite dela.
+  adhocVideoTargetBytes: Number(process.env.ADHOC_VIDEO_TARGET_BYTES || 64 * 1024 * 1024),
 };
 
 // Confirmacao de entrega: a resposta HTTP da Evolution so diz que ela aceitou a
