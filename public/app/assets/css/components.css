@@ -1179,6 +1179,20 @@ td.mono {
   color: var(--text-muted);
 }
 
+/* Proximo passo ("Marque pelo menos um grupo."). Fica separado do texto da
+   causa e com mais contraste: das tres linhas da caixa, e' a unica que o
+   operador precisa ler para sair do erro. */
+.modal-erro-acao {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  color: var(--text);
+  font-weight: 500;
+}
+
 /* Detalhe tecnico (mensagem/status vindos da API). Fechado por padrao: o
    operador nao precisa dele, mas quem for abrir um chamado precisa. */
 .modal-erro-detalhe {

@@ -754,6 +754,7 @@
         </div>
         <h3 id="estimuloErroTitulo">Ops... algo inesperado aconteceu</h3>
         <p id="estimuloErroTexto"></p>
+        <p class="modal-erro-acao" id="estimuloErroAcao" hidden></p>
         <details class="modal-erro-detalhe" id="estimuloErroDetalhe" hidden>
           <summary>Detalhes técnicos</summary>
           <pre id="estimuloErroDetalheTexto"></pre>
@@ -792,12 +793,14 @@
 
   // Texto tecnico que vai para o <details>: mensagem crua + status HTTP, quando
   // o requestJson da pagina tiver anexado um.
-  function detalheTecnico(error) {
+  function detalheTecnico(error, mensagemTraduzida) {
     if (!error) return "";
     const partes = [];
     if (error.status) partes.push(`HTTP ${error.status}`);
     const mensagem = typeof error === "string" ? error : error.message;
     if (mensagem) partes.push(mensagem);
+    // Sem status e sem mensagem crua diferente da exibida nao ha detalhe util.
+    if (!partes.length && mensagemTraduzida) return "";
     return partes.join(" — ");
   }
 
@@ -805,15 +808,30 @@
     const opts = options || {};
     const overlay = ensureErroModal();
 
+    // error-messages.js transforma a mensagem tecnica do backend em
+    // titulo/texto/acao que o operador entende. options.title/message ainda
+    // vencem, para a tela que quiser um texto proprio.
+    const traduzido = window.estimuloTraduzirErro
+      ? window.estimuloTraduzirErro(error)
+      : { titulo: "", texto: "", acao: "" };
+
     overlay.querySelector("#estimuloErroTitulo").textContent =
-      opts.title || "Ops... algo inesperado aconteceu";
+      opts.title || traduzido.titulo || "Ops... algo inesperado aconteceu";
     overlay.querySelector("#estimuloErroTexto").textContent =
       opts.message ||
+      traduzido.texto ||
       "Não conseguimos concluir sua ação agora. O problema foi do nosso lado, não seu — tente novamente em instantes. Se continuar, avise a equipe.";
+
+    // A acao fica em paragrafo proprio, destacado: e' a unica linha que diz ao
+    // operador o que fazer em seguida.
+    const acao = opts.action !== undefined ? opts.action : traduzido.acao;
+    const acaoEl = overlay.querySelector("#estimuloErroAcao");
+    acaoEl.hidden = !acao;
+    acaoEl.textContent = acao || "";
 
     // textContent, nunca innerHTML: o detalhe vem de error.message, que carrega
     // texto devolvido pelo servidor.
-    const detalhe = detalheTecnico(error);
+    const detalhe = detalheTecnico(error, traduzido.texto);
     const detalheEl = overlay.querySelector("#estimuloErroDetalhe");
     detalheEl.open = false;
     detalheEl.hidden = !detalhe;
@@ -840,18 +858,25 @@
     return true;
   };
 
-  // Ponto unico para tratar um erro vindo de requestJson: 5xx / API fora do ar
-  // vao para a caixa de "erro inesperado"; o resto (4xx, validacao) continua no
-  // alerta comum, onde a mensagem da API e' a informacao util.
+  // Ponto unico para tratar qualquer erro vindo de requestJson.
+  //
+  // Antes isso bifurcava: 5xx ia para a caixa central e 4xx caia no
+  // estimuloAlert generico, que mostrava a mensagem crua da API sob o titulo
+  // "Aviso". Como os services lancam texto tecnico em ingles ("Group has no
+  // trilha selected"), o 4xx - justamente o erro que o operador CONSEGUE
+  // corrigir - era o menos compreensivel dos dois. Agora todo erro passa pela
+  // mesma caixa central e pela mesma traducao; o que muda por faixa de status
+  // e' o tom (5xx assume a culpa, 4xx aponta o campo) e a oferta de "Tentar
+  // novamente", que so faz sentido quando o problema nao esta no formulario.
   // Usage: window.estimuloTratarErro(error, { onRetry: () => carregar() });
   window.estimuloTratarErro = function estimuloTratarErro(error, options) {
-    const opts = options || {};
-    if (window.estimuloEhErroDeServidor(error)) {
-      window.estimuloErroInesperado(error, opts);
-      return;
-    }
-    const mensagem = (error && error.message) || "Não foi possível concluir a ação.";
-    return window.estimuloAlert(mensagem, opts.alertOptions);
+    const opts = Object.assign({}, options || {});
+
+    // Repetir a mesma requisicao invalida daria o mesmo 4xx: em erro de
+    // validacao o botao de retry seria um convite a bater na parede de novo.
+    if (!window.estimuloEhErroDeServidor(error)) delete opts.onRetry;
+
+    window.estimuloErroInesperado(error, opts);
   };
 
   // ---------- Prompt modal ----------

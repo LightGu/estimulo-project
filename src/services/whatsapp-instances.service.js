@@ -10,6 +10,7 @@ const {
   listEvolutionInstances,
 } = require("./evolution-instances");
 const { evolutionConfig } = require("../config/evolution");
+const { toSafeInstanceName } = require("./evolution-instance-resolver");
 
 // Duracao fixa exibida no contador da tela de Configuracoes. E apenas uma
 // convencao de UI: quem expira o QR de fato e a propria Evolution/Baileys.
@@ -88,7 +89,21 @@ function createWhatsappInstancesService(dependencies = {}) {
   }
 
   async function registerInstance(payload = {}) {
-    const instanceName = String(payload.instance_name || "").trim();
+    const rawInstanceName = String(payload.instance_name || "").trim();
+
+    if (!rawInstanceName) {
+      throw new Error("instance_name is required");
+    }
+
+    // camelCase, minusculo, sem espaco/acento/pontuacao: e' o mesmo texto que
+    // vai cru no path de toda chamada a Evolution
+    // (`/group/fetchAllGroups/:instance`, `/message/sendText/:instance`, ...).
+    // Normalizar aqui, antes de criar na Evolution, evita o 404
+    // "instance does not exist" que aparecia quando o nome digitado tinha
+    // acento/espaco e a Evolution guardava/normalizava diferente do nosso
+    // banco (ver evolution-instance-resolver.js, que so RECUPERA esse
+    // descompasso depois de acontecer).
+    const instanceName = toSafeInstanceName(rawInstanceName);
 
     if (!instanceName) {
       throw new Error("instance_name is required");
@@ -241,7 +256,28 @@ function createWhatsappInstancesService(dependencies = {}) {
     // instancia, e depois disso nao da mais pra saber quais grupos eram dela.
     const orphanGroupIds = await resolveOrphanGroupIds(id);
 
-    await deleteInstance(instance.instance_name);
+    // A remocao local NAO pode ficar refem do estado da Evolution. Antes,
+    // qualquer erro daqui (Evolution fora do ar, timeout, 500) subia e o
+    // controller respondia "Internal server error" generico - o numero ficava
+    // impossivel de remover pela tela, sem dizer o porque. O 404 ja era
+    // tolerado dentro de deleteEvolutionInstance pelo mesmo motivo; aqui
+    // estendemos a tolerancia aos demais erros, registrando o que houve.
+    let evolutionDeleteError = null;
+
+    try {
+      await deleteInstance(instance.instance_name);
+    } catch (error) {
+      evolutionDeleteError = error?.message || String(error);
+
+      console.error(
+        JSON.stringify({
+          event: "whatsapp_instances.remove.evolution_delete_failed",
+          instance_id: id,
+          instance_name: instance.instance_name,
+          error_message: evolutionDeleteError,
+        })
+      );
+    }
 
     // ON DELETE CASCADE em group_whatsapp_instances.whatsapp_instance_id remove
     // automaticamente os vinculos dessa instancia com qualquer grupo.
@@ -259,6 +295,10 @@ function createWhatsappInstancesService(dependencies = {}) {
       instance_id: id,
       removed_group_ids: orphanGroupIds,
       removed_groups_count: Array.isArray(removedGroups) ? removedGroups.length : orphanGroupIds.length,
+      // Preenchido so quando o numero saiu daqui mas continua existindo na
+      // Evolution: a tela avisa para remover por la, em vez de deixar um
+      // orfao silencioso ocupando sessao no servidor da Evolution.
+      evolution_delete_error: evolutionDeleteError,
     };
   }
 

@@ -324,6 +324,7 @@
     </div>
 
     <script src="assets/js/dom-utils.js"></script>
+    <script src="assets/js/error-messages.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -376,7 +377,7 @@
           profileSaveStatus.style.color = "var(--success)";
           if (window.estimuloRefreshUserChip) await window.estimuloRefreshUserChip();
         } catch (error) {
-          profileSaveStatus.textContent = error.message;
+          profileSaveStatus.textContent = window.estimuloErroEmLinha(error);
           profileSaveStatus.style.color = "var(--danger)";
         }
         setTimeout(() => (profileSaveStatus.textContent = ""), 2500);
@@ -434,7 +435,7 @@
           driveFolderInput.value = data.root_folder_url || data.root_folder_id || "";
           setDriveStatus("Pasta raiz atualizada.", "var(--success)");
         } catch (error) {
-          setDriveStatus(error.message, "var(--danger)");
+          setDriveStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setDriveStatus(""), 3000);
       });
@@ -452,7 +453,7 @@
             data.connected ? "var(--success)" : "var(--danger)"
           );
         } catch (error) {
-          setDriveStatus(error.message, "var(--danger)");
+          setDriveStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         button.disabled = false;
         setTimeout(() => setDriveStatus(""), 3000);
@@ -471,7 +472,7 @@
             "var(--success)"
           );
         } catch (error) {
-          setDriveStatus(error.message, "var(--danger)");
+          setDriveStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         button.disabled = false;
         setTimeout(() => setDriveStatus(""), 5000);
@@ -490,7 +491,7 @@
           if (!response.ok) throw new Error(data.error || "Falha ao salvar horário");
           setDriveStatus("Horário de indexação atualizado.", "var(--success)");
         } catch (error) {
-          setDriveStatus(error.message, "var(--danger)");
+          setDriveStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setDriveStatus(""), 3000);
       });
@@ -680,7 +681,7 @@
           if (!response.ok) throw new Error(data.error || "Falha ao salvar regra de rotação");
           setEvoStatus("Regra de rotação salva.", "var(--success)");
         } catch (error) {
-          setEvoStatus(error.message, "var(--danger)");
+          setEvoStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setEvoStatus(""), 3000);
       });
@@ -698,7 +699,7 @@
           setEvoStatus("");
           await loadWhatsappInstances();
         } catch (error) {
-          setEvoStatus(error.message, "var(--danger)");
+          setEvoStatus(window.estimuloErroEmLinha(error), "var(--danger)");
           setTimeout(() => setEvoStatus(""), 3000);
         }
       }
@@ -741,7 +742,7 @@
           );
           await loadWhatsappInstances();
         } catch (error) {
-          setEvoStatus(error.message, "var(--danger)");
+          setEvoStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setEvoStatus(""), 4000);
       }
@@ -760,15 +761,25 @@
           const data = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(data.error || "Falha ao remover número");
           const removedGroups = Number(data.removed_groups_count) || 0;
-          setEvoStatus(
+          const groupsSuffix =
             removedGroups > 0
-              ? `Número removido. ${removedGroups} ${removedGroups === 1 ? "grupo excluído" : "grupos excluídos"}.`
-              : "Número removido.",
-            "var(--success)"
-          );
+              ? ` ${removedGroups} ${removedGroups === 1 ? "grupo excluído" : "grupos excluídos"}.`
+              : "";
+
+          // O número sai daqui mesmo quando a Evolution não responde; nesse
+          // caso a instância continua existindo lá e precisa ser removida
+          // manualmente, então o aviso não pode aparecer como sucesso limpo.
+          if (data.evolution_delete_error) {
+            setEvoStatus(
+              `Número removido da plataforma.${groupsSuffix} A instância não pôde ser removida da Evolution API (${data.evolution_delete_error}) — remova por lá.`,
+              "var(--warning)"
+            );
+          } else {
+            setEvoStatus(`Número removido.${groupsSuffix}`, "var(--success)");
+          }
           await loadWhatsappInstances();
         } catch (error) {
-          setEvoStatus(error.message, "var(--danger)");
+          setEvoStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         } finally {
           window.estimuloHideLoading();
         }
@@ -862,7 +873,7 @@
             }
           }, 2500);
         } catch (error) {
-          qrStatus.textContent = error.message;
+          qrStatus.textContent = window.estimuloErroEmLinha(error);
           qrStatus.className = "status-line error";
         }
       }
@@ -879,14 +890,14 @@
             data.connected ? "var(--success)" : "var(--danger)"
           );
         } catch (error) {
-          setEvoStatus(error.message, "var(--danger)");
+          setEvoStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         button.disabled = false;
         setTimeout(() => setEvoStatus(""), 3000);
       });
 
       document.getElementById("evoAddInstanceButton").addEventListener("click", async () => {
-        const instanceName = await window.estimuloPrompt("Nome da instância (identificador técnico, ex.: estimulo-numero-2):", { title: "Adicionar número" });
+        const instanceName = await window.estimuloPrompt("Nome da instância (ex.: estimulo-numero-2). Espaços e acentos são removidos automaticamente:", { title: "Adicionar número" });
         if (!instanceName) return;
 
         setEvoStatus("Registrando instância…");
@@ -909,7 +920,7 @@
           await loadWhatsappInstances();
           await startQrFlow(data.id);
         } catch (error) {
-          setEvoStatus(error.message, "var(--danger)");
+          setEvoStatus(window.estimuloErroEmLinha(error), "var(--danger)");
           setTimeout(() => setEvoStatus(""), 3000);
         } finally {
           window.estimuloHideLoading();
@@ -1129,7 +1140,7 @@
           aiSaveStatus.textContent = "Configurações salvas.";
           aiSaveStatus.style.color = "var(--success)";
         } catch (error) {
-          aiSaveStatus.textContent = error.message;
+          aiSaveStatus.textContent = window.estimuloErroEmLinha(error);
           aiSaveStatus.style.color = "var(--danger)";
         }
         setTimeout(() => (aiSaveStatus.textContent = ""), 2500);
@@ -1210,7 +1221,7 @@
           scheduleSaveStatus.textContent = "Configurações salvas.";
           scheduleSaveStatus.style.color = "var(--success)";
         } catch (error) {
-          scheduleSaveStatus.textContent = error.message;
+          scheduleSaveStatus.textContent = window.estimuloErroEmLinha(error);
           scheduleSaveStatus.style.color = "var(--danger)";
         }
         setTimeout(() => (scheduleSaveStatus.textContent = ""), 2500);
@@ -1273,7 +1284,7 @@
               if (rule.withMinutes) {
                 document.querySelector(`[data-rule-minutes-wrap="${rule.id}"]`).style.display = previousChecked ? "block" : "none";
               }
-              window.estimuloTratarErro(error.message);
+              window.estimuloTratarErro(error);
             }
           })
         );
@@ -1292,25 +1303,16 @@
             } catch (error) {
               rule.minutes = previousMinutes;
               input.value = previousMinutes;
-              window.estimuloTratarErro(error.message);
+              window.estimuloTratarErro(error);
             }
           })
         );
       }
 
-      function requestJsonConfig(url, options) {
-        return fetch(url, options).then(async (response) => {
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            // status/payload anexados para estimuloTratarErro separar 5xx de 4xx.
-            const error = new Error(data.error || `Falha na requisição (${response.status})`);
-            error.status = response.status;
-            error.payload = data;
-            throw error;
-          }
-          return data;
-        });
-      }
+      // Implementacao unica em assets/js/error-messages.js. A copia local nao
+      // tratava a rejeicao do fetch, entao "Failed to fetch" chegava cru na tela
+      // quando a API estava fora do ar.
+      const requestJsonConfig = (url, options) => window.estimuloRequestJson(url, options);
 
       async function loadDispatchRules() {
         try {
@@ -1451,7 +1453,7 @@
           setDbBadge(false);
           dbLatencyText.textContent = "";
           dbActionStatus.style.color = "var(--danger)";
-          dbActionStatus.textContent = error.message;
+          dbActionStatus.textContent = window.estimuloErroEmLinha(error);
         }
         button.disabled = false;
         setTimeout(() => (dbActionStatus.textContent = ""), 3000);
@@ -1612,7 +1614,7 @@
           setProfilesStatus("Ordem da jornada atualizada.", "var(--success)");
           await loadProfiles();
         } catch (error) {
-          setProfilesStatus(error.message, "var(--danger)");
+          setProfilesStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setProfilesStatus(""), 3000);
       }
@@ -1665,7 +1667,7 @@
           setProfilesStatus("Fusão desfeita. Os dois perfis originais foram restaurados.", "var(--success)");
           await loadProfiles();
         } catch (error) {
-          setProfilesStatus(error.message, "var(--danger)");
+          setProfilesStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setProfilesStatus(""), 4000);
       }
@@ -1682,7 +1684,7 @@
           setProfilesStatus("Perfil removido.", "var(--success)");
           await loadProfiles();
         } catch (error) {
-          setProfilesStatus(error.message, "var(--danger)");
+          setProfilesStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setProfilesStatus(""), 3000);
       }
@@ -1706,7 +1708,7 @@
           setProfilesStatus("Perfil renomeado. Trilhas e grupos vinculados foram atualizados.", "var(--success)");
           await loadProfiles();
         } catch (error) {
-          setProfilesStatus(error.message, "var(--danger)");
+          setProfilesStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setProfilesStatus(""), 4000);
       }
@@ -1734,7 +1736,7 @@
           setProfilesStatus("Perfis fundidos. Trilhas e grupos dos dois perfis agora usam o perfil unificado.", "var(--success)");
           await loadProfiles();
         } catch (error) {
-          setProfilesStatus(error.message, "var(--danger)");
+          setProfilesStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setProfilesStatus(""), 4000);
       }
@@ -1763,7 +1765,7 @@
           setProfilesStatus("Perfil adicionado.", "var(--success)");
           await loadProfiles();
         } catch (error) {
-          setProfilesStatus(error.message, "var(--danger)");
+          setProfilesStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setProfilesStatus(""), 3000);
       });
@@ -1810,7 +1812,7 @@
           if (!response.ok) throw new Error(users.error || "Falha ao carregar usuários");
           renderAppUsers(users);
         } catch (error) {
-          setAppUsersStatus(error.message, "var(--danger)");
+          setAppUsersStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
       }
 
@@ -1839,7 +1841,7 @@
           setAppUsersStatus("Login atualizado.", "var(--success)");
           await loadAppUsers();
         } catch (error) {
-          setAppUsersStatus(error.message, "var(--danger)");
+          setAppUsersStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setAppUsersStatus(""), 3000);
       });
@@ -1867,7 +1869,7 @@
           setAppUsersStatus("Login apagado.", "var(--success)");
           await loadAppUsers();
         } catch (error) {
-          setAppUsersStatus(error.message, "var(--danger)");
+          setAppUsersStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setAppUsersStatus(""), 3000);
       });
@@ -1901,7 +1903,7 @@
           setAppUsersStatus("Login criado.", "var(--success)");
           await loadAppUsers();
         } catch (error) {
-          setAppUsersStatus(error.message, "var(--danger)");
+          setAppUsersStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }
         setTimeout(() => setAppUsersStatus(""), 3000);
       });

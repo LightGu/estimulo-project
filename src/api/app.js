@@ -153,12 +153,23 @@ function createApp(dependencies = {}) {
   });
 
   // Anexo de imagem/video do Disparador Pontual: fica so em RAM (memoryStorage),
-  // nunca grava em disco. O limite de bytes do arquivo bruto usa 3/4 do limite
-  // de payload da Evolution (evolutionConfig.maxMediaPayloadBytes) para sobrar
-  // espaco para os +33% que o base64 adiciona antes de montar o payload.
+  // nunca grava em disco. O teto do upload nao espelha mais o limite da Evolution:
+  // video acima do alvo do WhatsApp e' recomprimido antes do envio
+  // (services/adhoc-media.js), entao aqui so barramos o que e' grande demais para
+  // sequer caber na memoria do processo. Imagem nao passa por recompressao e
+  // mantem o teto antigo (3/4 do payload da Evolution, espaco para o +33% do base64).
+  const maxUploadBytes = Math.max(
+    evolutionConfig.adhocMediaMaxUploadBytes,
+    evolutionConfig.adhocImageMaxUploadBytes
+  );
+
+  function formatMegabytes(bytes) {
+    return `${Math.round(bytes / 1024 / 1024)} MB`;
+  }
+
   const mediaUpload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: Math.floor((evolutionConfig.maxMediaPayloadBytes * 3) / 4) },
+    limits: { fileSize: maxUploadBytes },
   });
 
   // multer chama next(error) fora do try/catch do controller; sem isso o erro
@@ -169,17 +180,34 @@ function createApp(dependencies = {}) {
 
     return (req, res, next) => {
       middleware(req, res, (error) => {
-        if (!error) {
-          next();
+        if (error) {
+          if (error.code === "LIMIT_FILE_SIZE") {
+            res.status(413).json({
+              error: `Arquivo de midia excede o tamanho maximo permitido (${formatMegabytes(maxUploadBytes)})`,
+            });
+            return;
+          }
+
+          res.status(400).json({ error: error.message || "Falha ao processar o arquivo enviado" });
           return;
         }
 
-        if (error.code === "LIMIT_FILE_SIZE") {
-          res.status(413).json({ error: "Arquivo de midia excede o tamanho maximo permitido" });
+        // O teto das imagens e' menor que o do multer (que precisa acomodar
+        // video), e o mimetype so existe depois do parse - por isso a checagem
+        // fica aqui e nao em `limits`.
+        const file = req.file;
+        const isImage = file && String(file.mimetype || "").startsWith("image/");
+
+        if (isImage && file.size > evolutionConfig.adhocImageMaxUploadBytes) {
+          res.status(413).json({
+            error:
+              `Imagem excede o tamanho maximo permitido (${formatMegabytes(evolutionConfig.adhocImageMaxUploadBytes)}). ` +
+              "Imagens nao sao recomprimidas automaticamente",
+          });
           return;
         }
 
-        res.status(400).json({ error: error.message || "Falha ao processar o arquivo enviado" });
+        next();
       });
     };
   }
@@ -205,6 +233,17 @@ function createApp(dependencies = {}) {
     handleMediaUpload("media"),
     mensagensController.scheduleWithMedia
   );
+  // Envio imediato assincrono (botao "Enviar teste para este grupo"): responde
+  // 202 sem esperar a Evolution, e a tela acompanha por /mensagens/dispatch/
+  // status/:campaignId. As rotas sincronas acima seguem no ar para clientes que
+  // dependem do retorno completo em uma unica resposta.
+  app.post("/mensagens/dispatch/async", mensagensController.dispatchAsync);
+  app.post(
+    "/mensagens/dispatch/async/media",
+    handleMediaUpload("media"),
+    mensagensController.dispatchAsyncWithMedia
+  );
+  app.get("/mensagens/dispatch/status/:campaignId", mensagensController.dispatchStatus);
   app.get("/notifications", notificationsController.list);
   app.post("/notifications/read-all", notificationsController.markAllRead);
   app.post("/notifications/:id/read", notificationsController.markRead);
@@ -292,6 +331,72 @@ function createApp(dependencies = {}) {
   app.patch("/group-profiles/:id", groupProfilesController.update);
   app.delete("/group-profiles/:id", groupProfilesController.remove);
   app.get("/health", healthController);
+
+  // Rota de API que nao existe: sem isso a requisicao passava pelo static e
+  // caia no 404 default do Express, que responde HTML ("Cannot POST /..."). O
+  // painel entao quebrava no response.json() e mostrava erro de parse em vez
+  // de dizer que a chamada nao existe - tipico de front chamando endpoint
+  // renomeado. Restrito aos prefixos de API para nao roubar o 404 dos arquivos
+  // estaticos (imagem/css ausente deve continuar sendo 404 de arquivo).
+  const API_PATH_PREFIXES = [
+    "/access",
+    "/account",
+    "/campaigns",
+    "/group-profiles",
+    "/groups",
+    "/health",
+    "/mensagens",
+    "/notifications",
+    "/organizations",
+    "/reports",
+    "/settings",
+    "/trilhas",
+    "/video-catalog",
+  ];
+
+  app.use((req, res, next) => {
+    const isApiPath = API_PATH_PREFIXES.some(
+      (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
+    );
+
+    if (!isApiPath) return next();
+
+    return res.status(404).json({ error: "Recurso nao encontrado nesta versao do painel" });
+  });
+
+  // Rede de seguranca para o que escapa do try/catch dos controllers: erro
+  // sincrono numa rota, JSON malformado no body (express.json lanca
+  // SyntaxError), ou um controller novo que esqueceu o try/catch.
+  //
+  // Sem isso a resposta caia no handler default do Express, que devolve HTML
+  // com stack trace. O requestJson do painel faz response.json(), a leitura
+  // falhava no HTML e o operador via um erro de parse no lugar do problema
+  // real - e a stack ia junto para o navegador. Aqui a resposta e' sempre o
+  // mesmo { error } em JSON que o resto da API usa, e o detalhe fica no log do
+  // servidor.
+  //
+  // Precisa dos quatro parametros: e' assim que o Express reconhece um
+  // middleware de erro.
+  // eslint-disable-next-line no-unused-vars
+  app.use((error, req, res, next) => {
+    const isMalformedJson = error instanceof SyntaxError && "body" in error;
+
+    console.error("[api] erro nao tratado", {
+      method: req.method,
+      path: req.originalUrl,
+      message: error?.message,
+      stack: error?.stack,
+    });
+
+    if (res.headersSent) return;
+
+    if (isMalformedJson) {
+      res.status(400).json({ error: "Corpo da requisicao nao e um JSON valido" });
+      return;
+    }
+
+    res.status(500).json({ error: "Internal server error" });
+  });
 
   return app;
 }

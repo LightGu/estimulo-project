@@ -124,7 +124,51 @@ function createMensagensController(dependencies = {}) {
     }
   }
 
-  return { dispatch, schedule, dispatchWithMedia, scheduleWithMedia };
+  // Envio imediato assincrono: valida sincrono (erro de verdade continua vindo
+  // como 400/409) e devolve 202 com campaign_id assim que os jobs entram na
+  // fila. Substitui o /mensagens/dispatch sincrono no botao de teste, que
+  // segurava a conexao ate a Evolution responder e estourava em "Failed to
+  // fetch" no navegador.
+  async function dispatchAsync(req, res) {
+    try {
+      const result = await mensagensService.dispatchAdHocAsync(req.body || {}, { userId: req.user && req.user.id });
+
+      return res.status(202).json(result);
+    } catch (error) {
+      return respondWithError(res, error);
+    }
+  }
+
+  async function dispatchAsyncWithMedia(req, res) {
+    try {
+      const payload = { ...parseMultipartBody(req.body), ...buildContentFromUploadedFile(req.file) };
+      const result = await mensagensService.dispatchAdHocAsync(payload, { userId: req.user && req.user.id });
+
+      return res.status(202).json(result);
+    } catch (error) {
+      return respondWithError(res, error);
+    }
+  }
+
+  async function dispatchStatus(req, res) {
+    try {
+      const result = await mensagensService.getDispatchStatus(req.params.campaignId);
+
+      return res.status(200).json(result);
+    } catch (error) {
+      return respondWithError(res, error);
+    }
+  }
+
+  return {
+    dispatch,
+    dispatchAsync,
+    dispatchAsyncWithMedia,
+    dispatchStatus,
+    schedule,
+    dispatchWithMedia,
+    scheduleWithMedia,
+  };
 }
 
 module.exports = createMensagensController;

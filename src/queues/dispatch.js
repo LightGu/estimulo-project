@@ -213,6 +213,67 @@ function canUseDispatchConsistency(jobData = {}, dispatchConsistencyService) {
 // agendada; a implementacao vive em services/evolution-instance-sender.js.
 const resolveDispatchSender = resolveInstanceSender;
 
+// Registra no relatorio um envio que percorreu o caminho legado (sem
+// dispatch-consistency). Esse ramo entregava o video ao grupo e nao tocava na
+// tabela `logs`: o disparo chegava no WhatsApp e nao existia registro nenhum
+// dele - foi assim que envios de teste de grupo ("manual-test", campaign_id que
+// nao e UUID) sumiram do relatorio operacional.
+//
+// Best-effort por definicao: este caminho ja entregou a mensagem quando a
+// funcao e chamada, entao falhar aqui nao pode derrubar o job e transformar um
+// envio bem-sucedido em falha (o retry reenviaria o video ao grupo). Erros
+// viram evento de log e nada mais.
+//
+// So grava quando campaign_id e progress_group_id sao UUID: logs.campaign_id e
+// logs.group_id sao FKs, e um id sintetico como "manual-test" seria rejeitado
+// pelo banco. Quando nao da para gravar, emite um evento explicito para que o
+// envio nao registrado seja rastreavel no worker em vez de silencioso.
+async function recordLegacyDispatchLog(jobData, dispatchLogs, status, mensagemErro, logger = console) {
+  const campaignId = String(jobData.campaign_id || "");
+  const groupId = String(jobData.progress_group_id || "");
+  const canPersist = UUID_PATTERN.test(campaignId) && UUID_PATTERN.test(groupId);
+
+  if (!canPersist || !dispatchLogs || typeof dispatchLogs.createLog !== "function") {
+    logger.warn &&
+      logger.warn(
+        JSON.stringify({
+          event: "dispatch.legacy_send_not_logged",
+          campaign_id: jobData.campaign_id,
+          progress_group_id: jobData.progress_group_id,
+          video_id: jobData.video_id,
+          status,
+          reason: canPersist ? "dispatch_logs_indisponivel" : "campaign_id/group_id nao sao UUID",
+        })
+      );
+
+    return null;
+  }
+
+  try {
+    return await dispatchLogs.createLog({
+      campaign_id: campaignId,
+      group_id: groupId,
+      video_id: UUID_PATTERN.test(String(jobData.video_id || "")) ? jobData.video_id : null,
+      status,
+      mensagem_erro: mensagemErro || null,
+      horario_envio_planejado: jobData.scheduled_at || null,
+      whatsapp_instance_id: jobData.whatsapp_instance_id || null,
+    });
+  } catch (error) {
+    logger.error &&
+      logger.error(
+        JSON.stringify({
+          event: "dispatch.legacy_dispatch_log_failed",
+          campaign_id: jobData.campaign_id,
+          progress_group_id: jobData.progress_group_id,
+          error_message: error.message || String(error),
+        })
+      );
+
+    return null;
+  }
+}
+
 function createDeliveryExecutor(params = {}) {
   const {
     compressVideo = compressVideoToFitBase64Budget,
@@ -801,7 +862,19 @@ function createDispatchProcessor(options = {}) {
         delivery = result.result;
         progress = result.progress;
       } else {
-        delivery = await executeDelivery();
+        // Caminho legado (campaign/group/video que nao sao todos UUID, ex.: o
+        // "Enviar teste para este grupo", que usa campaign_id "manual-test").
+        // Aqui nao existe log pendente criado antes, entao o registro e feito
+        // depois do envio - o inverso do caminho de consistencia, mas e o
+        // unico ponto em que se sabe o desfecho neste ramo.
+        try {
+          delivery = await executeDelivery();
+        } catch (error) {
+          await recordLegacyDispatchLog(job.data, dispatchLogs, "falhou", error.message || String(error), logger);
+          throw error;
+        }
+
+        await recordLegacyDispatchLog(job.data, dispatchLogs, "enviado", null, logger);
         progress = await registerDispatchProgress(job.data, progressRepository, groupsRepository, {
           neverRepeatVideo: job.data.never_repeat_video,
         });

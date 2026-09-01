@@ -9,7 +9,10 @@ const { addDispatchJob } = require("../queues/dispatch");
 const { fetchAllGroupsFromEvolution } = require("./evolution");
 const { evolutionConfig } = require("../config/evolution");
 const whatsappInstancesService = require("./whatsapp-instances.service");
+const { resolveInstanceNames } = require("./evolution-instance-resolver");
 const defaultTrilhaSequenceService = require("./trilha-sequence.service");
+const defaultCampaignsRepository = require("../repositories/campaigns.repository");
+const defaultCampaignGroupsRepository = require("../repositories/campaign-groups.repository");
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
@@ -116,9 +119,13 @@ function createGroupsService(dependencies = {}) {
   const groupInstancesRepository = dependencies.groupWhatsappInstancesRepository || groupWhatsappInstancesRepository;
   const instancesService = dependencies.whatsappInstancesService || whatsappInstancesService;
   const fetchEvolutionGroups = dependencies.fetchEvolutionGroups || fetchAllGroupsFromEvolution;
+  const resolveEvolutionInstanceNames = dependencies.resolveInstanceNames || resolveInstanceNames;
   const enqueueDispatch = dependencies.addDispatchJob || addDispatchJob;
   const videoCatalogRepositoryDependency = dependencies.videoCatalogRepository || videoCatalogRepository;
   const trilhaSequenceServiceDependency = dependencies.trilhaSequenceService || defaultTrilhaSequenceService;
+  const campaignsRepositoryDependency = dependencies.campaignsRepository || defaultCampaignsRepository;
+  const campaignGroupsRepositoryDependency =
+    dependencies.campaignGroupsRepository || defaultCampaignGroupsRepository;
 
   async function create(payload) {
     const nome = payload?.nome?.trim();
@@ -428,6 +435,49 @@ function createGroupsService(dependencies = {}) {
       await instancesRepository.update(instanceId, payload).catch(() => null);
     }
 
+    // Uma instancia desconectada/com erro nao pode derrubar a sincronizacao das
+    // demais - registra a falha e segue para a proxima instancia.
+    async function handleInstanceFailure(instance, error, attemptedAt) {
+      const errorMessage = error?.message || String(error);
+
+      failedInstances.push({
+        instance_id: instance.id,
+        instance_name: instance.instance_name,
+        error_message: errorMessage,
+      });
+      groupIdsSeenByInstance.set(instance.id, new Set());
+
+      await recordSyncAttempt(instance.id, { last_sync_attempt_at: attemptedAt, last_sync_error: errorMessage });
+    }
+
+    // Nome divergente entre o nosso banco e a Evolution faz TODA rota daquele
+    // numero responder 404 "instance does not exist". Resolvido sob demanda (so
+    // quando um 404 aparece) para nao pagar uma chamada extra a cada sync.
+    let remoteNameByInstanceId = null;
+
+    async function resolveRemoteName(instance) {
+      if (remoteNameByInstanceId === null) {
+        remoteNameByInstanceId = new Map();
+
+        try {
+          const resolved = await resolveEvolutionInstanceNames(activeInstances, { config: evolutionConfig });
+
+          for (const entry of resolved) {
+            if (entry && entry.instance && entry.remoteName) {
+              remoteNameByInstanceId.set(entry.instance.id, entry.remoteName);
+            }
+          }
+        } catch (error) {
+          // Sem a lista remota nao da para corrigir nada; segue com o 404
+          // original, que ja e' registrado em last_sync_error.
+        }
+      }
+
+      const remoteName = remoteNameByInstanceId.get(instance.id);
+
+      return remoteName && remoteName !== instance.instance_name ? remoteName : null;
+    }
+
     for (const instance of activeInstances) {
       let response;
       const attemptedAt = new Date().toISOString();
@@ -440,21 +490,37 @@ function createGroupsService(dependencies = {}) {
           timeoutMs,
           config: { ...evolutionConfig, instanceName: instance.instance_name },
         });
-      } catch (error) {
-        // Uma instancia desconectada/com erro nao pode derrubar a sincronizacao
-        // das demais - registra a falha e segue para a proxima instancia.
-        const errorMessage = error?.message || String(error);
+      } catch (initialError) {
+        // 404 aqui quase sempre e' nome dessincronizado, nao numero ausente:
+        // descobre o nome real na Evolution, tenta de novo e grava a correcao
+        // para que os disparos (que usam o mesmo instance_name) parem de falhar.
+        let recovered = false;
 
-        failedInstances.push({
-          instance_id: instance.id,
-          instance_name: instance.instance_name,
-          error_message: errorMessage,
-        });
-        groupIdsSeenByInstance.set(instance.id, new Set());
+        if (Number(initialError?.status) === 404) {
+          const remoteName = await resolveRemoteName(instance);
 
-        await recordSyncAttempt(instance.id, { last_sync_attempt_at: attemptedAt, last_sync_error: errorMessage });
+          if (remoteName) {
+            try {
+              response = await fetchEvolutionGroups({
+                getParticipants,
+                timeoutMs,
+                config: { ...evolutionConfig, instanceName: remoteName },
+              });
 
-        continue;
+              await recordSyncAttempt(instance.id, { instance_name: remoteName });
+              instance.instance_name = remoteName;
+              recovered = true;
+            } catch (retryError) {
+              // Cai no tratamento normal de falha com o erro da nova tentativa.
+              initialError = retryError;
+            }
+          }
+        }
+
+        if (!recovered) {
+          await handleInstanceFailure(instance, initialError, attemptedAt);
+          continue;
+        }
       }
 
       await recordSyncAttempt(instance.id, { last_sync_attempt_at: attemptedAt, last_sync_error: null });
@@ -588,6 +654,55 @@ function createGroupsService(dependencies = {}) {
     return result;
   }
 
+  // Campanha ancora do "Enviar teste para este grupo": existe so para dar um
+  // campaign_id real ao log do disparo de teste. Nasce oculta (hidden_at), entao
+  // nao aparece na tela de campanhas - mas o log dela aparece no relatorio.
+  //
+  // Best-effort: se a criacao falhar, o teste ainda deve ser enviado (e um
+  // disparo manual explicito do usuario). Nesse caso volta ao campaign_id
+  // sintetico e o worker registra o evento dispatch.legacy_send_not_logged,
+  // deixando rastro de que aquele envio nao pode ser registrado.
+  async function createHiddenTestCampaign(group, video) {
+    if (!campaignsRepositoryDependency || typeof campaignsRepositoryDependency.create !== "function") {
+      return null;
+    }
+
+    try {
+      const now = new Date();
+      const campaign = await campaignsRepositoryDependency.create({
+        tipo: "pontual",
+        ativo: false,
+        status: "concluido",
+        trilha: `Teste manual - ${group.nome || group.id}`,
+        data_envio: now.toISOString().slice(0, 10),
+        hidden_at: now.toISOString(),
+      });
+
+      if (
+        campaign &&
+        campaignGroupsRepositoryDependency &&
+        typeof campaignGroupsRepositoryDependency.associateGroup === "function"
+      ) {
+        await campaignGroupsRepositoryDependency
+          .associateGroup(campaign.id, group.id, group.organization_id)
+          .catch(() => undefined);
+      }
+
+      return campaign;
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "groups.test_dispatch_campaign_failed",
+          group_id: group.id,
+          video_id: video && video.id,
+          error_message: error.message || String(error),
+        })
+      );
+
+      return null;
+    }
+  }
+
   async function dispatchTestVideo(id, payload = {}) {
     const group = await updateOperationalSettings(id, payload);
 
@@ -622,11 +737,21 @@ function createGroupsService(dependencies = {}) {
       throw new Error("Selected video has no drive_file_id or link_video");
     }
 
+    // Antes este disparo usava o campaign_id sintetico "manual-test". Como ele
+    // nao e UUID, o worker caia no ramo legado de queues/dispatch.js E nao havia
+    // campanha real para ancorar o log: o video chegava no grupo sem deixar
+    // nenhuma linha em `logs`, ou seja, sumia do relatorio operacional.
+    //
+    // Agora cria uma campanha ad-hoc oculta (hidden_at preenchido): ela nao
+    // polui a listagem de campanhas na UI, mas da um campaign_id valido para o
+    // log do disparo - que segue visivel no relatorio, com o numero usado.
+    const testCampaign = await createHiddenTestCampaign(group, video);
+
     const job = await enqueueDispatch(
       {
         group_id: group.evolution_group_id,
         progress_group_id: group.id,
-        campaign_id: "manual-test",
+        campaign_id: testCampaign ? testCampaign.id : "manual-test",
         video_id: video.id,
         drive_file_id: video.drive_file_id,
         video_catalog: video.drive_file_id

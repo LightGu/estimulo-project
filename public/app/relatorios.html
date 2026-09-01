@@ -140,6 +140,7 @@
     </div>
 
     <script src="assets/js/dom-utils.js"></script>
+    <script src="assets/js/error-messages.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -179,28 +180,16 @@
       };
 
 
-      async function requestJson(url, options) {
-        const response = await fetch(url, options);
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          // O status vai junto porque estimuloTratarErro usa ele para separar
-          // erro de servidor (5xx -> caixa "algo inesperado") de erro de
-          // validacao (4xx -> aviso com a mensagem da API).
-          const error = new Error(payload.error || `Falha na requisicao (${response.status})`);
-          error.status = response.status;
-          error.payload = payload;
-          throw error;
-        }
-
-        return payload;
-      }
+      // Implementacao unica em assets/js/error-messages.js (era copia
+      // byte-a-byte nesta e em outras oito telas). O alias local mantem as
+      // chamadas existentes desta pagina funcionando sem alteracao.
+      const requestJson = (url, options) => window.estimuloRequestJson(url, options);
 
       function renderLoadError(error) {
         document.getElementById("summaryCards").innerHTML = "";
         document.getElementById("resultCount").textContent = "";
         document.getElementById("reportBody").innerHTML = `
-          <tr><td colspan="8"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(error.message)}</p></div></td></tr>`;
+          <tr><td colspan="8"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(window.estimuloErroEmLinha(error))}</p></div></td></tr>`;
       }
 
       const DISPATCH_STATUS_TIP = {

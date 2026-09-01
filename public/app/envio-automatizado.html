@@ -385,6 +385,7 @@
     </div>
 
     <script src="assets/js/dom-utils.js"></script>
+    <script src="assets/js/error-messages.js"></script>
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
@@ -616,33 +617,9 @@
         return minutes * 60000 + seconds * 1000;
       }
 
-      async function requestJson(url, options) {
-        let response;
-
-        try {
-          response = await fetch(url, options);
-        } catch (networkError) {
-          // fetch so rejeita quando a requisicao nao chega ao servidor. O "Failed to
-          // fetch" cru nao diz nada ao operador; o que aconteceu foi a API local ter
-          // parado de responder (tipicamente o processo do `npm run api` caiu).
-          const apiDownError = new Error(
-            "A API local não respondeu. Verifique se o processo do `npm run api` está rodando e tente novamente."
-          );
-          apiDownError.isApiUnreachable = true;
-          throw apiDownError;
-        }
-
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          const error = new Error(payload.error || `Falha na requisicao (${response.status})`);
-          error.status = response.status;
-          error.payload = payload;
-          throw error;
-        }
-
-        return payload;
-      }
+      // Implementacao unica em assets/js/error-messages.js, que ja trata a
+      // rejeicao do fetch (API fora do ar) do mesmo jeito que esta copia fazia.
+      const requestJson = (url, options) => window.estimuloRequestJson(url, options);
 
       function wrapSegmento(seg) {
         return seg ? seg.replace("/", "/​") : seg;
@@ -1170,7 +1147,7 @@
             window.estimuloAlert(parts.join(" "));
           }
         } catch (error) {
-          window.estimuloAlert(`Falha ao atualizar trilhas finalizadas: ${error.message}`);
+          window.estimuloTratarErro(error);
         } finally {
           button.disabled = false;
         }
@@ -1190,7 +1167,7 @@
         try {
           progress = await loadProgressForGroup(group.id);
         } catch (error) {
-          detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Falha ao carregar progresso</strong><span>${escapeHtml(error.message)}</span></div></div>`;
+          detailCard.innerHTML = `<div class="card-body"><div class="empty-state"><strong>Falha ao carregar progresso</strong><span>${escapeHtml(window.estimuloErroEmLinha(error))}</span></div></div>`;
           return;
         }
 
@@ -1331,7 +1308,7 @@
             try {
               await applyTrilhaChange(recommended.trilha_id, recommended.profile_id);
             } catch (error) {
-              window.estimuloTratarErro(error.message);
+              window.estimuloTratarErro(error);
               useRecommendedTrilhaButton.disabled = false;
             }
           });
@@ -1348,7 +1325,7 @@
             try {
               await applyTrilhaChange(el.dataset.selectStepTrilha, group.profile_id);
             } catch (error) {
-              window.estimuloTratarErro(error.message);
+              window.estimuloTratarErro(error);
               el.dataset.selecting = "0";
             }
           };
@@ -1369,7 +1346,7 @@
           await loadProgressForGroup(groupId);
           renderDetail();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         }
       }
 
@@ -1484,7 +1461,7 @@ function parseDateOnly(value) {
             });
             callout.innerHTML = `<div><strong>Não é possível disparar:</strong> os grupos abaixo não têm todos os números de WhatsApp adicionados. Adicione o(s) número(s) faltante(s) ao grupo e sincronize em Grupos antes de tentar novamente.<ul style="margin:6px 0 0 18px;padding:0;">${names.map((n) => `<li>${escapeHtml(n)}</li>`).join("")}</ul></div>`;
           } else {
-            callout.innerHTML = `<div><strong>Falha ao disparar a campanha:</strong> ${escapeHtml(error.message)}</div>`;
+            callout.innerHTML = `<div><strong>Falha ao disparar a campanha:</strong> ${escapeHtml(window.estimuloErroEmLinha(error))}</div>`;
           }
         } finally {
           dispatchButton.disabled = false;
@@ -1738,7 +1715,7 @@ function parseDateOnly(value) {
           closeCaptionModal();
           await refreshCaptionProgress();
         } catch (error) {
-          window.estimuloTratarErro(error.message);
+          window.estimuloTratarErro(error);
         } finally {
           saveButton.disabled = false;
         }
@@ -1758,7 +1735,7 @@ function parseDateOnly(value) {
           });
           await refreshCaptionProgress();
         } catch (error) {
-          window.estimuloAlert(`Falha ao tentar gerar a legenda novamente: ${error.message}`);
+          window.estimuloTratarErro(error);
           button.disabled = false;
         }
       }
@@ -1841,7 +1818,9 @@ function parseDateOnly(value) {
         } catch (error) {
           warningCallout.style.display = "flex";
           warningCallout.className = "callout callout-danger";
-          warningCallout.textContent = `Falha ao iniciar o envio: ${error.message}`;
+          // O callout fica na tela (o operador precisa dele depois de fechar a
+          // caixa), mas o texto vem traduzido em vez do error.message cru.
+          warningCallout.textContent = window.estimuloErroEmLinha(error);
           startSendButton.disabled = false;
         }
       }
@@ -1882,15 +1861,10 @@ function parseDateOnly(value) {
           closeBackToConfigModal();
           goToStep(1);
         } catch (error) {
-          // Mensagens de regra de negocio (ex.: disparo ja enviado) e a de API fora
-          // do ar ja vem prontas e completas; nesses casos mostramos direto, sem o
-          // prefixo de falha tecnica.
-          const isBusinessRuleMessage = /já teve envios|não pode ser apagado/i.test(error.message || "");
-          window.estimuloAlert(
-            isBusinessRuleMessage || error.isApiUnreachable
-              ? error.message
-              : `Falha ao apagar o disparo: ${error.message}`
-          );
+          // O caso especial de regra de negocio ("ja teve envios") virou entrada
+          // no dicionario de error-messages.js, junto com a falha de rede - nao
+          // precisa mais do teste por regex nem do prefixo tecnico aqui.
+          window.estimuloTratarErro(error);
         } finally {
           confirmButton.disabled = false;
         }
@@ -1969,7 +1943,7 @@ function parseDateOnly(value) {
 
       function renderLoadError(error) {
         document.getElementById("groupList").innerHTML = `
-          <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(error.message)}</span></div></td></tr>`;
+          <tr><td colspan="4"><div class="empty-state"><strong>Falha ao carregar grupos</strong><span>${escapeHtml(window.estimuloErroEmLinha(error))}</span></div></td></tr>`;
       }
 
       async function loadDefaultScheduleSettings() {
