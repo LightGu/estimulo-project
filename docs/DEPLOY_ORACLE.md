@@ -194,13 +194,34 @@ incoerentes - sempre volte para `true` (ou remova a variavel) ao ligar o Caddy.
 
 Atualizar (use os mesmos perfis escolhidos no deploy):
 
+Se a VM foi provisionada com `git clone` (secao 2), `git pull --ff-only` funciona direto nela. **A VM em producao atual (163.176.107.172) nao e um checkout git** - foi copiada pelo `codex`/sessoes anteriores via `rsync`, entao `git pull` la falha com `not a git repository`. Para essa VM (ou qualquer outra copiada do mesmo jeito), sincronize a partir de uma maquina com a chave SSH e o repositorio local atualizado:
+
 ```bash
-git pull --ff-only
+rsync -avz --delete \
+  --exclude ".git" --exclude "node_modules" --exclude ".tmp_preview" \
+  --exclude "coverage" --exclude "logs" --exclude ".env" --exclude ".env.*" \
+  --exclude "storage/*" --exclude "credentials" \
+  -e "ssh -i /caminho/da/chave.key" \
+  ./ ubuntu@163.176.107.172:~/estimulo-project/
+```
+
+Depois, em qualquer um dos dois casos, na VM:
+
+```bash
 docker compose --env-file .env -f infra/docker-compose.yml --profile workers up -d --build --remove-orphans
 docker image prune -f
 ```
 
 Se tambem usa Evolution local, acrescente `--profile evolution` ao ultimo comando. Nunca rode `down -v` em producao: isso remove dados persistidos da Evolution.
+
+Se so uma parte do codigo mudou (por exemplo, so telas em `public/` ou so um worker), da para evitar rebuild/restart de tudo - rebuild e recrie apenas os servicos afetados:
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.yml build api dispatch-worker
+docker compose --env-file .env -f infra/docker-compose.yml up -d --no-deps api dispatch-worker
+```
+
+`--no-deps` evita que o compose tente recriar Redis/Evolution junto (eles nao tem `depends_on` circular aqui, mas o flag deixa a intencao explicita). Rode `docker compose ps` depois para confirmar que so os servicos esperados reiniciaram.
 
 ## Rede Oracle e firewall local
 
