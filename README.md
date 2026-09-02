@@ -4,10 +4,10 @@ MVP para organizar campanhas de envio de conteudos em grupos de WhatsApp. A apli
 
 O fluxo principal funciona assim: campanhas sao cadastradas na API, o worker `campaign-trigger` identifica os grupos elegiveis, escolhe o proximo video conforme a trilha/perfil do grupo e cria jobs para a fila `dispatch`. O worker `dispatch` envia o conteudo pela Evolution API e registra historico, progresso e falhas no banco.
 
-O projeto ja possui um ambiente deployado para testes. No historico do projeto, o servidor validado foi:
+O projeto ja possui um ambiente deployado para testes, rodando via Docker Compose numa VM Oracle Cloud (ver `docs/DEPLOY_ORACLE.md`), com HTTPS via Caddy + sslip.io:
 
 ```text
-http://136.248.85.41
+https://163-176-107-172.sslip.io
 ```
 
 Se o IP ou dominio mudar, atualize esta referencia antes de compartilhar o acesso.
@@ -72,6 +72,11 @@ GEMINI_TRANSCRIPTION_MODEL=gemini-flash-latest
 GEMINI_TEXT_MODEL=gemini-flash-latest
 FFMPEG_PATH=
 TRANSCRIPTION_AUDIO_ONLY=true
+
+# Disparador Pontual (anexo enviado direto na tela de Mensagens)
+ADHOC_MEDIA_MAX_UPLOAD_BYTES=524288000
+ADHOC_IMAGE_MAX_UPLOAD_BYTES=16777216
+ADHOC_VIDEO_TARGET_BYTES=67108864
 ```
 
 A `SUPABASE_SERVICE_ROLE_KEY` deve ficar apenas no backend. Nunca exponha essa chave no frontend, em logs, prints, documentacao publica ou codigo versionado.
@@ -282,6 +287,8 @@ erDiagram
 
     GROUPS ||--o{ GROUP_WHATSAPP_INSTANCES : descoberto_em
     WHATSAPP_INSTANCES ||--o{ GROUP_WHATSAPP_INSTANCES : sincroniza
+    WHATSAPP_INSTANCES ||--o{ LOGS : enviou_por
+    APP_USERS ||--o{ LOGS : responsavel_por
     GROUPS ||--o{ NOTIFICATIONS : destino
     GROUPS ||--o{ SETTINGS : grupo_notificacao
 
@@ -390,6 +397,7 @@ erDiagram
         timestamptz status_changed_at
         integer jitter_delay_min_ms
         integer jitter_delay_max_ms
+        timestamptz hidden_at
         timestamptz created_at
         timestamptz updated_at
     }
@@ -427,12 +435,27 @@ erDiagram
         uuid campaign_id FK
         uuid group_id FK
         uuid video_id FK
+        uuid whatsapp_instance_id FK
+        uuid usuario_responsavel_id FK
         varchar status
         text mensagem_erro
         integer retry_count
         timestamptz horario_envio_planejado
         timestamptz enviado_em
+        timestamptz hidden_at
         timestamptz criado_em
+    }
+
+    APP_USERS {
+        uuid id PK
+        text username
+        text display_name
+        text password_hash
+        boolean is_admin
+        boolean active
+        timestamptz last_login_at
+        timestamptz created_at
+        timestamptz updated_at
     }
 
     SETTINGS {
@@ -462,9 +485,12 @@ erDiagram
         text connection_state
         integer priority
         boolean active
+        timestamptz paused_at
         timestamptz qr_generated_at
         timestamptz connected_at
         timestamptz last_status_check_at
+        timestamptz last_sync_attempt_at
+        text last_sync_error
         timestamptz created_at
         timestamptz updated_at
     }
@@ -500,7 +526,7 @@ erDiagram
     }
 ```
 
-O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes. As tabelas que estavam faltando no desenho anterior incluem principalmente `campaign_video_captions`, `settings`, `whatsapp_instances`, `group_whatsapp_instances`, `group_profiles`, `group_profile_merges` e `notifications`.
+O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes, incluindo `app_users` (login do painel) e as colunas de `logs`/`campaigns`/`whatsapp_instances` adicionadas em agosto/2026 (pausa de numero, instancia responsavel pelo envio, ocultar registros). Para o historico completo coluna a coluna, `supabase/migrations/` continua sendo a fonte de verdade.
 
 ## Filas e Workers
 
@@ -511,7 +537,7 @@ O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes. A
 | `npm run queue:dispatch:worker` | Executa envio de videos/conteudos pela Evolution API. |
 | `npm run queue:dispatch-review-timeout:worker` | Trata campanhas aguardando revisao/manual timeout de legendas. |
 | `npm run queue:dispatch-failure-retry:worker` | Reprocessa falhas elegiveis de dispatch. |
-| `npm run queue:mensagens-dispatch:worker` | Executa disparos pontuais da tela de Mensagens. |
+| `npm run queue:mensagens-dispatch:worker` | Executa disparos pontuais da tela de Mensagens (texto, video/imagem de anexo direto ou video da trilha). |
 | `npm run queue:group-sync:worker` | Sincroniza grupos da Evolution API. |
 | `npm run queue:drive-video-index:worker` | Indexa videos do Google Drive no catalogo. |
 
@@ -622,30 +648,37 @@ npm run db:test
 
 ## Deploy
 
-O projeto esta deployado para testes. Para atualizar o servidor existente, garanta:
+O projeto esta deployado para testes numa VM Oracle Cloud, via Docker Compose (`infra/docker-compose.yml`) com Caddy fazendo HTTPS automatico (Let's Encrypt) por tras de um hostname `sslip.io` gratuito - guia completo em `docs/DEPLOY_ORACLE.md`. A API e os workers rodam como containers (perfis `workers`, `evolution`, `proxy`), nao como processos soltos com `npm run`.
 
-1. O servidor fez `git pull` da branch correta.
-2. `npm install` foi executado quando `package-lock.json` mudou.
-3. As migrations novas foram aplicadas no Supabase.
-4. O `.env` do servidor contem Redis, Supabase, Evolution API, Google Drive, Gemini e as variaveis de sessao do login (`ESTIMULO_SESSION_TTL_HOURS`, `ESTIMULO_SESSION_STATE_FILE`); e ha pelo menos um usuario criado via `npm run users:manage -- create`.
-5. Redis esta acessivel pela API e pelos workers.
-6. Evolution API esta acessivel pelos workers de dispatch.
-7. Cada worker obrigatorio esta rodando como processo separado.
-8. Nginx/proxy aponta para a porta da API Node, normalmente `3000`.
-   Para a liberacao por IP funcionar corretamente atras do Nginx, o proxy precisa repassar `X-Forwarded-For`.
+Para atualizar o servidor existente:
 
-Comandos esperados no servidor:
+1. Sincronize o codigo com a VM. O servidor atual **nao e um checkout git** (foi copiado, nao clonado) - a forma usada e `rsync` a partir de uma maquina com a chave SSH:
+   ```bash
+   rsync -avz --delete \
+     --exclude ".git" --exclude "node_modules" --exclude ".tmp_preview" \
+     --exclude "coverage" --exclude "logs" --exclude ".env" --exclude ".env.*" \
+     --exclude "storage/*" --exclude "credentials" \
+     -e "ssh -i /caminho/da/chave.key" \
+     ./ ubuntu@SEU_IP:~/estimulo-project/
+   ```
+   Se o servidor for um checkout git de verdade, `git fetch && git reset --hard origin/main` (ou `git pull --ff-only`) substitui esse passo.
+2. `package-lock.json` mudou? A imagem roda `npm ci` no build (passo 4), entao normalmente nao precisa de acao manual - so confira que o lockfile foi commitado junto do `package.json`.
+3. As migrations novas foram aplicadas no Supabase (`supabase/migrations`, em ordem cronologica - aplique via SQL Editor do projeto, ja que nao ha CLI do Supabase linkado ao projeto).
+4. Rebuild e recrie so os containers que rodam codigo da aplicacao (nao mexe em Redis/Evolution/Caddy):
+   ```bash
+   cd infra
+   docker compose --env-file ../.env build api campaign-trigger-worker dispatch-worker \
+     dispatch-review-timeout-worker dispatch-failure-retry-worker mensagens-dispatch-worker \
+     group-sync-worker drive-video-index-worker
+   docker compose --env-file ../.env up -d --no-deps api campaign-trigger-worker dispatch-worker \
+     dispatch-review-timeout-worker dispatch-failure-retry-worker mensagens-dispatch-worker \
+     group-sync-worker drive-video-index-worker
+   ```
+   Sempre use `--env-file ../.env` (ou rode da raiz com `--env-file .env`) - sem isso o compose nao acha o `.env` e sobe os containers de Evolution/Redis com credenciais vazias (ver aviso na secao "Filas e Workers" abaixo).
+5. Confira: `docker compose ps` (todos `healthy`/`Up`) e `docker compose logs --tail=30 <servico>` sem erro.
+6. O `.env` do servidor contem Redis, Supabase, Evolution API, Google Drive, Gemini e as variaveis de sessao do login (`ESTIMULO_SESSION_TTL_HOURS`, `ESTIMULO_SESSION_STATE_FILE`); e ha pelo menos um usuario criado via `npm run users:manage -- create`.
 
-```bash
-npm run api
-npm run queue:campaign-trigger:worker
-npm run queue:dispatch:worker
-npm run queue:dispatch-review-timeout:worker
-npm run queue:dispatch-failure-retry:worker
-npm run queue:mensagens-dispatch:worker
-npm run queue:group-sync:worker
-npm run queue:drive-video-index:worker
-```
+Detalhes de rede, firewall, HTTPS sem dominio proprio e configuracao completa do `.env` de producao: `docs/DEPLOY_ORACLE.md`.
 
 ## Referencias Internas
 

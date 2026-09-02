@@ -17,7 +17,26 @@ PROFILES="${COMPOSE_PROFILES:-workers}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:3000/health}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 
+REPO_URL="${REPO_URL:-https://github.com/LightGu/estimulo-project.git}"
+
 cd "$APP_DIR"
+
+# A VM de producao (163.176.107.172) foi provisionada por rsync, nao por
+# git clone - ver secao "Atualizar" do docs/DEPLOY_ORACLE.md. Nesse diretorio
+# todo comando git falha com "not a git repository", entao converte-se a copia
+# em clone na primeira execucao, sem tocar no que nao e versionado: .env,
+# credentials/ e storage/ ficam onde estao (nenhum deles esta no repositorio).
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "==> $APP_DIR nao e um checkout git; convertendo em clone de $REPO_URL"
+  git init -q
+  git remote add origin "$REPO_URL"
+  git fetch --depth=1 origin "$BRANCH"
+  # checkout -f em vez de reset --hard: o reset deixaria os arquivos copiados
+  # por rsync que nao existem mais no repositorio como untracked; o -f sobrescreve
+  # a copia local com a versao versionada.
+  git checkout -f -B "$BRANCH" "origin/$BRANCH"
+  git branch --set-upstream-to="origin/$BRANCH" "$BRANCH" >/dev/null 2>&1 || true
+fi
 
 profile_args=()
 IFS=',' read -ra _profiles <<< "$PROFILES"

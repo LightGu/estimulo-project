@@ -194,13 +194,34 @@ incoerentes - sempre volte para `true` (ou remova a variavel) ao ligar o Caddy.
 
 Atualizar (use os mesmos perfis escolhidos no deploy):
 
+Se a VM foi provisionada com `git clone` (secao 2), `git pull --ff-only` funciona direto nela. **A VM em producao atual (163.176.107.172) nao e um checkout git** - foi copiada pelo `codex`/sessoes anteriores via `rsync`, entao `git pull` la falha com `not a git repository`. Para essa VM (ou qualquer outra copiada do mesmo jeito), sincronize a partir de uma maquina com a chave SSH e o repositorio local atualizado:
+
 ```bash
-git pull --ff-only
+rsync -avz --delete \
+  --exclude ".git" --exclude "node_modules" --exclude ".tmp_preview" \
+  --exclude "coverage" --exclude "logs" --exclude ".env" --exclude ".env.*" \
+  --exclude "storage/*" --exclude "credentials" \
+  -e "ssh -i /caminho/da/chave.key" \
+  ./ ubuntu@163.176.107.172:~/estimulo-project/
+```
+
+Depois, em qualquer um dos dois casos, na VM:
+
+```bash
 docker compose --env-file .env -f infra/docker-compose.yml --profile workers up -d --build --remove-orphans
 docker image prune -f
 ```
 
 Se tambem usa Evolution local, acrescente `--profile evolution` ao ultimo comando. Nunca rode `down -v` em producao: isso remove dados persistidos da Evolution.
+
+Se so uma parte do codigo mudou (por exemplo, so telas em `public/` ou so um worker), da para evitar rebuild/restart de tudo - rebuild e recrie apenas os servicos afetados:
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.yml build api dispatch-worker
+docker compose --env-file .env -f infra/docker-compose.yml up -d --no-deps api dispatch-worker
+```
+
+`--no-deps` evita que o compose tente recriar Redis/Evolution junto (eles nao tem `depends_on` circular aqui, mas o flag deixa a intencao explicita). Rode `docker compose ps` depois para confirmar que so os servicos esperados reiniciaram.
 
 ## 4.2. Deploy automatico por push (GitHub Actions)
 
@@ -253,17 +274,27 @@ Os perfis precisam bater com os que a VM usa hoje. Se o deploy manual foi feito
 com `--profile workers --profile proxy`, use `workers,proxy` - passar menos
 perfis derruba os servicos que ficaram de fora.
 
-### c) A VM precisa ter o repositorio como clone git
+### c) VM provisionada por rsync (caso da producao atual)
 
-O script atualiza por `git fetch` + `git reset --hard origin/<branch>`. Se o
-projeto foi copiado por SCP em vez de clonado, faca o clone antes (secao 2) e
-recoloque `.env` e `credentials/` - nenhum dos dois e versionado, entao o reset
-nao os toca.
+O script atualiza por `git fetch` + `git reset --hard origin/<branch>`. A VM de
+producao (163.176.107.172) **nao e um checkout git** - foi copiada por rsync,
+como descrito na secao "Atualizar" acima. O script detecta isso e converte o
+diretorio em clone na primeira execucao (`git init` + `fetch` + `checkout -f`),
+sem precisar de intervencao manual.
+
+Nada fora do repositorio e afetado nessa conversao: `.env`, `credentials/` e
+`storage/` sao gitignored e continuam no lugar. Arquivos que sobraram de rsyncs
+antigos e nao existem mais no repositorio permanecem no disco como untracked -
+o script nao apaga nada por conta propria.
 
 O `reset --hard` **descarta** edicoes feitas direto na VM em arquivos
 versionados. Isso e' proposital: o estado da VM passa a ser exatamente o do
 commit. Se hoje ha ajustes feitos na mao no servidor, traga-os para o repositorio
 antes de ligar o deploy automatico.
+
+Se o repositorio for privado, a VM precisa conseguir autenticar no GitHub para
+o `fetch` - configure um deploy key de leitura na VM, ou defina `REPO_URL` para
+uma URL SSH que a chave da VM ja autorize.
 
 ### d) Primeiro teste
 
