@@ -10,7 +10,7 @@ const {
   listEvolutionInstances,
 } = require("./evolution-instances");
 const { evolutionConfig } = require("../config/evolution");
-const { toSafeInstanceName } = require("./evolution-instance-resolver");
+const { toSafeInstanceName, resolveInstanceNames } = require("./evolution-instance-resolver");
 
 // Duracao fixa exibida no contador da tela de Configuracoes. E apenas uma
 // convencao de UI: quem expira o QR de fato e a propria Evolution/Baileys.
@@ -39,9 +39,67 @@ function createWhatsappInstancesService(dependencies = {}) {
   const getConnectionState = dependencies.getEvolutionConnectionState || getEvolutionConnectionState;
   const deleteInstance = dependencies.deleteEvolutionInstance || deleteEvolutionInstance;
   const listInstances = dependencies.listEvolutionInstances || listEvolutionInstances;
+  // Mesmo resolvedor de nome usado no caminho de envio: o teste de conexao
+  // precisa aprovar/reprovar exatamente o que o disparo consegue usar.
+  const resolveNames = dependencies.resolveInstanceNames || resolveInstanceNames;
 
+  // A listagem da tela de Configuracoes.
+  //
+  // `connection_state` no banco e' um valor GRAVADO por algum check anterior,
+  // nao uma consulta ao vivo - entao uma instancia que sumiu da Evolution
+  // continuava aparecendo como "Conectado" indefinidamente. Era o caso de
+  // "sophiaEstimulo": badge verde na tela enquanto todo disparo por ele falhava
+  // com 404 "instance does not exist", e a propria tela ainda escondia o botao
+  // "Conectar" (so aparece quando o estado != open), deixando o operador sem
+  // como corrigir o que a tela dizia nao estar quebrado.
+  //
+  // Aqui o estado gravado e' confrontado com a lista autoritativa da Evolution,
+  // pelo MESMO resolvedor do caminho de envio: sem instancia correspondente la,
+  // a linha sai como "close" - que e' a verdade operacional (nao da para enviar
+  // por ela) e reativa o botao "Conectar".
+  //
+  // Best-effort de proposito: se a Evolution nao responder, devolve o estado
+  // gravado em vez de marcar tudo como desconectado. Uma indisponibilidade
+  // momentanea da API nao e' o mesmo que numero descadastrado, e apagar os
+  // badges nesse caso seria outro tipo de mentira.
   async function list() {
-    return repository.findAll();
+    const instances = await repository.findAll();
+
+    if (!instances || instances.length === 0) {
+      return instances || [];
+    }
+
+    let remoteResolution;
+
+    try {
+      remoteResolution = await resolveNames(instances, { listEvolutionInstances: listInstances });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: "whatsapp_instances.list.remote_check_failed",
+          error_message: error?.message,
+        })
+      );
+
+      return instances;
+    }
+
+    const missingIds = new Set(
+      remoteResolution.filter((entry) => !entry.remoteName).map((entry) => entry.instance.id)
+    );
+
+    if (missingIds.size === 0) {
+      return instances;
+    }
+
+    // `missing_on_evolution` deixa a tela distinguir "desconectou do WhatsApp"
+    // (leia o QR de novo) de "nao existe mais na Evolution" (o cadastro esta
+    // orfao) - dois problemas com a mesma cara e solucoes diferentes.
+    return instances.map((instance) =>
+      missingIds.has(instance.id)
+        ? { ...instance, connection_state: "close", missing_on_evolution: true }
+        : instance
+    );
   }
 
   // Stubs de teste e repositorios antigos podem nao ter listDispatchable; nesse
@@ -57,14 +115,60 @@ function createWhatsappInstancesService(dependencies = {}) {
     return (active || []).filter((instance) => !instance.paused_at);
   }
 
+  // O teste de conexao da tela de Configuracoes.
+  //
+  // Antes so chamava listInstances() e devolvia { connected: true } se a
+  // Evolution respondesse. Isso responde "a Evolution esta no ar?", nao "os
+  // numeros cadastrados funcionam?" - e as duas coisas divergem exatamente no
+  // caso que mais importa: um numero cadastrado aqui que nao existe la. Foi o
+  // que aconteceu com "sophiaEstimulo" (linha no banco com
+  // connection_state=open, nenhuma instancia correspondente na Evolution): a
+  // tela dizia "Conectado com sucesso" enquanto todo disparo por aquele numero
+  // falhava com 404 "The \"sophiaEstimulo\" instance does not exist". O
+  // connection_state que a tela mostra tambem nao ajuda a perceber - e um valor
+  // gravado no banco por algum check anterior, nao uma consulta ao vivo.
+  //
+  // Agora confere cada instancia cadastrada contra a lista autoritativa da
+  // Evolution, usando o MESMO resolvedor de nome do caminho de envio
+  // (resolveInstanceNames): o que o teste aprova e' o que o disparo consegue
+  // usar de fato. Assim um nome divergente que a rede de seguranca resolve
+  // (banco "Estimulo Novo" vs. Evolution "estimulo-novo") continua passando,
+  // e um numero que nao existe la reprova.
   async function testConnection() {
-    try {
-      await listInstances();
+    let remoteResolution;
 
-      return { connected: true };
+    try {
+      const registered = await repository.findAll();
+
+      // Sem numero cadastrado nao ha o que conferir: o teste volta a ser
+      // apenas "a Evolution responde?", que e a informacao util nesse estado
+      // (e o que a tela mostra antes do primeiro cadastro).
+      if (!registered || registered.length === 0) {
+        await listInstances();
+
+        return { connected: true };
+      }
+
+      remoteResolution = await resolveNames(registered, { listEvolutionInstances: listInstances });
     } catch (error) {
       return { connected: false, reason: error.message };
     }
+
+    const missing = remoteResolution
+      .filter((entry) => !entry.remoteName)
+      .map((entry) => entry.instance.instance_name);
+
+    if (missing.length > 0) {
+      return {
+        connected: false,
+        reason:
+          `Numero(s) sem instancia correspondente na Evolution API: ${missing.join(", ")}. ` +
+          "Reconecte o numero (leia o QR Code novamente) ou pause-o para que os disparos nao tentem usa-lo.",
+        missing_instances: missing,
+      };
+    }
+
+    return { connected: true };
   }
 
   // Backfill idempotente: se nenhuma instancia estiver cadastrada, registra a
@@ -164,12 +268,38 @@ function createWhatsappInstancesService(dependencies = {}) {
       throw new Error("Instance not found");
     }
 
-    const response = await getConnectionState(instance.instance_name);
-    const rawState = String(
-      (response.data && response.data.instance && response.data.instance.state) ||
-        (response.data && response.data.state) ||
-        "close"
-    ).toLowerCase();
+    // 404 "instance does not exist" nao pode subir como erro: era o que
+    // mantinha o connection_state=open gravado de um check antigo para sempre,
+    // porque a funcao estourava ANTES do repository.update - a instancia sumia
+    // da Evolution e a tela seguia mostrando "Conectado". Instancia inexistente
+    // e' um estado conhecido, e o estado correto para ela e' "close".
+    // Outros erros (Evolution fora do ar, timeout) continuam subindo: nao sao
+    // conclusao sobre a instancia, e gravar "close" neles seria um falso
+    // negativo que apaga o estado real.
+    let response = null;
+    let missingOnEvolution = false;
+
+    try {
+      response = await getConnectionState(instance.instance_name);
+    } catch (error) {
+      // Casa por status HTTP (o EvolutionApiError carrega `status`), com o
+      // texto como reserva para erros que cheguem sem ele.
+      const naoExiste = error?.status === 404 || /does not exist/i.test(String(error?.message || ""));
+
+      if (!naoExiste) {
+        throw error;
+      }
+
+      missingOnEvolution = true;
+    }
+
+    const rawState = missingOnEvolution
+      ? "close"
+      : String(
+          (response.data && response.data.instance && response.data.instance.state) ||
+            (response.data && response.data.state) ||
+            "close"
+        ).toLowerCase();
     const normalizedState = VALID_CONNECTION_STATES.includes(rawState) ? rawState : "close";
 
     const updatePayload = {
@@ -191,7 +321,12 @@ function createWhatsappInstancesService(dependencies = {}) {
       }
     }
 
-    return repository.update(id, updatePayload);
+    const updated = await repository.update(id, updatePayload);
+
+    // Mesmo flag que list() usa, para a tela mostrar "Nao encontrado na
+    // Evolution" em vez de um "Desconectado" generico que sugeriria que basta
+    // ler o QR Code de novo.
+    return missingOnEvolution ? { ...updated, missing_on_evolution: true } : updated;
   }
 
   // Pausar mantem a instancia conectada na Evolution (nenhuma chamada e feita

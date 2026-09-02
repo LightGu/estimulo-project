@@ -202,6 +202,81 @@ docker image prune -f
 
 Se tambem usa Evolution local, acrescente `--profile evolution` ao ultimo comando. Nunca rode `down -v` em producao: isso remove dados persistidos da Evolution.
 
+## 4.2. Deploy automatico por push (GitHub Actions)
+
+Com isto configurado, todo push em `main` atualiza a VM sozinho: o GitHub Actions
+conecta por SSH e roda `scripts/deploy.sh`, que faz fetch/reset para o commit
+novo, `docker compose up -d --build --remove-orphans` e so considera o deploy
+bem-sucedido se `/health` responder. O workflow e' `.github/workflows/deploy.yml`.
+
+**Migrations do Supabase continuam manuais.** O deploy automatico nao aplica
+nada no banco - aplique a migration antes do push quando o commit depender dela.
+
+### a) Chave SSH exclusiva do deploy
+
+Na sua maquina (nao na VM), gere um par so para o CI - assim voce revoga o
+acesso do GitHub sem mexer na sua chave pessoal:
+
+```bash
+ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/estimulo_deploy -N ""
+```
+
+Autorize a chave publica na VM:
+
+```bash
+ssh-copy-id -i ~/.ssh/estimulo_deploy.pub ubuntu@163.176.107.172
+```
+
+O usuario da VM precisa estar no grupo `docker` (a secao 1 ja faz isso com
+`usermod -aG docker`), senao o `docker compose` do script pede sudo e falha.
+
+Colete o known_hosts (evita desligar a verificacao de host no runner):
+
+```bash
+ssh-keyscan -H 163.176.107.172
+```
+
+### b) Secrets e variables no GitHub
+
+Em **Settings > Secrets and variables > Actions** do repositorio:
+
+| Tipo | Nome | Valor |
+| --- | --- | --- |
+| Secret | `ORACLE_HOST` | IP ou dominio da VM (ex.: `163.176.107.172`) |
+| Secret | `ORACLE_USER` | usuario SSH (ex.: `ubuntu`) |
+| Secret | `ORACLE_SSH_KEY` | conteudo **inteiro** de `~/.ssh/estimulo_deploy` (a chave privada, incluindo as linhas `BEGIN`/`END`) |
+| Secret | `ORACLE_SSH_KNOWN_HOSTS` | saida do `ssh-keyscan` acima |
+| Variable | `COMPOSE_PROFILES` | perfis usados na VM, separados por virgula (ex.: `workers` ou `workers,proxy`). Sem isso, assume `workers` |
+| Variable | `ORACLE_APP_DIR` | caminho do projeto na VM, se nao for `~/estimulo-project` |
+
+Os perfis precisam bater com os que a VM usa hoje. Se o deploy manual foi feito
+com `--profile workers --profile proxy`, use `workers,proxy` - passar menos
+perfis derruba os servicos que ficaram de fora.
+
+### c) A VM precisa ter o repositorio como clone git
+
+O script atualiza por `git fetch` + `git reset --hard origin/<branch>`. Se o
+projeto foi copiado por SCP em vez de clonado, faca o clone antes (secao 2) e
+recoloque `.env` e `credentials/` - nenhum dos dois e versionado, entao o reset
+nao os toca.
+
+O `reset --hard` **descarta** edicoes feitas direto na VM em arquivos
+versionados. Isso e' proposital: o estado da VM passa a ser exatamente o do
+commit. Se hoje ha ajustes feitos na mao no servidor, traga-os para o repositorio
+antes de ligar o deploy automatico.
+
+### d) Primeiro teste
+
+Rode o workflow manualmente antes de confiar no push: **Actions > Deploy Oracle
+> Run workflow**. Os logs mostram cada passo; se `/health` nao responder em 30s,
+o job falha e imprime os ultimos 80 logs da API.
+
+Para rodar o mesmo script na mao, direto na VM:
+
+```bash
+COMPOSE_PROFILES=workers bash scripts/deploy.sh
+```
+
 ## Rede Oracle e firewall local
 
 Na Security List/NSG da VCN, libere entrada TCP:

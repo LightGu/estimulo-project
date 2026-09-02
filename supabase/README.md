@@ -8,6 +8,26 @@ supabase link --project-ref SEU_PROJECT_REF
 supabase db push
 ```
 
+## Um timestamp, um arquivo
+
+O Supabase registra o historico em `supabase_migrations.schema_migrations` tendo
+a **versao (o timestamp) como chave**. Dois arquivos com o mesmo prefixo nao
+cabem la: um registra, o outro fica "pendente" para sempre e todo `db push`
+morre no INSERT de chave duplicada - travando tambem todas as migrations
+posteriores, que nem chegam a ser tentadas.
+
+Foi o que aconteceu com `202608280001`, usado por `add_app_users_display_name` e
+`fix_organizations_schema_drift` ao mesmo tempo: tres migrations seguintes
+ficaram presas atras dele. Resolvido em 2026-09-02 renomeando a primeira para
+`202608280006` (proximo livre do mesmo dia, ordem preservada) e registrando o
+historico com `supabase migration repair --status applied`.
+
+Ao criar uma migration, confira que o timestamp escolhido ainda nao existe:
+
+```bash
+ls supabase/migrations/ | grep "^<timestamp>"
+```
+
 ## Por que os 45 arquivos continuam aqui
 
 A refatoracao pre-deploy revisou esses arquivos. Existe churn real: 20 das 45

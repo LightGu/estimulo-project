@@ -377,6 +377,16 @@ async function testCancelMarksPendingLogsAndCampaign() {
   assert.equal(result.status, "cancelado");
   assert.equal(cancelCalls.length, 1);
   assert.equal(updates[updates.length - 1].payload.status, "cancelado");
+  // ativo: false junto com o status. Gravar so o status deixava a campanha
+  // dentro de listActiveOverlappingWindow (que filtra por ativo, nao por
+  // status), e ela seguia bloqueando aquela janela+grupos para sempre - todo
+  // disparo pontual novo no mesmo horario batia em 409 apontando para uma
+  // campanha ja cancelada.
+  assert.equal(
+    updates[updates.length - 1].payload.ativo,
+    false,
+    "cancelamento precisa desativar a campanha para ela sair da checagem de conflito de janela"
+  );
 }
 
 async function testCancelIsIdempotent() {

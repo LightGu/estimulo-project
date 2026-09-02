@@ -809,7 +809,16 @@ function createCampaignsService(dependencies = {}) {
 
     await dispatchLogsRepositoryDependency.cancelPendingByCampaign(id);
 
-    return repository.update(id, { status: "cancelado" });
+    // ativo: false junto com o status. Cancelar so o status deixava a campanha
+    // dentro de listActiveOverlappingWindow (que filtra por ativo, nao por
+    // status) e ela seguia bloqueando aquela janela+grupos para sempre: todo
+    // disparo pontual novo no mesmo horario batia em 409 "ja existe campanha
+    // ativa no mesmo periodo", apontando para uma campanha que o usuario ja
+    // havia cancelado. Cancelamento e terminal em todos os caminhos
+    // (confirmDispatch e resumeCampaign recusam campanha cancelada), entao
+    // ativo: false aqui e o mesmo marcador de "saiu de jogo" que o
+    // campaign-trigger e o dispatch-consistency ja usam ao encerrar campanha.
+    return repository.update(id, { status: "cancelado", ativo: false });
   }
 
   async function getById(id) {

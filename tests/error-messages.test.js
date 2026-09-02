@@ -113,6 +113,36 @@ async function main() {
     assert.match(estimuloTraduzirErro({ status: 502, message: "" }).titulo, /servico externo/i);
   }
 
+  // ---------- Erros do disparador pontual ----------
+  {
+    // Cobertura incompleta: os nomes dos grupos precisam sobreviver ate o
+    // TITULO, porque a tela do disparador mostra o erro pela versao de uma
+    // linha (estimuloErroEmLinha), que usa titulo + acao e descarta o texto.
+    const cobertura = Object.assign(
+      new Error("Grupo(s) sem vinculo com todos os numeros de WhatsApp ativos: Teste Maria 3, Teste Maria 4"),
+      { status: 400 }
+    );
+    const tc = estimuloTraduzirErro(cobertura);
+    assert.match(tc.titulo, /nao estao em todos os numeros ativos/i);
+    assert.match(tc.titulo, /Teste Maria 3, Teste Maria 4/);
+    assert.match(estimuloErroEmLinha(cobertura), /Teste Maria 3, Teste Maria 4/);
+    // Nao pode cair no fallback generico de 400.
+    assert.ok(!/Nao conseguimos concluir essa acao/i.test(tc.titulo));
+
+    // Conflito de janela: o nome e o horario da campanha em conflito sao o que
+    // diz ao operador qual disparo remover ou reagendar.
+    const conflito = Object.assign(
+      new Error(
+        'Ja existe campanha ativa no mesmo periodo para os grupos selecionados: "Campanha de texto do dia 01/09" (01/09 22:35:00 - 01/09 23:59:00). Escolha outro horario ou remova os grupos em comum.'
+      ),
+      { status: 409 }
+    );
+    const tj = estimuloTraduzirErro(conflito);
+    assert.match(tj.titulo, /ja existe um disparo nesse horario/i);
+    assert.match(tj.texto, /Campanha de texto do dia 01\/09/);
+    assert.ok(!/entra em conflito com algo que ja existe/i.test(tj.titulo));
+  }
+
   // ---------- Mensagem tecnica nunca vira texto principal ----------
   {
     // Nome de coluna, tipo interno e contrato de modulo sao ilegiveis para o

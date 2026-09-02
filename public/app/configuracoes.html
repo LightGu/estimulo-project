@@ -519,7 +519,15 @@
       // de enviar por ele. Por isso a coluna mostra os dois selos juntos, em vez
       // de a pausa esconder o estado real da conexao.
       function instanceStatusBadges(instance) {
-        const connection = connectionStateBadge(instance.connection_state);
+        // missing_on_evolution: o numero nao existe mais na Evolution API - o
+        // cadastro aqui ficou orfao. E diferente de "desconectado do WhatsApp"
+        // (que se resolve lendo o QR de novo, com a instancia ainda la), entao
+        // ganha rotulo proprio: o operador precisa saber que o problema e' o
+        // cadastro, nao a sessao.
+        const connection = instance.missing_on_evolution
+          ? '<span class="badge badge-danger" title="O numero esta cadastrado aqui, mas nao existe na Evolution API. Reconecte-o (leia o QR Code) ou remova o cadastro.">Nao encontrado na Evolution</span>'
+          : connectionStateBadge(instance.connection_state);
+
         return instance.paused_at ? `${connection} <span class="badge badge-neutral">Pausado</span>` : connection;
       }
 
@@ -885,10 +893,27 @@
         try {
           const response = await fetch("/settings/whatsapp/test-connection", { method: "POST" });
           const data = await response.json();
+
+          // missing_instances = a Evolution respondeu, mas um numero cadastrado
+          // aqui nao existe la. Chamar isso de "falha na conexao" seria
+          // enganoso (a conexao esta de pe; o cadastro e' que esta orfao), e e'
+          // justamente o caso em que o operador precisa ler o texto inteiro
+          // para saber qual numero reconectar - por isso ele nao e' apagado
+          // depois de 3s como os outros.
+          const numerosOrfaos = Array.isArray(data.missing_instances) && data.missing_instances.length > 0;
+
           setEvoStatus(
-            data.connected ? "Conectado com sucesso." : `Falha na conexão: ${data.reason}`,
+            data.connected ? "Conectado com sucesso." : numerosOrfaos ? data.reason : `Falha na conexão: ${data.reason}`,
             data.connected ? "var(--success)" : "var(--danger)"
           );
+
+          button.disabled = false;
+
+          if (!numerosOrfaos) {
+            setTimeout(() => setEvoStatus(""), 3000);
+          }
+
+          return;
         } catch (error) {
           setEvoStatus(window.estimuloErroEmLinha(error), "var(--danger)");
         }

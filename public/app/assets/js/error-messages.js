@@ -567,6 +567,55 @@
       },
     },
     {
+      // Conflito de janela (buildWindowConflictError em
+      // src/services/campaign-window-conflict.js). Padrao porque a mensagem
+      // traz o nome e o horario das campanhas em conflito - o dado que diz ao
+      // operador qual disparo remover ou reagendar. Antes caia no fallback de
+      // status 409 ("Isso entra em conflito com algo que ja existe"), que
+      // omitia exatamente isso.
+      teste: /Ja existe campanha ativa no mesmo periodo/i,
+      monta: function (mensagem) {
+        return {
+          titulo: "Ja existe um disparo nesse horario para esses grupos",
+          texto: mensagem,
+          acao: "Escolha outro horario, remova os grupos em comum, ou cancele o disparo que ja ocupa essa janela em Campanhas.",
+        };
+      },
+    },
+    {
+      // Cobertura incompleta no disparador pontual (assertInstanceCoverage em
+      // src/services/mensagens.service.js). Padrao, e nao chave exata no
+      // dicionario, porque a mensagem termina com a lista de grupos - e sao
+      // justamente esses nomes que o operador precisa ver para agir, entao a
+      // mensagem original vira o `texto`.
+      //
+      // So dispara com 2+ numeros ativos: o disparo sorteia entre os numeros,
+      // e um grupo que nao esteja em todos eles pode cair num numero que nao
+      // participa do grupo. A Evolution aceita e responde 200, mas a mensagem
+      // nunca chega. Sem esta entrada o erro caia no fallback de status 400
+      // ("Nao conseguimos concluir essa acao"), que nao dizia nem qual era o
+      // problema nem quais grupos.
+      teste: /sem vinculo com todos os numeros de WhatsApp ativos:\s*(.+?)\.?$/i,
+      monta: function (mensagem, casado) {
+        // Os nomes dos grupos entram no TITULO, nao so no texto: o disparador
+        // pontual mostra o erro pela versao de uma linha
+        // (estimuloErroEmLinha), que usa titulo + acao e descarta o texto. Sem
+        // isso, justamente na tela onde o erro aparece o operador nao veria
+        // quais grupos estao sem cobertura.
+        var grupos = casado && casado[1] ? casado[1].replace(/\.$/, "") : "";
+
+        return {
+          titulo: grupos
+            ? "Estes grupos nao estao em todos os numeros ativos: " + grupos
+            : "Alguns grupos nao estao em todos os numeros ativos",
+          texto:
+            "Com mais de um numero ativo o envio alterna entre eles, e um grupo que nao tenha todos os numeros pode cair em um numero que nao participa dele - o WhatsApp aceita o envio, mas a mensagem nao chega.",
+          acao:
+            "Sincronize os grupos em Configuracoes > Numeros de WhatsApp, adicione os numeros que faltam a esses grupos, ou pause o numero que nao participa deles.",
+        };
+      },
+    },
+    {
       teste: /excede o tamanho maximo/i,
       monta: function (mensagem) {
         return {
@@ -731,8 +780,14 @@
 
     if (!achado) {
       for (var i = 0; i < PADROES.length; i += 1) {
-        if (PADROES[i].teste.test(mensagem)) {
-          achado = PADROES[i].monta(mensagem);
+        // exec em vez de test para passar os grupos capturados ao monta: alguns
+        // padroes precisam de um pedaco da mensagem original (a lista de grupos
+        // sem cobertura, por exemplo) dentro do titulo. Padroes sem captura
+        // simplesmente ignoram o segundo argumento.
+        var casado = PADROES[i].teste.exec(mensagem);
+
+        if (casado) {
+          achado = PADROES[i].monta(mensagem, casado);
           break;
         }
       }

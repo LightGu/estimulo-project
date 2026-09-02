@@ -80,16 +80,105 @@ async function main() {
     );
   }
 
+  // ---------- list: estado real, nao o gravado ----------
+  {
+    const REMOTA = { status: 200, data: [{ name: "estimulo-novo", ownerJid: "5511936185837@s.whatsapp.net" }] };
+
+    // connection_state no banco e' um valor gravado por um check antigo. Uma
+    // instancia que sumiu da Evolution seguia aparecendo como "Conectado" - e
+    // a tela ainda escondia o botao Conectar, porque ele so aparece quando o
+    // estado != open.
+    const service = createWhatsappInstancesService({
+      repository: {
+        findAll: async () => [
+          { id: "i-1", instance_name: "Estimulo Novo", phone_number: "5511936185837", connection_state: "open" },
+          { id: "i-2", instance_name: "sophiaEstimulo", phone_number: "5511936185834", connection_state: "open" },
+        ],
+      },
+      listEvolutionInstances: async () => REMOTA,
+    });
+
+    const listed = await service.list();
+
+    const viva = listed.find((i) => i.id === "i-1");
+    assert.equal(viva.connection_state, "open", "numero que existe na Evolution mantem o estado");
+    assert.equal(viva.missing_on_evolution, undefined);
+
+    const orfa = listed.find((i) => i.id === "i-2");
+    assert.equal(orfa.connection_state, "close", "numero ausente na Evolution nao pode aparecer como conectado");
+    assert.equal(orfa.missing_on_evolution, true);
+
+    // Evolution fora do ar nao e' o mesmo que numero descadastrado: sem
+    // resposta, preserva o estado gravado em vez de zerar todos os badges.
+    const offline = createWhatsappInstancesService({
+      repository: {
+        findAll: async () => [{ id: "i-1", instance_name: "Estimulo Novo", connection_state: "open" }],
+      },
+      listEvolutionInstances: async () => {
+        throw new Error("Evolution indisponivel");
+      },
+    });
+
+    const preservado = await offline.list();
+    assert.equal(preservado[0].connection_state, "open");
+    assert.equal(preservado[0].missing_on_evolution, undefined);
+  }
+
+  // ---------- checkConnectionStatus: 404 vira "close", nao excecao ----------
+  {
+    const updates = [];
+    const service = createWhatsappInstancesService({
+      repository: {
+        findById: async () => ({ id: "i-2", instance_name: "sophiaEstimulo", connection_state: "open" }),
+        update: async (id, payload) => {
+          updates.push({ id, payload });
+          return { id, ...payload };
+        },
+      },
+      getEvolutionConnectionState: async () => {
+        const error = new Error('Falha na chamada para Evolution API (HTTP 404: The "sophiaEstimulo" instance does not exist)');
+        error.status = 404;
+        throw error;
+      },
+    });
+
+    // Antes a excecao subia ANTES do update, entao o "open" gravado por um
+    // check antigo ficava la para sempre.
+    const resultado = await service.checkConnectionStatus("i-2");
+    assert.equal(resultado.connection_state, "close");
+    assert.equal(resultado.missing_on_evolution, true);
+    assert.equal(updates[0].payload.connection_state, "close");
+
+    // Erro que NAO e' 404 continua subindo: Evolution fora do ar nao e'
+    // conclusao sobre a instancia, e gravar "close" seria falso negativo.
+    const instavel = createWhatsappInstancesService({
+      repository: {
+        findById: async () => ({ id: "i-1", instance_name: "Estimulo Novo" }),
+        update: async () => {
+          throw new Error("nao deveria gravar");
+        },
+      },
+      getEvolutionConnectionState: async () => {
+        throw new Error("Evolution API indisponivel ou sem resposta");
+      },
+    });
+
+    await assert.rejects(() => instavel.checkConnectionStatus("i-1"), /indisponivel/i);
+  }
+
   // ---------- testConnection ----------
   {
-    const connectedService = createWhatsappInstancesService({
+    // Sem numero cadastrado o teste e' so "a Evolution responde?".
+    const semNumeros = createWhatsappInstancesService({
+      repository: { findAll: async () => [] },
       listEvolutionInstances: async () => ({ status: 200, data: [] }),
     });
 
-    const connectedResult = await connectedService.testConnection();
-    assert.equal(connectedResult.connected, true);
+    assert.equal((await semNumeros.testConnection()).connected, true);
 
+    // Evolution fora do ar continua reprovando com o motivo original.
     const failingService = createWhatsappInstancesService({
+      repository: { findAll: async () => [] },
       listEvolutionInstances: async () => {
         throw new Error("Evolution indisponivel");
       },
@@ -98,6 +187,43 @@ async function main() {
     const failingResult = await failingService.testConnection();
     assert.equal(failingResult.connected, false);
     assert.equal(failingResult.reason, "Evolution indisponivel");
+
+    // O caso que o teste antigo aprovava por engano: a Evolution responde, mas
+    // o numero cadastrado nao existe la. Antes isso dava "Conectado com
+    // sucesso" enquanto todo disparo por aquele numero falhava com 404.
+    const ausenteService = createWhatsappInstancesService({
+      repository: {
+        findAll: async () => [
+          { id: "i-1", instance_name: "sophiaEstimulo", phone_number: "5511936185834" },
+        ],
+      },
+      listEvolutionInstances: async () => ({
+        status: 200,
+        data: [{ name: "estimulo-novo", ownerJid: "5511936185837@s.whatsapp.net" }],
+      }),
+    });
+
+    const ausente = await ausenteService.testConnection();
+    assert.equal(ausente.connected, false);
+    assert.match(ausente.reason, /sem instancia correspondente/i);
+    assert.deepEqual(ausente.missing_instances, ["sophiaEstimulo"]);
+
+    // Nome divergente que a rede de seguranca resolve (banco "Estimulo Novo"
+    // vs. Evolution "estimulo-novo") tem que continuar passando: o disparo
+    // consegue usar esse numero, entao reprovar aqui seria falso negativo.
+    const divergenteService = createWhatsappInstancesService({
+      repository: {
+        findAll: async () => [
+          { id: "i-2", instance_name: "Estimulo Novo", phone_number: "5511936185837" },
+        ],
+      },
+      listEvolutionInstances: async () => ({
+        status: 200,
+        data: [{ name: "estimulo-novo", ownerJid: "5511936185837@s.whatsapp.net" }],
+      }),
+    });
+
+    assert.equal((await divergenteService.testConnection()).connected, true);
   }
 
   // ---------- generateQrCode ----------

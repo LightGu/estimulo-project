@@ -990,13 +990,22 @@
         button.textContent = "Programar mensagem";
       });
 
+      // Um detalhe pode ser por grupo (falha/agendamento de um grupo especifico)
+      // ou da requisicao inteira - quando o backend recusa o disparo antes de
+      // resolver grupo algum, o catch monta { ok: false, error } sem group_nome
+      // nem group_id. Sem este prefixo condicional, o `${d.group_nome ||
+      // d.group_id}` rendia o literal "undefined: " na frente da mensagem e a
+      // tela parecia estar quebrada, em vez de estar apenas relatando o erro.
       function statusTip(m) {
         if (!m.detalhes.length) return "";
         return m.detalhes
           .map((d) => {
-            if (!d.ok) return `${d.group_nome || d.group_id}: ${d.error}`;
-            if (d.scheduled_at) return `${d.group_nome || d.group_id}: agendado para ${new Date(d.scheduled_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
-            return `${d.group_nome || d.group_id}: enviado`;
+            const nome = d.group_nome || d.group_id;
+            const prefixo = nome ? `${nome}: ` : "";
+
+            if (!d.ok) return `${prefixo}${d.error}`;
+            if (d.scheduled_at) return `${prefixo}agendado para ${new Date(d.scheduled_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`;
+            return `${prefixo}enviado`;
           })
           .join(" · ");
       }

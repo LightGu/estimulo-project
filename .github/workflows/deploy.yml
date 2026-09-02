@@ -1,0 +1,41 @@
+name: Deploy Oracle
+
+# Dispara a cada push em main e tambem manualmente (Actions > Deploy Oracle >
+# Run workflow), util para reimplantar sem precisar de um commit novo.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Impede dois deploys simultaneos na mesma VM; o mais novo espera o anterior.
+concurrency:
+  group: deploy-oracle
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar chave SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # known_hosts fixo: sem isso o StrictHostKeyChecking teria de ser
+          # desligado, e o runner aceitaria qualquer host que responda no IP.
+          echo "${{ secrets.ORACLE_SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Atualizar containers na VM
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          USER_NAME: ${{ secrets.ORACLE_USER }}
+          APP_DIR: ${{ vars.ORACLE_APP_DIR || '~/estimulo-project' }}
+          PROFILES: ${{ vars.COMPOSE_PROFILES || 'workers' }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes "$USER_NAME@$HOST" \
+            "APP_DIR='$APP_DIR' DEPLOY_BRANCH='${{ github.ref_name }}' COMPOSE_PROFILES='$PROFILES' bash -s" \
+            < scripts/deploy.sh
