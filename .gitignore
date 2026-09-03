@@ -50,3 +50,8 @@ Thumbs.db
 .idea/
 .claude/settings.local.json
 .claude/
+
+# Guia local de deploy pro Claude Code - fica so na maquina de quem faz
+# deploy, nao no repositorio (evita expor caminho/topologia de infra em
+# historico publico).
+CLAUDE.md
