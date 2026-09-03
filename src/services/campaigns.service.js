@@ -788,7 +788,9 @@ function createCampaignsService(dependencies = {}) {
     });
   }
 
-  async function cancelCampaign(id) {
+  async function cancelCampaign(id, options = {}) {
+    const { usuarioId = null } = options || {};
+
     if (!id) {
       throw new Error("Campaign id is required");
     }
@@ -812,7 +814,14 @@ function createCampaignsService(dependencies = {}) {
     // origem "usuario": este caminho so existe atras do POST /campaigns/:id/cancel,
     // ou seja, de uma acao explicita no painel. Sem marcar a origem, o log
     // resultante ficava indistinguivel de um cancelamento automatico por atraso.
-    await dispatchLogsRepositoryDependency.cancelPendingByCampaign(id, { origem: "usuario" });
+    //
+    // usuarioId completa a resposta: a origem dizia que partiu do painel, nunca
+    // de qual conta. No cancelamento de 03/09/2026 (34 envios da "Divulgacao
+    // FIRME 1") deu para provar por eliminacao que houve clique humano, mas nao
+    // de quem - essa resposta se perdeu para sempre. Cada envio cancelado em
+    // cascata passa a carregar o responsavel, para o relatorio responder linha
+    // a linha em vez de exigir engenharia reversa.
+    await dispatchLogsRepositoryDependency.cancelPendingByCampaign(id, { origem: "usuario", usuarioId });
 
     // ativo: false junto com o status. Cancelar so o status deixava a campanha
     // dentro de listActiveOverlappingWindow (que filtra por ativo, nao por
@@ -823,7 +832,7 @@ function createCampaignsService(dependencies = {}) {
     // (confirmDispatch e resumeCampaign recusam campanha cancelada), entao
     // ativo: false aqui e o mesmo marcador de "saiu de jogo" que o
     // campaign-trigger e o dispatch-consistency ja usam ao encerrar campanha.
-    return repository.update(id, { status: "cancelado", ativo: false });
+    return repository.update(id, { status: "cancelado", ativo: false, cancelado_por: usuarioId });
   }
 
   async function getById(id) {
@@ -932,9 +941,37 @@ function createCampaignsService(dependencies = {}) {
     return creatorByCampaignId;
   }
 
+  // "Quem cancelou", ao contrario de "quem programou", mora na propria campanha
+  // (campaigns.cancelado_por, gravado por cancelCampaign). So precisa virar
+  // nome: uma query para todas as campanhas canceladas da lista.
+  async function resolveCancellersByCampaigns(campaigns) {
+    const cancellerByCampaignId = new Map();
+    const userIds = [...new Set(campaigns.map((campaign) => campaign.cancelado_por).filter(Boolean))];
+
+    if (!userIds.length) {
+      return cancellerByCampaignId;
+    }
+
+    const users = await appUsersRepositoryDependency.findByIds(userIds);
+    const userById = new Map(users.map((user) => [user.id, user]));
+
+    for (const campaign of campaigns) {
+      const user = campaign.cancelado_por ? userById.get(campaign.cancelado_por) : null;
+
+      if (user) {
+        cancellerByCampaignId.set(campaign.id, user.display_name || user.username);
+      }
+    }
+
+    return cancellerByCampaignId;
+  }
+
   async function listWithSummary() {
     const campaigns = await repository.findAll();
-    const creatorByCampaignId = await resolveCreatorsByCampaignIds(campaigns.map((campaign) => campaign.id));
+    const [creatorByCampaignId, cancellerByCampaignId] = await Promise.all([
+      resolveCreatorsByCampaignIds(campaigns.map((campaign) => campaign.id)),
+      resolveCancellersByCampaigns(campaigns),
+    ]);
 
     return Promise.all(
       campaigns.map(async (campaign) => {
@@ -946,6 +983,7 @@ function createCampaignsService(dependencies = {}) {
           status,
           grupos_total: groupRows.length,
           criado_por: creatorByCampaignId.get(campaign.id) || null,
+          cancelado_por_nome: cancellerByCampaignId.get(campaign.id) || null,
         };
       })
     );
@@ -981,6 +1019,14 @@ function createCampaignsService(dependencies = {}) {
         video_id: latestLog ? latestLog.video_id : null,
         status: latestLog ? latestLog.status : "pendente",
         criado_em: latestLog ? latestLog.criado_em : row.created_at,
+        // A tela mostra "Atualizado em" e ate aqui recebia so `criado_em` - o
+        // instante em que o envio foi AGENDADO. Num cancelamento isso exibia o
+        // horario do agendamento como se fosse o da acao (03/09/2026: 02:34
+        // na tela para algo cancelado as 12:16). `atualizado_em` e mantido pelo
+        // trigger trg_logs_atualizado_em e fica nulo em log anterior a ele -
+        // nesse caso a tela avisa que caiu de volta para a data de criacao, em
+        // vez de apresentar uma como se fosse a outra.
+        atualizado_em: latestLog ? latestLog.atualizado_em || null : null,
       };
     });
   }

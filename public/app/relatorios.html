@@ -26,8 +26,8 @@
     <link rel="stylesheet" href="assets/css/layout.css">
     <link rel="stylesheet" href="assets/css/components.css">
     <style>
-      /* Com 8 colunas (Data/Hora, Horario planejado, Organizacao, Grupo,
-         Campanha, Conteudo, Numero, Status) o padding/fonte padrao de tabela
+      /* Com 9 colunas (Data/Hora, Horario planejado, Atualizado em, Organizacao,
+         Grupo, Campanha, Conteudo, Numero, Status) o padding/fonte padrao de tabela
          (usado tambem em grupos.html, campanhas.html etc.) nao cabe sem
          quebrar cabecalhos e datas/numeros que tem espaco de sobra para caber
          numa linha so. Reduzido so aqui, sem tocar nos tokens globais. */
@@ -116,6 +116,7 @@
                   <tr>
                     <th>Data/Hora</th>
                     <th>Horário envio</th>
+                    <th>Atualizado em</th>
                     <th>Organização</th>
                     <th>Grupo</th>
                     <th>Campanha</th>
@@ -190,7 +191,7 @@
         document.getElementById("summaryCards").innerHTML = "";
         document.getElementById("resultCount").textContent = "";
         document.getElementById("reportBody").innerHTML = `
-          <tr><td colspan="8"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(window.estimuloErroEmLinha(error))}</p></div></td></tr>`;
+          <tr><td colspan="9"><div class="empty-state"><strong>Não foi possível carregar o relatório</strong><p>${escapeHtml(window.estimuloErroEmLinha(error))}</p></div></td></tr>`;
       }
 
       const DISPATCH_STATUS_TIP = {
@@ -199,6 +200,39 @@
         enviado: "A Evolution aceitou o envio e postou a mensagem no grupo.",
         cancelado: "Este envio foi cancelado e não será disparado.",
       };
+
+      const CANCEL_ORIGEM_LABEL = {
+        usuario: "cancelado no painel",
+        campanha_cancelada: "cascata do cancelamento da campanha",
+        atraso: "trava de atraso da plataforma",
+        sistema: "cancelamento automático",
+      };
+
+      // Quem/quando/de onde, em uma linha. Vira sufixo da dica do badge e coluna
+      // do CSV, para as duas saidas contarem a mesma historia.
+      //
+      // Envio cancelado antes de 202609030001 nao tem nada disso gravado - o
+      // dado nunca existiu. Nesse caso a funcao devolve string vazia e a dica
+      // fica so com o motivo, em vez de afirmar "sem responsável" (que soa como
+      // "foi automatico" e seria justamente a conclusao errada).
+      function cancelSummary(row) {
+        if (row.status !== "cancelado") return "";
+
+        const partes = [];
+        const origem = CANCEL_ORIGEM_LABEL[row.cancelado_origem];
+        const quem = row.cancelado_por_usuario;
+
+        if (quem) {
+          partes.push(`por ${quem.display_name || quem.username}`);
+        } else if (row.cancelado_origem && row.cancelado_origem !== "usuario") {
+          partes.push("sem responsável (ação automática)");
+        }
+
+        if (origem) partes.push(origem);
+        if (row.cancelado_em) partes.push(`em ${formatDateTime(row.cancelado_em)}`);
+
+        return partes.join(" · ");
+      }
 
       function dispatchStatusTip(row) {
         if (row.status === "erro" || row.status === "falhou") {
@@ -209,7 +243,9 @@
         // exatamente iguais na tela ("Cancelado"), e descobrir qual dos dois
         // tinha acontecido exigia ler o banco.
         if (row.status === "cancelado") {
-          return row.mensagem_erro || DISPATCH_STATUS_TIP.cancelado;
+          const motivo = row.mensagem_erro || DISPATCH_STATUS_TIP.cancelado;
+          const detalhe = cancelSummary(row);
+          return detalhe ? `${motivo} — ${detalhe}` : motivo;
         }
         return DISPATCH_STATUS_TIP[row.status] || "";
       }
@@ -367,7 +403,7 @@
         document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
         renderPager(rows);
         if (!rows.length) {
-          document.getElementById("reportBody").innerHTML = `<tr><td colspan="8"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
+          document.getElementById("reportBody").innerHTML = `<tr><td colspan="9"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
         const start = (state.currentPage - 1) * PAGE_SIZE;
@@ -384,6 +420,7 @@
             <tr>
               <td class="mono">${formatDateTimeStacked(r.criado_em)}</td>
               <td class="mono">${formatDateTimeStacked(r.horario_envio_planejado)}</td>
+              <td class="mono">${formatDateTimeStacked(r.atualizado_em)}</td>
               <td class="nowrap">${escapeHtml(organizacao)}</td>
               <td class="strong">${escapeHtml(grupo)}</td>
               <td>${escapeHtml(campanha)}</td>
@@ -494,12 +531,17 @@
         const headers = [
           "Data/Hora",
           "Horário envio",
+          "Atualizado em",
           "Organização",
           "Grupo",
           "Campanha",
           "Conteúdo",
           "Número",
           "Status",
+          // O CSV nao tem tooltip: o que a tela conta ao passar o mouse sobre um
+          // badge "Cancelado" precisa virar coluna aqui, senao a planilha volta a
+          // ser a versao do relatorio que nao sabe quem cancelou.
+          "Detalhe do cancelamento",
           "ID da mensagem no provedor",
         ];
         const lines = [headers.join(";")].concat(
@@ -507,12 +549,14 @@
             [
               formatDateTime(r.criado_em),
               formatDateTime(r.horario_envio_planejado),
+              formatDateTime(r.atualizado_em),
               r.groups?.organizations?.nome || "",
               r.groups?.nome || "",
               campaignLabel(r.campaigns),
               r.video_catalog?.nome_do_arquivo || "",
               r.whatsapp_instances?.instance_name || r.whatsapp_instances?.phone_number || "",
               dispatchStatusPresentation(r).label,
+              cancelSummary(r),
               r.provider_message_id || "",
             ]
               .map(toCsvValue)

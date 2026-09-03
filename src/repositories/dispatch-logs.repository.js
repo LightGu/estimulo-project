@@ -24,10 +24,17 @@ const CANCEL_ORIGENS = {
 
 // Campos de auditoria aplicados a TODO caminho que grava status "cancelado".
 // Centralizado para que um caminho novo nao volte a cancelar em silencio.
-function buildCancelAudit(origem, at = new Date()) {
+//
+// `usuarioId` fica nulo de proposito nos cancelamentos automaticos (trava de
+// atraso, worker): ali nao existe conta por tras da acao, e a resposta certa
+// para "quem cancelou?" e "ninguem" - a origem ja diz o que foi.
+function buildCancelAudit(origem, options = {}) {
+  const { usuarioId = null, at = new Date() } = options;
+
   return {
     cancelado_em: at.toISOString(),
     cancelado_origem: origem || CANCEL_ORIGENS.SISTEMA,
+    cancelado_por: usuarioId || null,
   };
 }
 
@@ -203,7 +210,7 @@ async function markRetrying(id, retryCount, client) {
 // enviado/falhou/erro ficam intactos - preservam o historico do que ja
 // aconteceu antes do cancelamento.
 async function cancelPendingByCampaign(campaignId, options = {}, client) {
-  const { motivo, origem = CANCEL_ORIGENS.CAMPANHA_CANCELADA } = options || {};
+  const { motivo, origem = CANCEL_ORIGENS.CAMPANHA_CANCELADA, usuarioId = null } = options || {};
 
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
@@ -214,7 +221,7 @@ async function cancelPendingByCampaign(campaignId, options = {}, client) {
       // automatico cuja mensagem tivesse se perdido. O operador via so
       // "Cancelado", sem saber se foi ele ou a plataforma.
       mensagem_erro: motivo || "Envio cancelado: a campanha foi cancelada no painel.",
-      ...buildCancelAudit(origem),
+      ...buildCancelAudit(origem, { usuarioId }),
     })
     .eq("campaign_id", campaignId)
     .eq("status", "pendente")
@@ -282,14 +289,14 @@ async function claimForSend(id, client) {
 // worker ja tenha movido para processando/enviado/falhou entre a leitura do
 // horario planejado e este UPDATE.
 async function cancelIfPending(id, mensagemErro = null, options = {}, client) {
-  const { origem = CANCEL_ORIGENS.ATRASO } = options || {};
+  const { origem = CANCEL_ORIGENS.ATRASO, usuarioId = null } = options || {};
 
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
     .update({
       status: CANCELED_STATUS,
       mensagem_erro: mensagemErro,
-      ...buildCancelAudit(origem),
+      ...buildCancelAudit(origem, { usuarioId }),
     })
     .eq("id", id)
     .eq("status", "pendente")
@@ -366,7 +373,11 @@ async function listWithFilters(filters = {}, client) {
   let query = getClient(client)
     .from(LOGS_TABLE)
     .select(
-      "*, campaigns(id, trilha, data_envio, horario_envio, tipo, possui_midia, link_conteudo), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo), whatsapp_instances(id, instance_name, phone_number)"
+      // O apelido de app_users precisa nomear a FK (`!logs_cancelado_por_fkey`):
+      // a tabela `logs` referencia app_users por DUAS colunas
+      // (usuario_responsavel_id e cancelado_por), e sem desambiguar o Postgrest
+      // recusa o embed inteiro - derrubando o relatorio, nao so a coluna.
+      "*, campaigns(id, trilha, data_envio, horario_envio, tipo, possui_midia, link_conteudo), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo), whatsapp_instances(id, instance_name, phone_number), cancelado_por_usuario:app_users!logs_cancelado_por_fkey(id, username, display_name)"
     )
     .is("hidden_at", null)
     .order("criado_em", { ascending: false });

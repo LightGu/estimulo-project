@@ -92,6 +92,7 @@
           <button class="icon-btn-close" id="closeCampaignDetail" type="button" aria-label="Fechar">✕</button>
         </div>
         <div class="modal-body">
+          <p id="campaignDetailMeta" class="text-muted" hidden></p>
           <div class="table-wrap table-wrap--fluid">
             <table class="table-fluid">
               <thead id="campaignGroupsHead">
@@ -228,6 +229,31 @@
           minute: "2-digit",
           second: "2-digit",
         });
+      }
+
+      // A coluna "Atualizado em" do modal renderizava `criado_em` cru: num
+      // cancelamento ela mostrava o instante em que o envio foi AGENDADO, nao o
+      // da acao (03/09/2026: "02:34:07" na tela para 34 envios cancelados as
+      // 12:16). Somado ao ISO em UTC, o operador lia um horario que nunca
+      // aconteceu. Agora sai o `atualizado_em` real, no fuso local.
+      //
+      // Log anterior ao trigger trg_logs_atualizado_em nao tem esse dado. Nesse
+      // caso a celula cai para a criacao e DIZ que caiu - repetir o valor antigo
+      // em silencio e o que causou a leitura errada em primeiro lugar.
+      function groupUpdatedAtCell(group) {
+        const atualizado = formatDispatchDateTime(group.atualizado_em);
+
+        if (atualizado) {
+          return escapeHtml(atualizado);
+        }
+
+        const criado = formatDispatchDateTime(group.criado_em);
+
+        if (!criado) {
+          return "—";
+        }
+
+        return `<span class="has-tip" data-tip="Este envio é anterior ao registro de atualização, então não há data da última alteração. O valor exibido é a criação do envio.">${escapeHtml(criado)} <span class="text-muted">(criação)</span></span>`;
       }
 
       function dispatchPeriodLabel(campaign) {
@@ -403,12 +429,36 @@
         });
       }
 
+      // "Cancelado" sozinho nao diz se a plataforma barrou o envio ou se alguem
+      // clicou em cancelar - e era exatamente a duvida que o banco tambem nao
+      // sabia responder antes de campaigns.cancelado_por existir. Campanha
+      // cancelada antes dessa coluna continua sem dono, e a tela diz isso em vez
+      // de deixar a linha em branco parecendo que ninguem cancelou.
+      function renderCampaignDetailMeta(campaign) {
+        const meta = document.getElementById("campaignDetailMeta");
+
+        if (!campaign || campaign.status !== "cancelado") {
+          meta.hidden = true;
+          meta.textContent = "";
+          return;
+        }
+
+        const quando = formatDispatchDateTime(campaign.status_changed_at);
+        const quem = campaign.cancelado_por_nome
+          ? `por ${campaign.cancelado_por_nome}`
+          : "— responsável não registrado (cancelamento anterior ao registro de autoria)";
+
+        meta.textContent = quando ? `Campanha cancelada em ${quando} ${quem}` : `Campanha cancelada ${quem}`;
+        meta.hidden = false;
+      }
+
       async function openCampaignDetail(campaignId) {
         const campaign = state.campaigns.find((c) => c.id === campaignId);
         const isText = isTextCampaign(campaign);
         state.currentCampaignId = campaignId;
         state.captionsByGroup = new Map();
         document.getElementById("campaignDetailTitle").textContent = campaign ? campaignName(campaign) : "Campanha";
+        renderCampaignDetailMeta(campaign);
         document.getElementById("campaignGroupsVideoHeader").hidden = isText;
         document.getElementById("campaignGroupsBody").innerHTML = `
           <tr><td colspan="4"><div class="empty-state"><strong>Carregando grupos</strong></div></td></tr>`;
@@ -452,7 +502,7 @@
                   <td class="strong">${escapeHtml(g.nome || g.group_id)}</td>
                   ${isText ? "" : `<td class="mono">${escapeHtml(g.video_id || "—")}</td>`}
                   <td><span class="badge has-tip ${dispatchStatusBadgeClass(effectiveStatus)}" data-tip="${escapeHtml(dispatchStatusTip(effectiveStatus))}" data-tip-tone="${dispatchStatusBadgeClass(effectiveStatus).replace("badge-", "")}">${dispatchStatusLabel(effectiveStatus)}</span></td>
-                  <td class="mono">${escapeHtml(g.criado_em || "—")}</td>
+                  <td class="mono">${groupUpdatedAtCell(g)}</td>
                 </tr>`;
             })
             .join("");

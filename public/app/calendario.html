@@ -241,6 +241,26 @@
         return "badge-warning";
       }
 
+      // Mesma armadilha da coluna "Atualizado em" do painel de campanhas: aqui
+      // a data aparecia crua, sem dizer o que era, coladinha no badge de status
+      // - entao um envio "Cancelado" exibia o horario em que foi AGENDADO como
+      // se fosse o do cancelamento. O rotulo explicito e' o que impede a
+      // confusao; `atualizado_em` so existe em logs posteriores ao trigger
+      // trg_logs_atualizado_em, e nos antigos a data de criacao vai identificada.
+      function groupTimestampLabel(group) {
+        const format = (value) => {
+          if (!value) return null;
+          const date = new Date(value);
+          return Number.isNaN(date.getTime()) ? null : date.toLocaleString("pt-BR");
+        };
+
+        const atualizado = format(group.atualizado_em);
+        if (atualizado) return `Atualizado ${atualizado}`;
+
+        const criado = format(group.criado_em);
+        return criado ? `Criado ${criado}` : "—";
+      }
+
       function captionStatusLabel(status) {
         const labels = {
           processando: "Gerando legenda…",
@@ -446,7 +466,7 @@
               <a class="day-item group-row" href="#" data-group-id="${escapeHtml(g.group_id)}" data-video-id="${escapeHtml(g.video_id || "")}" data-group-name="${escapeHtml(g.nome || g.group_id)}">
                 <div class="day-item-main">
                   <strong>${escapeHtml(g.nome || g.group_id)}</strong>
-                  <span>${escapeHtml(g.criado_em ? new Date(g.criado_em).toLocaleString("pt-BR") : "—")}</span>
+                  <span>${escapeHtml(groupTimestampLabel(g))}</span>
                 </div>
                 <span class="badge has-tip ${dispatchStatusBadgeClass(g.status)}" data-tip="${escapeHtml(dispatchStatusTip(g.status))}" data-tip-tone="${dispatchStatusBadgeClass(g.status).replace("badge-", "")}">${dispatchStatusLabel(g.status)}</span>
               </a>`

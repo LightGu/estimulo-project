@@ -302,7 +302,13 @@ function createCampaignsController(dependencies = {}) {
 
   async function cancel(req, res) {
     try {
-      const campaign = await campaignService.cancelCampaign(req.params.id);
+      // req.user vem da sessao (auth-gate), nunca do corpo da requisicao: quem
+      // cancelou tem que ser quem esta logado, nao quem o cliente alegar ser.
+      // Este controller era o unico do fluxo de disparo que ignorava a sessao,
+      // e por isso o cancelamento era a unica acao do painel sem dono no banco.
+      const campaign = await campaignService.cancelCampaign(req.params.id, {
+        usuarioId: (req.user && req.user.id) || null,
+      });
 
       return res.status(200).json(campaign);
     } catch (error) {

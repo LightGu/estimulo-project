@@ -565,6 +565,25 @@ Tetos configuraveis (ver `.env.example`): `MAX_DISPATCH_DELAY_MS` (30 min, pontu
 
 Regressao coberta por `tests/dispatch-boot-replay.test.js` (`npm run test:boot-replay`).
 
+### Quem cancelou um envio, e quando
+
+Um envio pode virar "Cancelado" por caminhos muito diferentes - o operador clicando em cancelar, a trava de atraso barrando um job vencido, a cascata de uma campanha cancelada - e na tabela `logs` os tres ficavam identicos. Em 03/09/2026 uma campanha apareceu com 34 grupos cancelados sem que o banco soubesse dizer de onde partiu nem por quem. As colunas que respondem isso hoje:
+
+| Coluna | Onde | Resposta que ela da |
+|---|---|---|
+| `logs.cancelado_em` | `202609020002` | Quando aquele envio foi cancelado (a tabela nao tem `updated_at`). |
+| `logs.cancelado_origem` | `202609020002` | `usuario` \| `atraso` \| `campanha_cancelada` \| `sistema` - vocabulario fechado por CHECK. |
+| `logs.cancelado_por` / `campaigns.cancelado_por` | `202609030001` | A conta que pediu o cancelamento no painel. **Nula em cancelamento automatico**, onde nao existe responsavel. |
+| `logs.atualizado_em` | `202609030002` | Instante da ultima alteracao do envio, mantido pelo trigger `trg_logs_atualizado_em`. |
+
+`atualizado_em` existe porque a coluna "Atualizado em" do painel mostrava `criado_em`, o horario em que o envio foi **agendado**. No caso de 03/09 a tela exibia 02:34 (agendamento) para um cancelamento das 12:16 - quem lia o relatorio via um horario que nunca aconteceu. O carimbo fica no trigger, e nao na aplicacao, porque os envios sao atualizados por muitos caminhos (workers de video e de texto, retry, confirmacao de entrega, cascata de cancelamento) e basta um esquecer para o buraco voltar.
+
+Onde isso aparece: o modal de campanha traz "Campanha cancelada em … por …"; o relatorio ganhou a coluna **Atualizado em** e o badge "Cancelado" carrega na dica o motivo, a origem, o responsavel e o horario (`Detalhe do cancelamento` no CSV, ja que planilha nao tem tooltip). O relatorio embeda o responsavel com `app_users!logs_cancelado_por_fkey` - o nome da FK e' obrigatorio, porque `logs` referencia `app_users` por duas colunas (`usuario_responsavel_id` e `cancelado_por`) e sem desambiguar o Postgrest recusa o embed inteiro, derrubando a tela toda em vez de so a coluna.
+
+Linhas anteriores a cada migration ficam **nulas de proposito**: o dado nunca foi gravado e um backfill so trocaria um valor errado por outro. As telas tratam esse nulo explicitamente - o modal de campanha mostra a data de criacao dizendo que e' a de criacao, e a dica do relatorio omite o trecho de autoria em vez de escrever "sem responsavel" (que soaria como "foi automatico", justamente a conclusao errada).
+
+Regressao coberta por `tests/cancel-audit.test.js` (`npm run test:cancel-audit`).
+
 ### ATENCAO: use sempre `--env-file` (ou os scripts npm) para subir o compose
 
 `docker compose -f infra/docker-compose.yml ...` rodado da raiz do projeto **nao le o `.env`**. O CLI do compose procura o `.env` relativo ao arquivo passado em `-f` (ou seja `infra/.env`, que nao existe), e a interpolacao `${VAR}` do proprio YAML resolve para **string vazia**, em silencio - apenas warnings soltos. O `env_file: [../.env]` declarado dentro do YAML nao cobre isso: ele alimenta o container depois de criado, nao a interpolacao do YAML.
@@ -663,7 +682,7 @@ Para atualizar o servidor existente:
    ```
    Se o servidor for um checkout git de verdade, `git fetch && git reset --hard origin/main` (ou `git pull --ff-only`) substitui esse passo.
 2. `package-lock.json` mudou? A imagem roda `npm ci` no build (passo 4), entao normalmente nao precisa de acao manual - so confira que o lockfile foi commitado junto do `package.json`.
-3. As migrations novas foram aplicadas no Supabase (`supabase/migrations`, em ordem cronologica - aplique via SQL Editor do projeto, ja que nao ha CLI do Supabase linkado ao projeto).
+3. As migrations novas foram aplicadas no Supabase (`supabase/migrations`, em ordem cronologica - aplique via SQL Editor do projeto, ja que nao ha CLI do Supabase linkado ao projeto). **Antes do rebuild, nao depois**: o codigo escreve nas colunas novas, e o Postgrest recusa um payload com coluna inexistente (`PGRST204`). Subir a aplicacao na frente da migration quebra a acao correspondente - `202609030001`, por exemplo, deixa `POST /campaigns/:id/cancel` respondendo 500 ate o SQL rodar.
 4. Rebuild e recrie so os containers que rodam codigo da aplicacao (nao mexe em Redis/Evolution/Caddy):
    ```bash
    cd infra
