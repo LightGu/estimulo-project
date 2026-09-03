@@ -1,5 +1,8 @@
 require("dotenv").config({ quiet: true });
 
+const { Sentry, initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "dispatch-review-timeout-worker" });
+
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 const {
   createDispatchReviewTimeoutEvents,
@@ -57,5 +60,6 @@ scheduleDispatchReviewTimeoutSweep().catch((error) => {
       error_message: error.message,
     })
   );
+  Sentry.captureException(error, { tags: { event: "dispatch_review_timeout.schedule_failed" } });
   shutdown().finally(() => process.exit(1));
 });

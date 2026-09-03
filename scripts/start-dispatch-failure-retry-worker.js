@@ -1,5 +1,8 @@
 require("dotenv").config({ quiet: true });
 
+const { Sentry, initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "dispatch-failure-retry-worker" });
+
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 const {
   createDispatchFailureRetryEvents,
@@ -57,5 +60,6 @@ scheduleDispatchFailureRetrySweep().catch((error) => {
       error_message: error.message,
     })
   );
+  Sentry.captureException(error, { tags: { event: "dispatch_failure_retry.schedule_failed" } });
   shutdown().finally(() => process.exit(1));
 });

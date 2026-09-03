@@ -153,7 +153,17 @@ async function main() {
         video_catalog: { id: "video-2", nome_do_arquivo: "video2.mp4" },
       },
     ],
+    listResponsibleUsersByCampaigns: async (campaignIds) =>
+      campaignIds.map((campaignId) => ({
+        campaign_id: campaignId,
+        usuario_responsavel_id: "user-1",
+        criado_em: "2026-07-17T10:00:00.000Z",
+      })),
     updateStatus: async (id, status) => ({ id, status }),
+  };
+  const appUsersRepository = {
+    findByIds: async (ids) =>
+      ids.includes("user-1") ? [{ id: "user-1", username: "ana@estimulo.org", display_name: "Ana" }] : [],
   };
   const associatedCampaignGroups = [];
   const campaignTriggerJobs = [];
@@ -353,6 +363,7 @@ async function main() {
     whatsappInstancesService: fakeWhatsappInstancesService,
   });
   const campaignService = campaignsService.createCampaignsService({
+    appUsersRepository,
     addCampaignTriggerJob: async (payload) => {
       const job = {
         id: `trigger-${campaignTriggerJobs.length + 1}`,
@@ -517,6 +528,7 @@ async function main() {
   const queuedCampaignSummary = campaignsSummary.find((campaign) => campaign.id === queuedCampaign.campaign.id);
   assert.equal(queuedCampaignSummary.grupos_total, 1);
   assert.equal(queuedCampaignSummary.status, "concluido");
+  assert.equal(queuedCampaignSummary.criado_por, "Ana");
 
   const groupsDetail = await campaignService.getGroupsDetail(queuedCampaign.campaign.id);
   assert.equal(groupsDetail.length, 1);

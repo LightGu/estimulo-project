@@ -14,6 +14,7 @@
         } catch (e) {}
       })();
     </script>
+    <script src="assets/js/sentry-init.js"></script>
     <title>Relatório operacional · Estímulo</title>
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
@@ -202,6 +203,13 @@
       function dispatchStatusTip(row) {
         if (row.status === "erro" || row.status === "falhou") {
           return row.mensagem_erro || "Falha no envio — motivo não informado.";
+        }
+        // Cancelado tambem mostra o motivo gravado. Sem isto, um cancelamento
+        // pedido no painel e um cancelamento automatico por atraso apareciam
+        // exatamente iguais na tela ("Cancelado"), e descobrir qual dos dois
+        // tinha acontecido exigia ler o banco.
+        if (row.status === "cancelado") {
+          return row.mensagem_erro || DISPATCH_STATUS_TIP.cancelado;
         }
         return DISPATCH_STATUS_TIP[row.status] || "";
       }

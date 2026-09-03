@@ -39,6 +39,7 @@
     "test:campaign-video-captions": "node tests/campaign-video-captions-service.test.js && node tests/campaign-video-captions-repository.test.js",
     "test:auth-gate": "node tests/auth-gate.test.js && node tests/app-users-admin-gate.test.js && node tests/app-users-own-profile.test.js",
     "db:test": "node scripts/test-supabase-connection.js",
+    "sentry:test": "node scripts/test-sentry-connection.js",
     "users:manage": "node scripts/manage-app-user.js",
     "seed": "node scripts/seed.js",
     "transcribe-videos": "node scripts/transcribe-all-videos.js",
@@ -88,6 +89,7 @@
   "homepage": "https://github.com/LightGu/estimulo-project#readme",
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@sentry/node": "^10.73.0",
     "@supabase/supabase-js": "^2.49.1",
     "axios": "^1.18.1",
     "bullmq": "^5.79.3",

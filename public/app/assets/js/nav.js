@@ -508,6 +508,9 @@
       const data = await response.json();
       const name = data && (data.display_name || data.username);
       if (name) applyUserChipName(name);
+      if (data && data.username && window.estimuloSentrySetUser) {
+        window.estimuloSentrySetUser({ username: data.username });
+      }
     } catch (error) {
       /* mantém o nome já exibido no HTML caso a chamada falhe */
     }
@@ -807,6 +810,16 @@
   window.estimuloErroInesperado = function estimuloErroInesperado(error, options) {
     const opts = options || {};
     const overlay = ensureErroModal();
+
+    // So manda pro Sentry o que e' bug de verdade (5xx, API fora do ar) - erro
+    // de validacao (4xx) e' o usuario corrigindo o proprio formulario, nao uma
+    // trajetoria que alguem precisa investigar depois.
+    if (window.estimuloCaptureError && window.estimuloEhErroDeServidor(error)) {
+      window.estimuloCaptureError(error, {
+        tags: { status: error && error.status },
+        extra: { url: window.location.href },
+      });
+    }
 
     // error-messages.js transforma a mensagem tecnica do backend em
     // titulo/texto/acao que o operador entende. options.title/message ainda

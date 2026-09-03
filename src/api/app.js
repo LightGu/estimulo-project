@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const path = require("node:path");
+const { Sentry, enabled: sentryEnabled, environment: sentryEnvironment } = require("../config/sentry");
 const { createAuthGate } = require("./auth-gate");
 const createAppUsersController = require("./controllers/app-users.controller");
 const { evolutionConfig } = require("../config/evolution");
@@ -97,6 +98,22 @@ function createApp(dependencies = {}) {
   app.get("/access/status", authGate.statusHandler);
   app.post("/access/login", authGate.loginHandler);
   app.post("/access/logout", authGate.logoutHandler);
+  // Publica (sem exigir login): o painel precisa iniciar o Sentry no navegador
+  // antes mesmo do login (para capturar erro na propria tela de acesso), e o
+  // DSN nao e' segredo - e' feito para ser embutido em codigo cliente. Fonte
+  // unica de verdade continua sendo o .env do backend (SENTRY_DSN), em vez de
+  // duplicar o valor num arquivo estatico por ambiente.
+  app.get("/config/sentry", (req, res) => {
+    res.set("Cache-Control", "no-store");
+    res.json({
+      enabled: sentryEnabled,
+      dsn: sentryEnabled ? process.env.SENTRY_DSN : null,
+      environment: sentryEnvironment,
+      tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE ?? 0),
+      replaysSessionSampleRate: Number(process.env.SENTRY_REPLAYS_SESSION_SAMPLE_RATE ?? 0),
+      replaysOnErrorSampleRate: Number(process.env.SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE ?? 1),
+    });
+  });
   app.use(authGate.middleware);
   // Nao existe public/index.html (so public/app/*) - sem isso, "/" com
   // sessao valida caia em "Cannot GET /" porque o static nao acha arquivo
@@ -363,6 +380,12 @@ function createApp(dependencies = {}) {
 
     return res.status(404).json({ error: "Recurso nao encontrado nesta versao do painel" });
   });
+
+  // Precisa vir depois das rotas (para capturar o que elas jogarem) e antes do
+  // handler de erro abaixo (que ainda monta a resposta JSON de sempre) - o
+  // Sentry so registra o evento e repassa via next(error), nunca responde ao
+  // cliente sozinho.
+  Sentry.setupExpressErrorHandler(app);
 
   // Rede de seguranca para o que escapa do try/catch dos controllers: erro
   // sincrono numa rota, JSON malformado no body (express.json lanca

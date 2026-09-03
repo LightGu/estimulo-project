@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 
 const {
+  DEFAULT_MAX_ABSOLUTE_DISPATCH_DELAY_MS,
   DEFAULT_MAX_DISPATCH_DELAY_MS,
   resolveStaleDispatchReason,
 } = require("../src/services/dispatch-staleness");
@@ -209,8 +210,64 @@ async function testDispatchConsistencyCancelsStaleVideoLog() {
   assert.match(logs[0].mensagem_erro, /cancelado/);
 }
 
+// Regressao do incidente de 02/09/2026: um disparo pontual legitimo, criado
+// pelo operador, foi CANCELADO sozinho porque a fila ficou parada e o job so
+// rodou depois dos 30 min. Enquanto a janela escolhida nao termina, entregar
+// continua sendo exatamente o que foi pedido - o atraso da fila e operacional,
+// nao um motivo para descartar o envio.
+function testDentroDaJanelaNaoCancelaMesmoAtrasado() {
+  const scheduledAt = "2026-09-03T15:01:00.000Z";
+  const windowEnd = "2026-09-03T16:30:00.000Z";
+  const atrasoDe80Min = () => new Date("2026-09-03T16:21:00.000Z");
+
+  // Sem janela, o teto de 30 min continua valendo exatamente como antes.
+  assert.ok(
+    resolveStaleDispatchReason(scheduledAt, { now: atrasoDe80Min }),
+    "sem janela, 80 min de atraso continua cancelando"
+  );
+  assert.equal(
+    resolveStaleDispatchReason(scheduledAt, { now: atrasoDe80Min, windowEnd }),
+    null,
+    "dentro da janela o envio nao pode ser cancelado por atraso de fila"
+  );
+}
+
+// A trava so existe por causa do replay de boot (jobs de dias atras promovidos
+// de uma vez quando a infra sobe). A regra de janela nao pode reabrir isso.
+function testJanelaEncerradaOuAntigaAindaCancela() {
+  const scheduledAt = "2026-09-03T15:01:00.000Z";
+  const windowEnd = "2026-09-03T16:30:00.000Z";
+
+  const umMinutoDepoisDoFim = () => new Date("2026-09-03T16:31:00.000Z");
+  const reasonForaDaJanela = resolveStaleDispatchReason(scheduledAt, {
+    now: umMinutoDepoisDoFim,
+    windowEnd,
+  });
+
+  assert.ok(reasonForaDaJanela, "passou do fim da janela: nao ha mais envio a fazer");
+  assert.match(reasonForaDaJanela, /janela de envio terminou/);
+
+  // Janela mal preenchida (fim daqui a uma semana) nao pode autorizar um job de
+  // dias atras: o teto absoluto corta por cima.
+  const tresDiasDepois = () => new Date(new Date(scheduledAt).getTime() + 3 * 24 * 60 * 60 * 1000);
+
+  assert.ok(
+    resolveStaleDispatchReason(scheduledAt, {
+      now: tresDiasDepois,
+      windowEnd: "2026-09-10T00:00:00.000Z",
+    }),
+    "teto absoluto barra replay de boot mesmo com janela aberta"
+  );
+  assert.ok(
+    DEFAULT_MAX_ABSOLUTE_DISPATCH_DELAY_MS < 3 * 24 * 60 * 60 * 1000,
+    "o teto absoluto precisa ser menor que o atraso do cenario de replay"
+  );
+}
+
 async function main() {
   testResolveStaleDispatchReasonBoundary();
+  testDentroDaJanelaNaoCancelaMesmoAtrasado();
+  testJanelaEncerradaOuAntigaAindaCancela();
   testResolveStaleDispatchReasonIgnoresMissingOrInvalidSchedule();
   testResolveStaleDispatchReasonRespectsCustomMaxDelay();
   await testMensagensDispatchWorkerCancelsStaleJob();

@@ -32,6 +32,23 @@ async function findById(id, client) {
   return data || null;
 }
 
+async function findByIds(ids, client) {
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await getClient(client)
+    .from("app_users")
+    .select(PUBLIC_COLUMNS)
+    .in("id", ids);
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 async function findAll(client) {
   const { data, error } = await getClient(client)
     .from("app_users")
@@ -109,6 +126,7 @@ module.exports = {
   delete: remove,
   findAll,
   findById,
+  findByIds,
   findByUsername,
   remove,
   touchLastLogin,

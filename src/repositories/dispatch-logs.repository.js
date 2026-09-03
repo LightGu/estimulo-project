@@ -9,6 +9,28 @@ const LOGS_TABLE = "logs";
 const DEFAULT_MAX_RETRY_COUNT = 3;
 const DEFAULT_FAILED_RETRY_BATCH_SIZE = 25;
 
+const CANCELED_STATUS = "cancelado";
+
+// Vocabulario fechado de `logs.cancelado_origem` (ver a migration
+// 202609020002). Existe porque, ate ela, um cancelamento pedido pelo usuario e
+// um cancelamento automatico por atraso ficavam identicos na tabela - e
+// responder "quem cancelou este envio?" exigia ler o codigo em vez do banco.
+const CANCEL_ORIGENS = {
+  USUARIO: "usuario",
+  ATRASO: "atraso",
+  CAMPANHA_CANCELADA: "campanha_cancelada",
+  SISTEMA: "sistema",
+};
+
+// Campos de auditoria aplicados a TODO caminho que grava status "cancelado".
+// Centralizado para que um caminho novo nao volte a cancelar em silencio.
+function buildCancelAudit(origem, at = new Date()) {
+  return {
+    cancelado_em: at.toISOString(),
+    cancelado_origem: origem || CANCEL_ORIGENS.SISTEMA,
+  };
+}
+
 // TEMPORARIO (investigacao 31/07/2026): registra a origem de todo log criado sem
 // horario_envio_planejado - a assinatura das linhas que aparecem no relatorio com
 // "-" e que nao correspondem a nenhum job nas filas. Inerte por padrao: so grava
@@ -80,6 +102,14 @@ async function updateStatus(id, status, mensagemErro = null, whatsappInstanceId,
 
   if (whatsappInstanceId !== undefined) {
     update.whatsapp_instance_id = whatsappInstanceId;
+  }
+
+  // Caminho generico: quem cancela por aqui nao informa a origem (e o fallback
+  // de mensagens-dispatch quando cancelIfPending nao esta disponivel), mas o
+  // INSTANTE do cancelamento nao pode se perder - era justamente o dado que
+  // faltava para investigar um envio cancelado.
+  if (status === CANCELED_STATUS) {
+    Object.assign(update, buildCancelAudit(CANCEL_ORIGENS.SISTEMA));
   }
 
   const { data, error } = await getClient(client)
@@ -172,10 +202,20 @@ async function markRetrying(id, retryCount, client) {
 // forcar o status por cima esconderia um "enviado"/"falhou" real. Logs
 // enviado/falhou/erro ficam intactos - preservam o historico do que ja
 // aconteceu antes do cancelamento.
-async function cancelPendingByCampaign(campaignId, client) {
+async function cancelPendingByCampaign(campaignId, options = {}, client) {
+  const { motivo, origem = CANCEL_ORIGENS.CAMPANHA_CANCELADA } = options || {};
+
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
-    .update({ status: "cancelado" })
+    .update({
+      status: CANCELED_STATUS,
+      // Sem esta mensagem, um envio cancelado pelo usuario chegava ao relatorio
+      // com mensagem_erro NULL - visualmente identico a um cancelamento
+      // automatico cuja mensagem tivesse se perdido. O operador via so
+      // "Cancelado", sem saber se foi ele ou a plataforma.
+      mensagem_erro: motivo || "Envio cancelado: a campanha foi cancelada no painel.",
+      ...buildCancelAudit(origem),
+    })
     .eq("campaign_id", campaignId)
     .eq("status", "pendente")
     .select("*");
@@ -241,10 +281,16 @@ async function claimForSend(id, client) {
 // estiver pendente nesse instante, para nao sobrescrever um log que outro
 // worker ja tenha movido para processando/enviado/falhou entre a leitura do
 // horario planejado e este UPDATE.
-async function cancelIfPending(id, mensagemErro = null, client) {
+async function cancelIfPending(id, mensagemErro = null, options = {}, client) {
+  const { origem = CANCEL_ORIGENS.ATRASO } = options || {};
+
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
-    .update({ status: "cancelado", mensagem_erro: mensagemErro })
+    .update({
+      status: CANCELED_STATUS,
+      mensagem_erro: mensagemErro,
+      ...buildCancelAudit(origem),
+    })
     .eq("id", id)
     .eq("status", "pendente")
     .select("*")
@@ -432,7 +478,34 @@ async function countVisibleByCampaignIds(campaignIds, client) {
   return counts;
 }
 
+// Usado pela lista de campanhas para exibir "quem programou": um log so grava
+// usuario_responsavel_id quando a confirmacao veio de uma acao no painel (ver
+// confirmDispatch/scheduleAdHoc em mensagens.service.js/campaigns.service.js);
+// jobs automaticos de fila deixam a coluna nula. Ordenado por criado_em
+// ascendente para que o service fique com o primeiro log gravado de cada
+// campanha - a confirmacao original, mesmo que a campanha tenha sido
+// reagendada depois por outra pessoa.
+async function listResponsibleUsersByCampaigns(campaignIds, client) {
+  if (!Array.isArray(campaignIds) || campaignIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .select("campaign_id, usuario_responsavel_id, criado_em")
+    .in("campaign_id", campaignIds)
+    .not("usuario_responsavel_id", "is", null)
+    .order("criado_em", { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  return data || [];
+}
+
 module.exports = {
+  CANCEL_ORIGENS,
   DEFAULT_FAILED_RETRY_BATCH_SIZE,
   DEFAULT_MAX_RETRY_COUNT,
   cancelIfPending,
@@ -447,6 +520,7 @@ module.exports = {
   listFailedForRetry,
   listPendingByCampaign,
   listRecent,
+  listResponsibleUsersByCampaigns,
   listWithFilters,
   markRetrying,
   updateDispatchJobId,

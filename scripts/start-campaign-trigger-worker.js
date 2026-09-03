@@ -1,3 +1,6 @@
+const { initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "campaign-trigger-worker" });
+
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 const {
   campaignTriggerQueue,

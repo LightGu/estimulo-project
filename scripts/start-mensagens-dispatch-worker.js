@@ -1,5 +1,8 @@
 require("dotenv").config({ quiet: true });
 
+const { initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "mensagens-dispatch-worker" });
+
 const { clearLoopbackDiscardProxyEnv } = require("../src/config/network");
 clearLoopbackDiscardProxyEnv(process.env, { logger: console });
 

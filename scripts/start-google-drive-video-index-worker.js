@@ -1,3 +1,6 @@
+const { Sentry, initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "google-drive-video-index-worker" });
+
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 const {
   createGoogleDriveVideoIndexEvents,
@@ -109,5 +112,6 @@ scheduleRecurringIndexJob().catch((error) => {
       error_message: error.message,
     })
   );
+  Sentry.captureException(error, { tags: { event: "google_drive_video_index.schedule_failed" } });
   shutdown().finally(() => process.exit(1));
 });

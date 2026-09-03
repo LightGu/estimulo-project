@@ -1,5 +1,8 @@
 require("dotenv").config({ quiet: true });
 
+const { Sentry, initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "dispatch-worker" });
+
 const { clearLoopbackDiscardProxyEnv } = require("../src/config/network");
 clearLoopbackDiscardProxyEnv(process.env, { logger: console });
 
@@ -73,6 +76,7 @@ process.on("unhandledRejection", (reason) => {
       stack: reason && reason.stack,
     })
   );
+  Sentry.captureException(reason, { tags: { event: "dispatch.worker.unhandled_rejection" } });
 
   shutdown().finally(() => process.exit(1));
 });
@@ -85,6 +89,7 @@ process.on("uncaughtException", (error) => {
       stack: error && error.stack,
     })
   );
+  Sentry.captureException(error, { tags: { event: "dispatch.worker.uncaught_exception" } });
 
   shutdown().finally(() => process.exit(1));
 });

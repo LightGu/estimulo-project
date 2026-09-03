@@ -1,6 +1,7 @@
 const { Queue, QueueEvents, Worker } = require("bullmq");
 
 const { closeRedisConnection, getRedisConnection } = require("../config/redis");
+const { Sentry } = require("../config/sentry");
 
 const defaultJobOptions = {
   attempts: 3,
@@ -49,6 +50,7 @@ function withErrorLogging(instance, name, kind) {
         error_message: (error && error.message) || String(error),
       })
     );
+    Sentry.captureException(error, { tags: { queue: name, kind } });
   });
 
   return instance;
@@ -58,8 +60,12 @@ function createQueue(name, options = {}) {
   return withErrorLogging(new Queue(name, buildQueueOptions(options)), name, "queue");
 }
 
+// Escuta "failed" aqui (em vez de exigir que cada script registre o proprio
+// listener) para nenhuma fila esquecer de mandar a falha do job pro Sentry -
+// erro de negocio dentro do processor, apos esgotar as tentativas, e' o tipo de
+// falha que hoje so aparece se alguem for procurar no log.
 function createWorker(name, processor, options = {}) {
-  return withErrorLogging(
+  const worker = withErrorLogging(
     new Worker(name, processor, {
       ...options,
       connection: getRedisConnection(),
@@ -67,6 +73,15 @@ function createWorker(name, processor, options = {}) {
     name,
     "worker"
   );
+
+  worker.on("failed", (job, error) => {
+    Sentry.captureException(error, {
+      tags: { queue: name, kind: "job_failed" },
+      extra: { job_id: job && job.id, job_data: job && job.data, attempts_made: job && job.attemptsMade },
+    });
+  });
+
+  return worker;
 }
 
 function createQueueEvents(name, options = {}) {

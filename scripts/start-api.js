@@ -1,5 +1,10 @@
 require("dotenv").config({ quiet: true });
 
+// Precisa ser inicializado antes de qualquer outro require para a
+// instrumentacao automatica (http etc) do Sentry cobrir o resto do processo.
+const { Sentry, initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "api" });
+
 const { clearLoopbackDiscardProxyEnv } = require("../src/config/network");
 clearLoopbackDiscardProxyEnv(process.env, { logger: console });
 
@@ -47,6 +52,7 @@ function logProcessFailure(event, error) {
       stack: error && error.stack,
     })
   );
+  Sentry.captureException(error, { tags: { event } });
 }
 
 process.on("unhandledRejection", (reason) => {

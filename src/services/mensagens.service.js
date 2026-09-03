@@ -279,6 +279,10 @@ function createMensagensService(dependencies = {}) {
             message: texto,
             content,
             scheduled_at: logScheduledAt,
+            // Mesma janela da campanha retomada: o resume nao pode devolver o
+            // envio a fila com a trava mais rigida do que ela era no
+            // agendamento original.
+            window_end: campaign.window_end || null,
             dispatch_order: dispatchOrder,
             dispatch_log_id: log.id,
             whatsapp_instance_id: resolveInstanceForOrder(
@@ -988,6 +992,10 @@ function createMensagensService(dependencies = {}) {
             // horarios futuros escolhidos pelo usuario na janela, e a compressao
             // termina muito antes deles.
             scheduled_at: item.scheduled_at,
+            // Ate o fim da janela o envio continua sendo o que o usuario pediu,
+            // mesmo se a fila atrasar - ver a regra de janela em
+            // dispatch-staleness.js.
+            window_end: payload.window_end,
             dispatch_order: item.dispatch_order,
             jitter_delay_ms: item.jitter_delay_ms,
             cumulative_delay_ms: item.cumulative_delay_ms,

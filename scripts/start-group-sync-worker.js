@@ -1,3 +1,6 @@
+const { Sentry, initSentry } = require("../src/config/sentry");
+initSentry({ serverName: "group-sync-worker" });
+
 const { closeQueueInfrastructure } = require("../src/queues/bullmq");
 const {
   createGroupSyncEvents,
@@ -94,5 +97,6 @@ scheduleRecurringGroupSyncJob().catch((error) => {
       error_message: error.message,
     })
   );
+  Sentry.captureException(error, { tags: { event: "group_sync.schedule_failed" } });
   shutdown().finally(() => process.exit(1));
 });

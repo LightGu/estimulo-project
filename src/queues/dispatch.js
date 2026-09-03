@@ -631,7 +631,7 @@ async function maybeNotifyCampaignFinished(jobData, dependencies = {}) {
 // que o relatorio mostre "cancelado" em vez de deixar a linha presa em pendente
 // quando o portao de entrada barra o envio. Nunca pode derrubar o job: o que
 // importa e nao enviar.
-async function cancelPendingLogForBlockedDispatch(jobData, dispatchLogs, reason, logger = console) {
+async function cancelPendingLogForBlockedDispatch(jobData, dispatchLogs, reason, logger = console, origem = "atraso") {
   if (!dispatchLogs || typeof dispatchLogs.listByCampaign !== "function" || !jobData.campaign_id) {
     return null;
   }
@@ -649,7 +649,7 @@ async function cancelPendingLogForBlockedDispatch(jobData, dispatchLogs, reason,
       return null;
     }
 
-    return await dispatchLogs.cancelIfPending(pending.id, reason);
+    return await dispatchLogs.cancelIfPending(pending.id, reason, { origem });
   } catch (error) {
     logger.error &&
       logger.error(
@@ -780,7 +780,13 @@ function createDispatchProcessor(options = {}) {
       const campaignBlockReason = resolveCampaignBlockReason(campaign);
 
       if (campaignBlockReason) {
-        await cancelPendingLogForBlockedDispatch(job.data, dispatchLogs, campaignBlockReason, logger);
+        await cancelPendingLogForBlockedDispatch(
+          job.data,
+          dispatchLogs,
+          campaignBlockReason,
+          logger,
+          "campanha_cancelada"
+        );
         await job
           .updateData({
             ...job.data,

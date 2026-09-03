@@ -14,6 +14,7 @@
         } catch (e) {}
       })();
     </script>
+    <script src="assets/js/sentry-init.js"></script>
     <title>Disparador Pontual · Estímulo</title>
     <link rel="icon" href="assets/img/logo-mark.svg" type="image/svg+xml">
     <link rel="shortcut icon" href="assets/img/logo-mark.svg">
@@ -142,6 +143,15 @@
                     </div>
                     <label style="margin-bottom:6px;"><input type="checkbox" id="selectAllGroups"> <strong>Selecionar todos os grupos</strong></label>
                     <div class="text-faint" id="selectedGroupsSummary" style="font-size: var(--fs-xs);margin:0 0 8px;"></div>
+                    <!-- Grupo selecionado que o filtro atual esconde continua no
+                         envio, mas sai da tela - foi assim que um disparo saiu
+                         para grupos que o operador nao estava vendo. O aviso
+                         torna a selecao invisivel visivel, com saida direta. -->
+                    <div id="hiddenSelectionWarning" hidden
+                         style="display:flex;align-items:flex-start;gap:8px;justify-content:space-between;background:var(--warning-bg);color:var(--warning);border-radius:var(--radius-sm);padding:8px 10px;margin:0 0 8px;font-size:var(--fs-xs);">
+                      <span id="hiddenSelectionText"></span>
+                      <button class="btn btn-secondary btn-sm" type="button" id="clearHiddenSelection" style="flex:none;">Remover da seleção</button>
+                    </div>
                     <div class="checkbox-list" id="groupCheckboxes"></div>
                   </div>
 
@@ -250,7 +260,7 @@
       const STATUS_BADGE = { programado: "badge-info", enviada: "badge-success", parcial: "badge-warning", erro: "badge-danger" };
       const STATUS_LABEL = { programado: "Programado (fila)", enviada: "Enviada", parcial: "Parcial", erro: "Erro" };
 
-      const state = { groups: [], organizations: [], selectedGroupIds: new Set() };
+      const state = { groups: [], organizations: [], selectedGroupIds: new Set(), visibleGroupIds: new Set() };
       const sentMessages = [];
 
       const ICONS = {
@@ -423,8 +433,13 @@
           return true;
         });
 
+        // Guarda o que o filtro atual deixa visivel: renderSelectedGroupsSummary
+        // usa isso para acusar selecao que ficou fora da tela.
+        state.visibleGroupIds = new Set(filteredGroups.map((g) => g.id));
+
         if (!state.groups.length) {
           document.getElementById("groupCheckboxes").innerHTML = '<span class="text-faint">Nenhum grupo cadastrado.</span>';
+          renderSelectedGroupsSummary();
           return;
         }
 
@@ -471,7 +486,43 @@
         summary.textContent = names.length
           ? `${names.length} selecionado(s): ${names.join(", ")}`
           : "Nenhum grupo selecionado.";
+
+        renderHiddenSelectionWarning();
       }
+
+      // Grupos que estao selecionados mas que o filtro/busca atual nao mostra.
+      // Eles continuam entrando no disparo - a selecao e' guardada por id, nao
+      // lida dos checkboxes -, entao ficar em silencio sobre eles e' o que
+      // permitia um envio sair para grupos que o operador nao via na tela.
+      function hiddenSelectedGroups() {
+        const visible = state.visibleGroupIds || new Set();
+
+        return selectedGroupIds()
+          .filter((id) => !visible.has(id))
+          .map((id) => state.groups.find((g) => g.id === id))
+          .filter(Boolean);
+      }
+
+      function renderHiddenSelectionWarning() {
+        const hidden = hiddenSelectedGroups();
+        const box = document.getElementById("hiddenSelectionWarning");
+
+        if (!hidden.length) {
+          box.hidden = true;
+          return;
+        }
+
+        document.getElementById("hiddenSelectionText").textContent =
+          `${hidden.length} grupo(s) selecionado(s) não aparecem no filtro atual e mesmo assim vão receber: ` +
+          hidden.map((g) => g.nome).join(", ");
+        box.hidden = false;
+      }
+
+      document.getElementById("clearHiddenSelection").addEventListener("click", () => {
+        hiddenSelectedGroups().forEach((g) => state.selectedGroupIds.delete(g.id));
+        renderSelectedGroupsSummary();
+        updatePreview();
+      });
 
       document.getElementById("selectAllGroups").addEventListener("change", (event) => {
         document.querySelectorAll(".group-check").forEach((cb) => {
@@ -938,6 +989,22 @@
             message: "Nao da para programar um envio para um horario que ja passou.",
             action: "Escolha uma data e um horario de inicio futuros.",
           });
+          return;
+        }
+
+        // Confirmacao explicita LISTANDO os grupos. A selecao e' guardada por id
+        // e sobrevive a troca de filtro, entao a lista da tela nem sempre e a
+        // lista do envio - esta e a ultima tela em que da para perceber que um
+        // grupo entrou sem querer, e o disparo nao volta atras depois de sair.
+        const nomesSelecionados = selectedGroupNames();
+        const dataLegivel = String(msg.data).split("-").reverse().join("/");
+        const confirmado = await window.estimuloConfirm(
+          `Programar esta mensagem para ${nomesSelecionados.length} grupo(s) em ${dataLegivel}, ` +
+            `entre ${msg.inicio} e ${msg.fim}? Grupos: ${nomesSelecionados.join(", ")}.`,
+          { title: "Confirmar programação", confirmLabel: "Programar envio" }
+        );
+
+        if (!confirmado) {
           return;
         }
 

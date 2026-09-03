@@ -22,6 +22,16 @@ const DEFAULT_MAX_DISPATCH_DELAY_MS = 30 * 60 * 1000;
 // promovido de uma vez quando a infra do Docker sobe.
 const DEFAULT_MAX_VIDEO_DISPATCH_DELAY_MS = 6 * 60 * 60 * 1000;
 
+// Teto ABSOLUTO, valido inclusive dentro da janela escolhida pelo usuario.
+//
+// Existe porque a regra da janela (abaixo) desarma o teto normal enquanto o
+// horario de fim nao chegou, e uma janela mal preenchida (fim daqui a uma
+// semana) reabriria exatamente a porta que a trava fechou: job de dias atras
+// promovido de uma vez quando a infra do Docker sobe. 24h e' maior que qualquer
+// janela legitima de um disparo e menor, por ordem de grandeza, que o replay de
+// boot que gerou o incidente.
+const DEFAULT_MAX_ABSOLUTE_DISPATCH_DELAY_MS = 24 * 60 * 60 * 1000;
+
 function resolvePositiveEnvMs(name, fallbackMs) {
   const configured = Number(process.env[name]);
 
@@ -40,6 +50,10 @@ function resolveMaxVideoDispatchDelayMs() {
   return resolvePositiveEnvMs("MAX_VIDEO_DISPATCH_DELAY_MS", DEFAULT_MAX_VIDEO_DISPATCH_DELAY_MS);
 }
 
+function resolveMaxAbsoluteDispatchDelayMs() {
+  return resolvePositiveEnvMs("MAX_ABSOLUTE_DISPATCH_DELAY_MS", DEFAULT_MAX_ABSOLUTE_DISPATCH_DELAY_MS);
+}
+
 // Retorna null quando o job ainda pode ser enviado, ou um motivo (string)
 // quando o atraso ja estourou o teto e o job deve ser cancelado sem enviar.
 //
@@ -48,7 +62,12 @@ function resolveMaxVideoDispatchDelayMs() {
 // de teste criam o log na hora do envio. Para a checagem no nivel do JOB, onde
 // o horario e sempre preenchido, use resolveJobStaleReason - que falha fechado.
 function resolveStaleDispatchReason(scheduledAt, options = {}) {
-  const { maxDelayMs = resolveMaxDispatchDelayMs(), now = () => new Date() } = options;
+  const {
+    maxDelayMs = resolveMaxDispatchDelayMs(),
+    now = () => new Date(),
+    windowEnd,
+    maxAbsoluteDelayMs = resolveMaxAbsoluteDispatchDelayMs(),
+  } = options;
 
   if (!scheduledAt) {
     return null;
@@ -60,13 +79,46 @@ function resolveStaleDispatchReason(scheduledAt, options = {}) {
     return null;
   }
 
-  const delayMs = now().getTime() - scheduledTime;
+  const nowMs = now().getTime();
+  const delayMs = nowMs - scheduledTime;
 
   if (delayMs <= maxDelayMs) {
     return null;
   }
 
+  // O teto de atraso estourou, mas isso sozinho nao distingue os dois casos
+  // OPOSTOS que chegam aqui:
+  //
+  //   (a) job zumbi: agendado ha dias, promovido de uma vez pela BullMQ quando
+  //       a infra sobe - o caso que gerou spam real e que a trava existe para
+  //       barrar;
+  //   (b) job legitimo do disparo que o usuario acabou de criar, que so nao
+  //       rodou no horario porque a fila ficou parada (worker caido/reiniciado,
+  //       backlog). Cancelar este ultimo transformava um atraso operacional em
+  //       envio perdido, sem que ninguem tivesse pedido - e era o que o operador
+  //       via como "o sistema cancelou sozinho".
+  //
+  // A janela de envio escolhida pelo usuario e' que separa os dois: enquanto o
+  // horario de FIM nao chegou, entregar continua sendo exatamente o que foi
+  // pedido, atrasado ou nao. Passou do fim, nao ha mais envio a fazer.
+  // O teto absoluto continua valendo por cima, para uma janela mal preenchida
+  // nao reabrir o caso (a).
+  const windowEndTime = windowEnd ? new Date(windowEnd).getTime() : NaN;
+  const dentroDaJanela = Number.isFinite(windowEndTime) && nowMs <= windowEndTime;
+
+  if (dentroDaJanela && delayMs <= maxAbsoluteDelayMs) {
+    return null;
+  }
+
   const delayMinutes = Math.floor(delayMs / 60000);
+
+  if (Number.isFinite(windowEndTime) && nowMs > windowEndTime) {
+    return (
+      `Envio cancelado: a janela de envio terminou em ${new Date(windowEndTime).toISOString()} ` +
+      `e o horario planejado (${new Date(scheduledTime).toISOString()}) acumulou ` +
+      `${delayMinutes} min de atraso.`
+    );
+  }
 
   return (
     `Envio cancelado: horario planejado (${new Date(scheduledTime).toISOString()}) ultrapassou ` +
@@ -101,7 +153,8 @@ function resolveJobStaleReason(scheduledAt, options = {}) {
     return `Envio cancelado: job com horario planejado invalido (${String(scheduledAt)}).`;
   }
 
-  return resolveStaleDispatchReason(scheduledAt, { maxDelayMs, now });
+  // ...options preserva windowEnd/maxAbsoluteDelayMs para a regra de janela.
+  return resolveStaleDispatchReason(scheduledAt, { ...options, maxDelayMs, now });
 }
 
 // Horario original de um log de disparo, para reenfileirar o envio SEM apagar a
@@ -141,11 +194,13 @@ function resolveCampaignBlockReason(campaign) {
 }
 
 module.exports = {
+  DEFAULT_MAX_ABSOLUTE_DISPATCH_DELAY_MS,
   DEFAULT_MAX_DISPATCH_DELAY_MS,
   DEFAULT_MAX_VIDEO_DISPATCH_DELAY_MS,
   resolveCampaignBlockReason,
   resolveJobStaleReason,
   resolveLogScheduledAt,
+  resolveMaxAbsoluteDispatchDelayMs,
   resolveMaxDispatchDelayMs,
   resolveMaxVideoDispatchDelayMs,
   resolveStaleDispatchReason,

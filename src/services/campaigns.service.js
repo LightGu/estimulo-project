@@ -2,6 +2,7 @@ const campaignsRepository = require("../repositories/campaigns.repository");
 const campaignGroupsRepository = require("../repositories/campaign-groups.repository");
 const groupsRepository = require("../repositories/groups.repository");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
+const appUsersRepository = require("../repositories/app-users.repository");
 const defaultCampaignVideoCaptionsService = require("./campaign-video-captions.service");
 const defaultSettingsService = require("./settings.service");
 const defaultMensagensService = require("./mensagens.service");
@@ -134,6 +135,7 @@ function createCampaignsService(dependencies = {}) {
   const campaignGroupsRepositoryDependency = dependencies.campaignGroupsRepository || campaignGroupsRepository;
   const groupsRepositoryDependency = dependencies.groupsRepository || groupsRepository;
   const dispatchLogsRepositoryDependency = dependencies.dispatchLogsRepository || dispatchLogsRepository;
+  const appUsersRepositoryDependency = dependencies.appUsersRepository || appUsersRepository;
   const campaignVideoCaptionsServiceDependency =
     dependencies.campaignVideoCaptionsService || defaultCampaignVideoCaptionsService;
   const settingsServiceDependency = dependencies.settingsService || defaultSettingsService;
@@ -807,7 +809,10 @@ function createCampaignsService(dependencies = {}) {
       throw error;
     }
 
-    await dispatchLogsRepositoryDependency.cancelPendingByCampaign(id);
+    // origem "usuario": este caminho so existe atras do POST /campaigns/:id/cancel,
+    // ou seja, de uma acao explicita no painel. Sem marcar a origem, o log
+    // resultante ficava indistinguivel de um cancelamento automatico por atraso.
+    await dispatchLogsRepositoryDependency.cancelPendingByCampaign(id, { origem: "usuario" });
 
     // ativo: false junto com o status. Cancelar so o status deixava a campanha
     // dentro de listActiveOverlappingWindow (que filtra por ativo, nao por
@@ -886,8 +891,50 @@ function createCampaignsService(dependencies = {}) {
     return "programado";
   }
 
+  // "Quem programou" nao existe na propria campanha - fica gravado nos logs de
+  // disparo dela (usuario_responsavel_id, ver confirmDispatch acima e
+  // scheduleAdHoc em mensagens.service.js). Uma unica query para todas as
+  // campanhas da lista, em vez de uma por campanha, mantem listWithSummary com
+  // custo previsivel mesmo com o historico crescendo.
+  async function resolveCreatorsByCampaignIds(campaignIds) {
+    const creatorByCampaignId = new Map();
+
+    if (!campaignIds.length) {
+      return creatorByCampaignId;
+    }
+
+    const responsibleLogs = await dispatchLogsRepositoryDependency.listResponsibleUsersByCampaigns(campaignIds);
+    const userIdByCampaignId = new Map();
+
+    for (const log of responsibleLogs) {
+      if (!userIdByCampaignId.has(log.campaign_id)) {
+        userIdByCampaignId.set(log.campaign_id, log.usuario_responsavel_id);
+      }
+    }
+
+    const userIds = [...new Set(userIdByCampaignId.values())];
+
+    if (!userIds.length) {
+      return creatorByCampaignId;
+    }
+
+    const users = await appUsersRepositoryDependency.findByIds(userIds);
+    const userById = new Map(users.map((user) => [user.id, user]));
+
+    for (const [campaignId, userId] of userIdByCampaignId) {
+      const user = userById.get(userId);
+
+      if (user) {
+        creatorByCampaignId.set(campaignId, user.display_name || user.username);
+      }
+    }
+
+    return creatorByCampaignId;
+  }
+
   async function listWithSummary() {
     const campaigns = await repository.findAll();
+    const creatorByCampaignId = await resolveCreatorsByCampaignIds(campaigns.map((campaign) => campaign.id));
 
     return Promise.all(
       campaigns.map(async (campaign) => {
@@ -898,6 +945,7 @@ function createCampaignsService(dependencies = {}) {
           ...campaign,
           status,
           grupos_total: groupRows.length,
+          criado_por: creatorByCampaignId.get(campaign.id) || null,
         };
       })
     );

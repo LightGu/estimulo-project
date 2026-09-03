@@ -78,6 +78,12 @@ function buildMensagensJobData(params = {}) {
     message: params.message || "",
     content: params.content || null,
     scheduled_at: scheduledDate.toISOString(),
+    // Fim da janela escolhida pelo usuario, propagado ate o worker: e' o que
+    // permite a trava de atraso distinguir "job zumbi de dias atras" de "envio
+    // desta janela que a fila atrasou" (ver dispatch-staleness.js). Nulo em
+    // disparo imediato/teste, que nao tem janela - la o teto de atraso vale
+    // sozinho, como antes.
+    window_end: params.window_end || params.windowEnd || null,
     status: params.status || MENSAGENS_DISPATCH_INITIAL_STATUS,
     dispatch_order: params.dispatch_order,
     jitter_delay_ms: params.jitter_delay_ms,
@@ -181,7 +187,10 @@ function createMensagensDispatchProcessor(options = {}) {
     // todo job desta fila nasce com scheduled_at preenchido, entao job sem
     // horario aqui e job corrompido/legado - e a resposta segura para "nao sei
     // quando isto deveria sair" e nao enviar.
-    const staleReason = resolveJobStaleReason(job.data.scheduled_at, { now });
+    const staleReason = resolveJobStaleReason(job.data.scheduled_at, {
+      now,
+      windowEnd: job.data.window_end,
+    });
 
     if (staleReason) {
       const cancelled = job.data.dispatch_log_id && typeof dispatchLogs.cancelIfPending === "function"
