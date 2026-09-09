@@ -47,6 +47,11 @@ function buildMensagensHarness() {
         createdCampaigns.push(campaign);
         return campaign;
       },
+      async update(id, payload) {
+        const campaign = createdCampaigns.find((entry) => entry.id === id);
+        if (campaign) Object.assign(campaign, payload);
+        return campaign || null;
+      },
       async listActiveOverlappingWindow() {
         return [];
       },
@@ -63,6 +68,19 @@ function buildMensagensHarness() {
       async createLog(payload) {
         const log = { id: `log-${createdLogs.length + 1}`, ...payload };
         createdLogs.push(log);
+        return log;
+      },
+      // dispatchAdHoc passou a criar o log como "pendente" ANTES de enviar e a
+      // fecha-lo com o desfecho depois (ver a migration 202609070001 e o
+      // incidente de 04/09/2026). O fake precisa aplicar a transicao para que
+      // os testes possam afirmar o estado FINAL do log, que e' a propriedade
+      // que importa - "o envio aparece no relatorio com o desfecho certo".
+      async updateStatus(id, status, mensagemErro, whatsappInstanceId) {
+        const log = createdLogs.find((entry) => entry.id === id);
+        if (!log) return null;
+        log.status = status;
+        log.mensagem_erro = mensagemErro ?? null;
+        if (whatsappInstanceId !== undefined) log.whatsapp_instance_id = whatsappInstanceId;
         return log;
       },
       async updateProviderDelivery() {
@@ -115,7 +133,15 @@ async function testDispatchAdHocRegistraSemPersistAsCampaign() {
   assert.equal(result.enviados, 1);
   assert.equal(createdLogs.length, 1, "envio imediato sem a flag precisa gravar log");
   assert.equal(createdLogs[0].group_id, "group-1");
+  // O log nasce "pendente" antes do envio e e' fechado com o desfecho depois.
+  // O que o relatorio mostra e' o estado final.
   assert.equal(createdLogs[0].status, "enviado");
+  // E ele nasce com horario planejado: sem isso a linha aparece com "-" no
+  // relatorio, que foi a assinatura dos "logs orfaos" investigados em julho.
+  assert.ok(
+    createdLogs[0].horario_envio_planejado,
+    "log de disparo pontual precisa nascer com horario_envio_planejado"
+  );
 
   // A campanha ancora existe, mas nasce oculta para nao poluir a tela de
   // campanhas - o log dela segue visivel no relatorio.
@@ -248,9 +274,118 @@ async function testRamoLegadoDoWorkerRegistraEnvio() {
   assert.equal(createdLogs[0].whatsapp_instance_id, "instance-1", "o numero usado precisa ir para o log");
 }
 
+/*
+  (1b) O INCIDENTE DE 04/09/2026, como regressao.
+
+  A campanha ancora falhava no INSERT (a constraint de campaigns.classificacao
+  nao aceitava "capacitacao", que a tela oferece) e o try/catch em volta apenas
+  registrava o evento `mensagens.persist_ad_hoc_campaign_failed`. Como o envio
+  vinha ANTES da gravacao, o desfecho era o pior possivel: mensagens entregues
+  nos grupos, nenhuma linha em `logs`, e HTTP 200 dizendo "enviados: N".
+
+  A regra agora e' a inversa e este teste a fixa: se nao da para registrar, nao
+  se envia. Falhar sem enviar e' recuperavel; enviar sem registrar nao e'.
+*/
+async function testFalhaAoGravarAncoraNaoEnviaNada() {
+  const { service, createdLogs, enviados } = buildMensagensHarnessComAncoraQuebrada();
+
+  await assert.rejects(
+    () => service.dispatchAdHoc({ group_ids: ["group-1", "group-2"], texto: "oi", tipo: "capacitacao" }),
+    /classificacao/i,
+    "a falha de gravacao da ancora precisa subir, nao ser engolida"
+  );
+
+  assert.equal(enviados.length, 0, "nenhuma mensagem pode sair quando a ancora nao pode ser gravada");
+  assert.equal(createdLogs.length, 0, "sem ancora nao ha log - e por isso mesmo nao pode haver envio");
+}
+
+// Mesmo harness, com o INSERT da campanha recusado como o Postgres recusou de
+// verdade, e com o sender contando os envios que chegaram a acontecer.
+function buildMensagensHarnessComAncoraQuebrada() {
+  const createdLogs = [];
+  const enviados = [];
+
+  const service = createMensagensService({
+    groupsRepository: {
+      async findById(id) {
+        return {
+          id,
+          nome: `Grupo ${id}`,
+          evolution_group_id: `${id}@g.us`,
+          segmento: "aviso",
+          organization_id: "org-1",
+        };
+      },
+    },
+    campaignsRepository: {
+      async create() {
+        const error = new Error(
+          'new row for relation "campaigns" violates check constraint "campaigns_classificacao_check"'
+        );
+        error.code = "23514";
+        throw error;
+      },
+      async listActiveOverlappingWindow() {
+        return [];
+      },
+    },
+    campaignGroupsRepository: {
+      async associateGroup() {
+        return {};
+      },
+      async listGroups() {
+        return [];
+      },
+    },
+    dispatchLogsRepository: {
+      async createLog(payload) {
+        const log = { id: `log-${createdLogs.length + 1}`, ...payload };
+        createdLogs.push(log);
+        return log;
+      },
+      async updateStatus() {
+        return {};
+      },
+      async updateProviderDelivery() {
+        return {};
+      },
+    },
+    whatsappInstancesRepository: {
+      async listActive() {
+        return [{ id: "instance-1", instance_name: "Numero A", priority: 0 }];
+      },
+    },
+    whatsappInstancesService: {
+      async listDispatchableInstances() {
+        return [{ id: "instance-1", instance_name: "Numero A", priority: 0 }];
+      },
+      async filterDispatchableGroups(groupIds) {
+        return { eligible: groupIds, ineligible: [] };
+      },
+      async getRotationSettings() {
+        return { whatsapp_rotation_group_count: 1 };
+      },
+    },
+    sendToEvolution: async (params) => {
+      enviados.push(params);
+      return { status: 201, data: { key: { id: "3EB0TEST" }, status: "PENDING" } };
+    },
+    confirmProviderDelivery: async () => ({ confirmed: true }),
+    settingsService: {
+      async getSettings() {
+        return { timezone: "America/Sao_Paulo" };
+      },
+    },
+    logger: { info() {}, warn() {}, error() {} },
+  });
+
+  return { service, createdLogs, enviados };
+}
+
 async function run() {
   await testDispatchAdHocRegistraSemPersistAsCampaign();
   await testDispatchAdHocComPersistAsCampaignMantemCampanhaVisivel();
+  await testFalhaAoGravarAncoraNaoEnviaNada();
   await testScheduleAdHocRegistraSemPersistAsCampaign();
   await testRamoLegadoDoWorkerRegistraEnvio();
 

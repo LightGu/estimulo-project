@@ -1,8 +1,12 @@
-const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const process = require("node:process");
+const {
+  buildFfmpegTimeoutMessage,
+  resolveTimeoutMs,
+  runFfmpegProcess,
+} = require("./ffmpeg-process");
 
 // O agente de transcricao so precisa do que e falado no video. Enviar o video
 // inteiro para a IA custa ~258 tokens por segundo (frames + audio), enquanto o
@@ -14,7 +18,6 @@ const DEFAULT_AUDIO_CODEC = "libmp3lame";
 const DEFAULT_AUDIO_BITRATE = "32k";
 const DEFAULT_AUDIO_CHANNELS = 1;
 const DEFAULT_AUDIO_SAMPLE_RATE = 16000;
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 
 function isAudioMimeType(value) {
   return Boolean(value && String(value).toLowerCase().startsWith("audio/"));
@@ -73,58 +76,31 @@ function buildFfmpegArgs(inputPath, outputPath, options = {}) {
   ];
 }
 
-function runFfmpeg(ffmpegPath, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(ffmpegPath, args, {
-      timeout: options.timeoutMs || DEFAULT_TIMEOUT_MS,
-      windowsHide: true,
-    });
-    let stderr = "";
-
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-
-    // Um "error" sem listener num stream e excecao nao capturada, que mata o
-    // processo inteiro. Os pipes do ffmpeg podem errar (EPIPE/ECONNRESET) quando o
-    // processo e derrubado pelo timeout no meio de um video longo - e a extracao
-    // roda dentro da API, entao isso levaria o servidor junto. O desfecho real
-    // vem de "error"/"close" no proprio child, aqui so evitamos o evento solto.
-    child.stderr.on("error", () => {});
-    child.stdout && child.stdout.on("error", () => {});
-
-    child.on("error", (error) => {
-      if (error.code === "ENOENT") {
-        reject(
-          new Error(
-            `ffmpeg nao encontrado em "${ffmpegPath}". Instale as dependencias do projeto (npm install) ou defina FFMPEG_PATH.`
-          )
-        );
-
-        return;
-      }
-
-      reject(error);
-    });
-
-    child.on("close", (code, signal) => {
-      if (code === 0) {
-        resolve();
-
-        return;
-      }
-
-      const details = stderr.trim().split("\n").slice(-5).join(" | ");
-
-      reject(
-        new Error(
-          `Falha ao extrair audio do video com ffmpeg (code ${code}${signal ? `, signal ${signal}` : ""})${
-            details ? `: ${details}` : ""
-          }`
-        )
-      );
-    });
+async function runFfmpeg(ffmpegPath, args, options = {}) {
+  const timeoutMs = resolveTimeoutMs(options);
+  const { code, signal, stderr, timedOut } = await runFfmpegProcess(ffmpegPath, args, {
+    ...options,
+    timeoutMs,
   });
+
+  if (code === 0) {
+    return;
+  }
+
+  // Estouro de tempo com mensagem propria. Antes o kill vinha da opcao `timeout`
+  // do spawn e chegava aqui como "code null, signal SIGTERM", indistinguivel de
+  // um ffmpeg morto por qualquer outro motivo.
+  if (timedOut) {
+    throw new Error(buildFfmpegTimeoutMessage("extrair o audio do video", timeoutMs));
+  }
+
+  const details = stderr.trim().split("\n").slice(-5).join(" | ");
+
+  throw new Error(
+    `Falha ao extrair audio do video com ffmpeg (code ${code}${signal ? `, signal ${signal}` : ""})${
+      details ? `: ${details}` : ""
+    }`
+  );
 }
 
 // Recebe o objeto retornado por downloadFromDrive e devolve o mesmo formato

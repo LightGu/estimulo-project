@@ -156,6 +156,12 @@ Worker de campanhas agendadas:
 npm run queue:campaign-trigger:worker
 ```
 
+Worker de geracao de legendas (Etapa 2):
+
+```bash
+npm run queue:campaign-captions:worker
+```
+
 Worker de disparo de conteudo:
 
 ```bash
@@ -534,6 +540,7 @@ O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes, i
 |---|---|
 | `npm run api` | Sobe a API Express e serve o painel em `public/`. |
 | `npm run queue:campaign-trigger:worker` | Processa campanhas agendadas e cria jobs de disparo. |
+| `npm run queue:campaign-captions:worker` | Gera as legendas da Etapa 2 de uma campanha e, se a revisao humana estiver desligada, confirma o disparo. |
 | `npm run queue:dispatch:worker` | Executa envio de videos/conteudos pela Evolution API. |
 | `npm run queue:dispatch-review-timeout:worker` | Trata campanhas aguardando revisao/manual timeout de legendas. |
 | `npm run queue:dispatch-failure-retry:worker` | Reprocessa falhas elegiveis de dispatch. |
@@ -541,7 +548,7 @@ O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes, i
 | `npm run queue:group-sync:worker` | Sincroniza grupos da Evolution API. |
 | `npm run queue:drive-video-index:worker` | Indexa videos do Google Drive no catalogo. |
 
-Sem o worker de `mensagens-dispatch`, a tela de Disparador Pontual pode enfileirar envio sem que nada execute. Sem `dispatch-review-timeout`, campanhas que dependem de revisao/timeout automatico podem ficar paradas.
+Sem o worker de `mensagens-dispatch`, a tela de Disparador Pontual pode enfileirar envio sem que nada execute. Sem `dispatch-review-timeout`, campanhas que dependem de revisao/timeout automatico podem ficar paradas. Sem `campaign-captions`, campanhas de video despachadas ficam paradas em `gerando_legendas` - a geracao deixou de rodar dentro do processo da API justamente para sobreviver a restart, e agora depende desse worker estar de pe.
 
 ### Reenvio no boot: por que existem travas de atraso
 

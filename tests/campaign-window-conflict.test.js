@@ -202,7 +202,14 @@ async function testNoConflictWhenNoOverlappingWindow() {
 }
 
 async function testAdHocDispatchDoesNotReportUnconfirmedAsSent() {
+  // dispatchAdHoc passou a criar o log como "pendente" ANTES de enviar e a
+  // fecha-lo com o desfecho depois (ordem invertida por causa do incidente de
+  // 04/09/2026: antes enviava primeiro e, se a gravacao falhasse, as mensagens
+  // ficavam entregues sem nenhuma linha em `logs`). A garantia verificada aqui
+  // e' a mesma - uma recusa da Evolution nao pode virar "enviado" - mas agora
+  // se le no estado FINAL do log, nao no payload de criacao.
   const statuses = [];
+  const finalStatuses = [];
 
   const service = createMensagensService({
     groupsRepository: {
@@ -210,12 +217,19 @@ async function testAdHocDispatchDoesNotReportUnconfirmedAsSent() {
         return { id, nome: "Grupo", evolution_group_id: "120@g.us", segmento: "aviso", organization_id: "org-1" };
       },
     },
-    campaignsRepository: { async create(payload) { return { id: "campaign-1", ...payload }; } },
+    campaignsRepository: {
+      async create(payload) { return { id: "campaign-1", ...payload }; },
+      async update(id, payload) { return { id, ...payload }; },
+    },
     campaignGroupsRepository: { async associateGroup() { return {}; } },
     dispatchLogsRepository: {
       async createLog(payload) {
         statuses.push(payload.status);
         return { id: "log-1" };
+      },
+      async updateStatus(id, status, mensagemErro) {
+        finalStatuses.push({ id, status, mensagemErro });
+        return { id, status };
       },
     },
     // 200 com corpo de recusa: a Evolution responde assim quando nao entrega.
@@ -233,7 +247,12 @@ async function testAdHocDispatchDoesNotReportUnconfirmedAsSent() {
   assert.equal(result.enviados, 0);
   assert.equal(result.falhas, 1);
   assert.match(result.results[0].error, /instance not connected/);
-  assert.deepEqual(statuses, ["falhou"]);
+  // O log existe desde antes do envio, e por isso nasce pendente.
+  assert.deepEqual(statuses, ["pendente"]);
+  // E fecha em "falhou", com o motivo real da recusa - nunca "enviado".
+  assert.equal(finalStatuses.length, 1);
+  assert.equal(finalStatuses[0].status, "falhou");
+  assert.match(finalStatuses[0].mensagemErro, /instance not connected/);
 }
 
 async function testQueuedAdHocDoesNotReportUnconfirmedAsSent() {
@@ -300,8 +319,27 @@ function buildScheduleAdHocHarness(overrides = {}) {
   const enqueued = [];
   const logs = [];
   const providerDeliveries = [];
+  // Deposito de anexo em memoria. O anexo deixou de viajar dentro do job e
+  // passou pelo spool (src/services/media-spool.js); sem substituir isto aqui, o
+  // teste abriria conexao com o Redis de verdade - e como a conexao do projeto
+  // usa `maxRetriesPerRequest: null`, ele ficaria esperando para sempre em vez
+  // de falhar.
+  const spooled = new Map();
 
   const service = createMensagensService({
+    putMediaInSpool: async (content, options = {}) => {
+      const spoolKey = `spool-${spooled.size + 1}`;
+      spooled.set(spoolKey, content);
+
+      return {
+        spool_key: spoolKey,
+        mime_type: content.mimeType || null,
+        file_name: content.fileName || null,
+        type: content.type || null,
+        base64_bytes: content.base64.length,
+        consumers: options.consumers,
+      };
+    },
     groupsRepository: {
       async findById(id) {
         return {
@@ -369,7 +407,7 @@ function buildScheduleAdHocHarness(overrides = {}) {
     logger: { error() {} },
   });
 
-  return { service, created, enqueued, logs, providerDeliveries };
+  return { service, created, enqueued, logs, providerDeliveries, spooled };
 }
 
 // dispatchAdHoc chama sendToEvolution de verdade (faria uma request HTTP real)
@@ -508,7 +546,7 @@ async function testDispatchAdHocWithMediaMarksPossuiMidiaWithoutPersistingFile()
 }
 
 async function testScheduleAdHocWithMediaMarksPossuiMidiaWithoutPersistingFile() {
-  const { service, created, enqueued } = buildScheduleAdHocHarness({});
+  const { service, created, enqueued, spooled } = buildScheduleAdHocHarness({});
 
   const result = await service.scheduleAdHoc({
     ...SCHEDULE_PAYLOAD,
@@ -521,9 +559,51 @@ async function testScheduleAdHocWithMediaMarksPossuiMidiaWithoutPersistingFile()
   assert.equal(created[0].possui_midia, true);
   assert.equal(created[0].link_conteudo, null);
   assert.equal(created[0].link_conteudo_tipo, null);
-  // O conteudo de midia (base64) chega ate o job de disparo, mas nunca passa
-  // por dispatchLogs/campaigns - so em memoria, no payload da fila.
-  assert.ok(enqueued.every((job) => job.content && job.content.base64 === "ZmFrZS12aWRlbw=="));
+
+  /*
+    Video com base64 tem o preparo (ffmpeg) e o enfileiramento jogados para
+    segundo plano de proposito, para nao segurar a resposta HTTP. A assercao
+    anterior deste teste iterava `enqueued` SEM esperar por isso: o array estava
+    vazio, e um `every` sobre array vazio e' verdadeiro - ou seja, ela nao
+    verificava nada. Aqui a espera e' explicita.
+  */
+  for (let tentativa = 0; tentativa < 100 && enqueued.length < 2; tentativa += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  assert.equal(enqueued.length, 2, "os dois grupos precisam ter sido enfileirados");
+
+  /*
+    O base64 NAO vai mais dentro do job.
+
+    A assercao anterior aqui era o contrario - exigia que cada job carregasse o
+    anexo inline. Era o comportamento real, e era o problema: um job por grupo,
+    cada um com o arquivo inteiro, e o worker reescrevia esse payload completo a
+    cada `job.updateData` (duas ou tres vezes por envio). Um video de 100 MB para
+    30 grupos escrevia da ordem de 9 GB no Redis - que roda com appendonly, ou
+    seja, gravava o anexo em disco, contrariando na pratica a exigencia de nao
+    persistir o arquivo.
+
+    Agora o anexo e' depositado UMA vez e os jobs levam so a referencia. O que
+    esta assercao guarda continua sendo o mesmo de antes - o arquivo nao passa
+    por dispatchLogs/campaigns -, com o acrescimo de que tambem nao passa pelo
+    payload do job.
+  */
+  assert.equal(spooled.size, 1, "o anexo deve ser depositado uma unica vez para os dois grupos");
+  assert.ok(
+    enqueued.every((job) => !job.content),
+    "nenhum job pode carregar o anexo inline"
+  );
+  assert.ok(
+    enqueued.every((job) => job.content_ref && job.content_ref.file_name === "aviso.mp4"),
+    "todo job precisa carregar a referencia do anexo"
+  );
+  assert.equal(
+    new Set(enqueued.map((job) => job.content_ref.spool_key)).size,
+    1,
+    "os dois grupos precisam apontar para a MESMA entrada"
+  );
+  assert.equal(enqueued[0].content_ref.consumers, 2, "o contador tem de saber quantos grupos vao ler o anexo");
 }
 
 async function testDispatchAdHocWithoutMediaKeepsPossuiMidiaFalse() {

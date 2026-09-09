@@ -245,6 +245,82 @@ Para remover o agendamento:
 npm run queue:campaign-trigger:test -- campaign-123 --remove
 ```
 
+## Fila campaign-captions
+
+Gera as legendas da Etapa 2 de uma campanha de video e, quando a revisao humana
+esta desligada nas configuracoes, confirma o disparo em seguida.
+
+### Por que ela existe
+
+Ate aqui a geracao era uma promise solta no processo da API, disparada por
+`campaigns.service.js -> dispatchCampaign`:
+
+```js
+campaignVideoCaptionsService
+  .generateCaptionsForCampaign(campaign.id)
+  .then(() => maybeAutoConfirmDispatch(...))
+  .catch((error) => console.error(...));
+```
+
+A campanha nascia em `gerando_legendas` e **so aquela promise podia tira-la de
+la**. Consequencias:
+
+- **Todo deploy abandonava a geracao em andamento.** O deploy recria o container
+  `api`; a promise morria com ele e a campanha ficava presa em
+  `gerando_legendas` para sempre - sem retry e sem estado de onde retomar. O
+  sweep de `dispatch-review-timeout` tambem nao a resgatava, porque
+  `auto_send_after_timeout` vem desligado por padrao (isso foi corrigido em
+  separado: hoje a deteccao roda sempre e notifica, mas notificar nao gera
+  legenda).
+- **O trabalho pesado rodava na API.** Download do Drive, ffmpeg, transcricao e
+  chamada ao Gemini por grupo, no mesmo event loop que atende requisicoes.
+- **Sem teto de concorrencia.** Duas campanhas despachadas juntas eram dois
+  lacos simultaneos, os dois consumindo a mesma cota diaria do Gemini.
+- **Erro so em `console.error`.** Sem tentativas, sem Sentry (o `createWorker`
+  manda `failed` para o Sentry; uma promise solta nao manda nada).
+
+### Desenho
+
+| Aspecto | Escolha | Por que |
+| --- | --- | --- |
+| `jobId` | `captions\|<campaign_id>` | A BullMQ recusa em silencio um `add()` com id repetido, e e' essa recusa que impede dois lacos de geracao sobre as mesmas linhas (dois cliques em "Disparar"). |
+| `attempts` | 3, backoff exponencial de 60s | A falha tipica e' cota do Gemini (429), que nao passa em segundos. |
+| `concurrency` | 1 (`CAMPAIGN_CAPTIONS_CONCURRENCY`) | A cota do Gemini e' global do projeto, nao por campanha: paralelizar nao termina antes, so esgota a cota mais cedo. |
+| `lockDuration` | 45 min (`CAMPAIGN_CAPTIONS_JOB_LOCK_MS`) | A geracao percorre os grupos em serie e cada um pode baixar video, extrair audio e chamar o Gemini. |
+
+### O que tornou o retry seguro
+
+Retentar so faz sentido porque `generateCaptionsForCampaign` aceita
+`{ resume: true }` e **preserva as linhas ja em `gerado`**.
+
+Sem isso o retry causaria dano em vez de resolver: `createManyPending` e' um
+upsert com `status: "pendente", erro_mensagem: null`, ou seja, a segunda
+tentativa devolveria a campanha inteira para a fila - gastando a cota do Gemini
+de novo e descartando texto que o usuario tivesse ajustado a mao na Etapa 2.
+`erro` e `processando` continuam voltando para a fila de proposito: o primeiro
+e' o que a retentativa existe para consertar, e o segundo e' uma geracao
+interrompida no meio, sem resultado a aproveitar.
+
+O `caption_id` das linhas preservadas segue reservado na retomada, para que um
+grupo nao receba a legenda que outro grupo da mesma campanha ja recebeu.
+
+### Desfechos do job
+
+| Situacao | Desfecho | Por que nao relanca |
+| --- | --- | --- |
+| Campanha apagada | `skipped` | Retentar tres vezes contra uma linha que nao existe. |
+| Campanha cancelada/ja confirmada na espera | `skipped` | Gerar legenda agora e' cota gasta para nada. |
+| Alguma linha em `erro` | `partial` | A linha esta registrada e visivel na Etapa 2, e `notifyAiError` ja avisou; relancar regeraria os videos que deram certo. |
+| Confirmacao automatica falhou | `completed`, `auto_confirm: "failed"` | A geracao terminou; o problema e' da janela de envio, e a tela permite confirmar a mao. |
+| Geracao incompleta sem erro | **relanca** | E' interrupcao no meio do laco - o unico caso em que retentar ajuda. Na ultima tentativa, notifica na tela. |
+
+### Se o Redis estiver fora
+
+`POST /campaigns/dispatch` responde **503** com `CAMPAIGN_CAPTIONS_ENQUEUE_FAILED`
+e o id da campanha. A campanha fica criada em `gerando_legendas`, e repetir o
+disparo depois resolve. Antes, essa mesma indisponibilidade produzia 200 seguido
+de silencio.
+
 ## Fila dispatch
 
 A fila `dispatch` processa os envios individuais de conteudos para grupos. Ela
@@ -361,6 +437,64 @@ const worker = createDispatchWorker({
   }),
 });
 ```
+
+## Anexo do disparo pontual: deposito em vez de payload
+
+O anexo do Disparador Pontual (upload de imagem/video) ia em base64 **dentro de
+`job.data.content`** na fila `mensagens-dispatch`. Isso multiplicava o arquivo de
+tres maneiras ao mesmo tempo:
+
+| Multiplicador | Por que | Efeito com video de 100 MB para 30 grupos |
+| --- | --- | --- |
+| Por grupo | Um job por grupo, cada um com a sua copia | ~3 GB |
+| Por atualizacao de estado | `job.updateData({ ...job.data, status })` reescreve o job data INTEIRO, e o worker chama isso 2-3x por envio | ~9 GB de escrita |
+| Em disco | O Redis da stack roda com `--appendonly yes` | tudo isso no AOF, no volume `redis-data` |
+
+### Sobre a exigencia de nao persistir o anexo
+
+O projeto tem uma decisao explicita de que o arquivo anexado nunca seja
+persistido em disco nem no banco. A terceira linha da tabela mostra que, **no
+caminho agendado, essa invariante ja estava quebrada** - em silencio e da pior
+forma possivel: N copias no AOF, mantidas enquanto o job existisse
+(`removeOnComplete` de 24h).
+
+E ela nao e' alcancavel nesse caminho: um envio marcado para daqui a horas exige
+que os bytes sobrevivam ao fim da requisicao, fora do processo da API.
+
+O que `src/services/media-spool.js` faz e' reduzir a exposicao ao minimo **sem
+introduzir um meio novo de persistencia** - continua sendo o mesmo Redis:
+
+- **uma** copia por arquivo, chaveada pelo SHA-256 do conteudo (grupos do mesmo
+  lote, e disparos diferentes do mesmo arquivo, compartilham a entrada);
+- as atualizacoes de estado do job nao reescrevem mais o anexo;
+- TTL explicito (`MEDIA_SPOOL_TTL_MS`, 12h por padrao);
+- apagado assim que o **ultimo** grupo do lote termina, por contador de
+  consumidores - sem esperar o TTL.
+
+O caminho **sincrono** (`POST /mensagens/dispatch`) nao passa por aqui: nele os
+bytes vao direto para a Evolution dentro da requisicao, que e' exatamente o
+comportamento que a exigencia descreve.
+
+### Decisoes que valem registrar
+
+- **Anexo ausente FALHA o envio.** Se a entrada expirou (job muito atrasado,
+  Redis limpo), o worker nao manda "so o texto": ele falha com motivo nomeando o
+  arquivo. Enviar a mensagem sem o anexo entregaria ao grupo algo diferente do
+  que foi agendado, e ninguem saberia.
+- **Ha teto de espera por comando** (`MEDIA_SPOOL_COMMAND_TIMEOUT_MS`, 10s). A
+  conexao compartilhada usa `maxRetriesPerRequest: null`, o que faz o ioredis
+  reenfileirar o comando indefinidamente com o Redis fora - sem teto, uma
+  indisponibilidade viraria espera eterna dentro do preparo, com os logs presos
+  em "pendente" e a tela girando para sempre.
+- **Jobs antigos continuam funcionando.** Um job enfileirado antes desta mudanca
+  ainda carrega `content.base64`, e o worker o usa quando presente. Sem isso, o
+  deploy cancelaria envios ja agendados.
+- **O resume continua sem recuperar o anexo.** `requeuePendingMessages` reenvia
+  so o texto quando o job original se perdeu do Redis durante uma pausa. O spool
+  nao muda isso de proposito: quem sabe a chave do anexo e' o job, e e'
+  justamente o job que se perdeu. Recuperar exigiria gravar a chave na campanha -
+  um ponteiro persistente para o arquivo no banco -, que e' exatamente a decisao
+  tomada em contrario.
 
 ## Fila google-drive-video-index
 

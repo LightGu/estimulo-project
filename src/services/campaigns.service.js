@@ -16,6 +16,7 @@ const { resolveLogScheduledAt } = require("./dispatch-staleness");
 const campaignTriggerQueueModule = require("../queues/campaign-trigger");
 const dispatchQueueModule = require("../queues/dispatch");
 const mensagensDispatchQueueModule = require("../queues/mensagens-dispatch");
+const campaignCaptionsQueueModule = require("../queues/campaign-captions");
 const {
   addCampaignTriggerJob,
   createPendingDispatchLogsForCampaign: defaultCreatePendingDispatchLogsForCampaign,
@@ -142,6 +143,12 @@ function createCampaignsService(dependencies = {}) {
   const mensagensServiceDependency = dependencies.mensagensService || defaultMensagensService;
   const whatsappInstancesServiceDependency = dependencies.whatsappInstancesService || defaultWhatsappInstancesService;
   const enqueueCampaignTrigger = dependencies.addCampaignTriggerJob || addCampaignTriggerJob;
+  // Resolvido no momento do uso, e nao desestruturado no topo do arquivo: ler
+  // addCampaignCaptionsJob de campaignCaptionsQueueModule ja cria a conexao
+  // BullMQ da fila, e este service e' importado tambem por contexto que nunca
+  // despacha campanha (relatorio, listagem).
+  const enqueueCampaignCaptions = (params) =>
+    (dependencies.addCampaignCaptionsJob || campaignCaptionsQueueModule.addCampaignCaptionsJob)(params);
   const requeuePendingDispatchJobs =
     dependencies.requeuePendingDispatchJobsForCampaign || defaultRequeuePendingDispatchJobsForCampaign;
 
@@ -315,51 +322,69 @@ function createCampaignsService(dependencies = {}) {
     };
   }
 
-  async function maybeAutoConfirmDispatch(campaignId, payload) {
-    let dispatchRules;
+  /*
+    A geracao de legendas vai para a fila campaign-captions, e nao para uma
+    promise solta neste processo.
 
-    try {
-      dispatchRules = await settingsServiceDependency.getDispatchRulesSettings();
-    } catch (error) {
-      return;
-    }
+    Como era: `generateCaptionsForCampaign(...).then(maybeAutoConfirmDispatch)`
+    com um `.catch(console.error)`. A campanha nascia em "gerando_legendas" e so
+    aquela promise podia tira-la de la - ou seja, qualquer restart do container
+    da api (todo deploy faz isso) no meio da geracao deixava a campanha presa
+    naquele status para sempre, sem retry e sem estado de onde retomar. Alem
+    disso o trabalho pesado (download do Drive, ffmpeg, Gemini por grupo) rodava
+    no event loop que atende as requisicoes, sem teto de concorrencia entre
+    campanhas. Ver o cabecalho de queues/campaign-captions.js.
 
-    if (dispatchRules.require_human_review !== false) {
-      return;
-    }
+    O payload do disparo viaja no job porque a confirmacao automatica acontece no
+    fim da geracao, minutos depois e em outro processo - confirmDispatch le
+    janela, jitter e timezone dele. A regra "require_human_review === false" que
+    ficava em maybeAutoConfirmDispatch mudou de lugar junto, para o worker; a
+    funcao aqui era o unico consumidor dela e foi removida. O sweep de review
+    timeout nunca a usou - ele chama confirmDispatch direto.
 
-    try {
-      await confirmDispatch(campaignId, payload);
-    } catch (error) {
-      console.error &&
-        console.error(
-          JSON.stringify({
-            event: "campaigns.auto_confirm_dispatch_failed",
-            campaign_id: campaignId,
-            error_message: error.message,
-          })
-        );
-    }
-  }
-
+    Se o enfileiramento falhar (Redis fora), o erro sobe: a campanha ja existe em
+    "gerando_legendas" e nada iria gerar as legendas dela: e' melhor o usuario
+    ver a falha agora do que receber 200 e uma campanha que nunca sai do lugar.
+    Antes essa mesma indisponibilidade produzia um 200 seguido de silencio.
+  */
   async function dispatchCampaign(payload = {}) {
     const result = await createAndQueue({ ...payload, defer_dispatch: true });
 
-    campaignVideoCaptionsServiceDependency
-      .generateCaptionsForCampaign(result.campaign.id)
-      .then(() => maybeAutoConfirmDispatch(result.campaign.id, payload))
-      .catch((error) => {
-        console.error &&
-          console.error(
-            JSON.stringify({
-              event: "campaign_video_captions.generation_failed",
-              campaign_id: result.campaign.id,
-              error_message: error.message,
-            })
-          );
-      });
+    let captionsJob;
 
-    return result;
+    try {
+      captionsJob = await enqueueCampaignCaptions({
+        campaign_id: result.campaign.id,
+        confirm_payload: payload,
+      });
+    } catch (error) {
+      // Codigo proprio para o controller responder 503 com texto acionavel, em
+      // vez de um 500 generico: a campanha ficou criada em "gerando_legendas" e
+      // o usuario precisa saber que basta repetir o disparo depois que o Redis
+      // voltar - nao ha nada a corrigir nos dados dela.
+      const enqueueError = new Error(
+        `Campanha ${result.campaign.id} foi criada, mas a geracao de legendas nao pode ser enfileirada: ` +
+          `${error && error.message}`
+      );
+      enqueueError.code = "CAMPAIGN_CAPTIONS_ENQUEUE_FAILED";
+      enqueueError.campaignId = result.campaign.id;
+
+      console.error &&
+        console.error(
+          JSON.stringify({
+            event: "campaigns.captions_enqueue_failed",
+            campaign_id: result.campaign.id,
+            error_message: error && error.message,
+          })
+        );
+
+      throw enqueueError;
+    }
+
+    return {
+      ...result,
+      captions_job: captionsJob && captionsJob.id ? { id: captionsJob.id, queue: captionsJob.queueName } : null,
+    };
   }
 
   async function confirmDispatch(campaignId, payload = {}, context = {}) {

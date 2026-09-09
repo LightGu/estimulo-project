@@ -973,18 +973,24 @@
         },
       });
 
-      // Atalhos "15min/30min/45min/1h/2h": substituem os periodos por uma unica
-      // janela curta [agora + N min, agora + N min + N min], contada a partir do
-      // clique - o proprio confirmDispatch (backend) desliza essa janela para
-      // frente de novo se a geracao de legendas consumir esse tempo antes da
-      // confirmacao (ver shiftDispatchWindowToConfirmation em campaigns.service.js).
+      // Atalhos "15min/30min/45min/1h/2h": o numero e a duracao TOTAL da janela,
+      // que comeca a contar ja no clique - [agora + 1min, agora + 1min + N min].
+      // O inicio e arredondado para o proximo minuto cheio porque o picker so tem
+      // resolucao de minuto e o agendamento exige inicio no futuro (mesma logica
+      // do disparo pontual em mensagens.html). O proprio confirmDispatch (backend)
+      // desliza essa janela para frente de novo se a geracao de legendas consumir
+      // esse tempo antes da confirmacao (ver shiftDispatchWindowToConfirmation em
+      // campaigns.service.js).
       function toDateInputValue(date) {
         return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
       }
 
-      function applyQuickPeriod(minutesFromNow) {
-        const start = new Date(Date.now() + minutesFromNow * 60000);
-        let end = new Date(start.getTime() + minutesFromNow * 60000);
+      function applyQuickPeriod(totalMinutes) {
+        const start = new Date(Date.now());
+        start.setSeconds(0, 0);
+        start.setMinutes(start.getMinutes() + 1);
+
+        let end = new Date(start.getTime() + totalMinutes * 60000);
         const endOfStartDay = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 23, 59);
 
         // Periodos nesta tela nao suportam cruzar a meia-noite (a validacao de

@@ -2,16 +2,22 @@
   Compressao do anexo do Disparador Pontual.
 
   O anexo sobe em base64 e segue para a Evolution no corpo JSON. Sem preparo, um
-  video grande era recusado no upload (413) e, quando passava, ia inteiro para
-  dentro de cada job da fila - um job por grupo, ou seja, o mesmo base64
-  duplicado N vezes no Redis.
+  video grande era recusado no upload (413).
+
+  A duplicacao por grupo que este cabecalho descrevia (o mesmo base64 dentro de
+  cada job da fila, um job por grupo) foi resolvida em separado: o anexo agora e'
+  depositado uma unica vez em src/services/media-spool.js e os jobs levam so a
+  referencia. Os testes daqui passaram a conferir isso tambem, porque "o que vai
+  para a fila e' o content preparado" mudou de forma - o que vai e' a referencia
+  ao content preparado.
 
   Estes testes fixam o contrato do preparo, sem rodar ffmpeg (o preparador e
   injetado):
 
     - o preparo roda UMA vez por disparo, nao uma vez por grupo;
-    - o que vai para a fila e para a Evolution e o content JA preparado;
-    - disparo so de texto nao invoca o preparo.
+    - o que a Evolution recebe e o que e' depositado no spool e o content JA
+      preparado;
+    - disparo so de texto nao invoca o preparo nem o deposito.
 */
 const assert = require("node:assert/strict");
 
@@ -26,9 +32,23 @@ function buildHarness(overrides = {}) {
   const prepareCalls = [];
   const statusUpdates = [];
   const plannedScheduleUpdates = [];
+  const spoolDeposits = [];
   let logs = [];
 
   const service = createMensagensService({
+    // Sem isto o teste falaria com o Redis de verdade - e como a conexao do
+    // projeto usa `maxRetriesPerRequest: null`, o comando ficaria pendurado.
+    putMediaInSpool: async (content, options = {}) => {
+      spoolDeposits.push({ content, consumers: options.consumers });
+
+      return {
+        spool_key: `spool-${spoolDeposits.length}`,
+        mime_type: content.mimeType || null,
+        file_name: content.fileName || null,
+        type: content.type || null,
+        base64_bytes: content.base64.length,
+      };
+    },
     groupsRepository: {
       async findById(id) {
         return {
@@ -129,7 +149,7 @@ function buildHarness(overrides = {}) {
     ...serviceOverrides,
   });
 
-  return { service, enqueued, sentParams, prepareCalls, statusUpdates, plannedScheduleUpdates };
+  return { service, enqueued, sentParams, prepareCalls, statusUpdates, plannedScheduleUpdates, spoolDeposits };
 }
 
 function buildVideoPayload(groupIds) {
@@ -192,10 +212,24 @@ async function testRespostaNaoEsperaPreparoDaMidia() {
   await flushBackground();
 
   assert.equal(harness.enqueued.length, 1, "o job entra na fila depois que o preparo conclui");
-  assert.equal(harness.enqueued[0].params.content.base64, PREPARED_BASE64);
+  // O video preparado vai para o deposito, e o job leva a referencia - nao o
+  // base64. Ver o cabecalho deste arquivo.
+  assert.equal(harness.spoolDeposits.length, 1);
+  assert.equal(harness.spoolDeposits[0].content.base64, PREPARED_BASE64, "o que e' depositado e' o video preparado");
+  assert.equal(harness.enqueued[0].params.content, null, "o job nao pode carregar o anexo inline");
+  assert.equal(harness.enqueued[0].params.content_ref.spool_key, "spool-1");
 }
 
-// Prova que o base64 cru nao entra no Redis: o job carrega o content preparado.
+/*
+  O base64 CRU nao chega a fila - e hoje nenhum base64 chega.
+
+  O nome e o objetivo deste teste continuam os mesmos; o que mudou e' o mecanismo
+  que o cumpre. Antes ele conferia que o job carregava o content JA preparado (o
+  base64 comprimido, e nao o original) - o que ainda deixava um base64 por job no
+  Redis. Agora o anexo preparado e' depositado uma unica vez e os jobs levam a
+  referencia, entao o teste confere as duas pontas: o deposito recebeu o video
+  preparado, e nenhum job carrega anexo inline.
+*/
 async function testAgendamentoEnfileiraContentPreparado() {
   const harness = buildHarness();
   const windowStart = new Date(Date.now() + 60 * 60 * 1000);
@@ -215,8 +249,21 @@ async function testAgendamentoEnfileiraContentPreparado() {
   assert.equal(harness.prepareCalls.length, 1, "o preparo deve rodar uma vez antes de enfileirar");
   assert.ok(harness.enqueued.length >= 2, "cada grupo deve gerar um job");
 
+  assert.equal(harness.spoolDeposits.length, 1, "um deposito para o lote inteiro, nao um por grupo");
+  assert.equal(
+    harness.spoolDeposits[0].content.base64,
+    PREPARED_BASE64,
+    "o que e' depositado tem de ser o video preparado, nao o original"
+  );
+  assert.equal(
+    harness.spoolDeposits[0].consumers,
+    harness.enqueued.length,
+    "o contador do deposito tem de conhecer todos os grupos, senao o primeiro a enviar apagaria o anexo dos outros"
+  );
+
   for (const job of harness.enqueued) {
-    assert.equal(job.params.content.base64, PREPARED_BASE64, "o job nao pode carregar o base64 original");
+    assert.equal(job.params.content, null, "nenhum job pode carregar anexo inline");
+    assert.equal(job.params.content_ref.spool_key, "spool-1", "todos apontam para o mesmo deposito");
   }
 }
 
@@ -251,7 +298,12 @@ async function testEnvioAssincronoEnfileiraContentPreparado() {
 
   assert.equal(harness.prepareCalls.length, 1);
   assert.equal(harness.enqueued.length, 1);
-  assert.equal(harness.enqueued[0].params.content.base64, PREPARED_BASE64);
+  // Mesma mudanca de mecanismo do teste de agendamento: o video preparado vai
+  // para o deposito e o job leva a referencia.
+  assert.equal(harness.spoolDeposits.length, 1);
+  assert.equal(harness.spoolDeposits[0].content.base64, PREPARED_BASE64);
+  assert.equal(harness.enqueued[0].params.content, null);
+  assert.equal(harness.enqueued[0].params.content_ref.spool_key, "spool-1");
 }
 
 /*

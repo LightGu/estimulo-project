@@ -76,7 +76,16 @@ function createWorker(name, processor, options = {}) {
 
   worker.on("failed", (job, error) => {
     Sentry.captureException(error, {
-      tags: { queue: name, kind: "job_failed" },
+      tags: {
+        queue: name,
+        kind: "job_failed",
+        // Como TAG (e nao extra): tag e' filtravel e agrupavel no Sentry, e este
+        // e' o identificador que liga o erro a linha do relatorio e ao log dos
+        // workers. Sem ele, um erro no Sentry exigia reconstruir o trio
+        // campanha/grupo/video a partir de campos que mudam de nome entre as
+        // camadas. Ver src/utils/dispatch-ref.js.
+        dispatch_ref: (job && job.data && job.data.dispatch_ref) || undefined,
+      },
       extra: { job_id: job && job.id, job_data: job && job.data, attempts_made: job && job.attemptsMade },
     });
   });

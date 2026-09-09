@@ -176,7 +176,14 @@
       const state = {
         organizations: [],
         groups: [],
+        // `logs` agora guarda apenas a PAGINA atual. Antes guardava o periodo
+        // inteiro, porque a rota devolvia tudo e a paginacao acontecia aqui com
+        // slice() - o custo completo era pago para exibir 100 linhas.
         logs: [],
+        // Total e resumo vem do servidor, contados sobre o filtro inteiro. Sem
+        // isso os cartoes passariam a contar so a pagina exibida.
+        total: 0,
+        summary: null,
         timezone: null,
         currentPage: 1,
       };
@@ -360,16 +367,63 @@
         if (group !== "todos") params.set("group_id", group);
         if (status !== "todos") params.set("status", status);
 
-        state.logs = await requestJson(`/reports/dispatches?${params.toString()}`);
+        params.set("limit", String(PAGE_SIZE));
+        params.set("offset", String((state.currentPage - 1) * PAGE_SIZE));
+
+        const payload = await requestJson(`/reports/dispatches?${params.toString()}`);
+
+        state.logs = payload.data || [];
+        state.total = (payload.pagination && payload.pagination.total) || state.logs.length;
+        state.summary = payload.summary || null;
       }
 
-      function renderSummary(rows) {
-        const counts = { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0, cancelado: 0 };
-        rows.forEach((r) => {
-          if (counts[r.status] !== undefined) counts[r.status]++;
-        });
+      // Busca TODAS as paginas do filtro atual. Usada so pela exportacao CSV,
+      // que por definicao precisa do conjunto completo - e o unico lugar que
+      // ainda justifica trazer tudo, agora explicitamente e em lotes.
+      async function fetchAllLogsForExport() {
+        const dataInicio = document.getElementById("dataInicio").value;
+        const dataFim = document.getElementById("dataFim").value;
+        const org = document.getElementById("orgFilter").value;
+        const group = document.getElementById("groupFilter").value;
+        const status = document.getElementById("statusFilter").value;
+
+        const base = new URLSearchParams();
+        if (dataInicio) base.set("start_date", dataInicio);
+        if (dataFim) base.set("end_date", dataFim);
+        if (org !== "todas") base.set("organization_id", org);
+        if (group !== "todos") base.set("group_id", group);
+        if (status !== "todos") base.set("status", status);
+
+        const EXPORT_PAGE_SIZE = 500;
+        const rows = [];
+        let offset = 0;
+
+        for (;;) {
+          const params = new URLSearchParams(base);
+          params.set("limit", String(EXPORT_PAGE_SIZE));
+          params.set("offset", String(offset));
+
+          const payload = await requestJson(`/reports/dispatches?${params.toString()}`);
+          const page = payload.data || [];
+
+          rows.push(...page);
+          offset += page.length;
+
+          if (!page.length || !(payload.pagination && payload.pagination.has_more)) {
+            break;
+          }
+        }
+
+        return rows;
+      }
+
+      // O resumo vem contado pelo servidor sobre o filtro INTEIRO. Contar
+      // `rows` aqui passaria a refletir apenas a pagina exibida desde que a
+      // paginacao virou server-side.
+      function renderSummary() {
+        const counts = state.summary || { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0, cancelado: 0 };
         const cards = [
-          { label: "Total no período", value: rows.length, bar: "var(--brand-blue)" },
+          { label: "Total no período", value: state.total, bar: "var(--brand-blue)" },
           { label: "Enviados", value: counts.enviado, bar: "var(--success)" },
           { label: "Aguardando envio", value: counts.pendente + counts.processando, bar: "var(--warning)" },
           { label: "Erros", value: counts.erro + counts.falhou, bar: "var(--danger)" },
@@ -386,29 +440,28 @@
           .join("");
       }
 
-      function totalPages(rows) {
-        return Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      function totalPages() {
+        return Math.max(1, Math.ceil(state.total / PAGE_SIZE));
       }
 
-      function renderPager(rows) {
-        const pages = totalPages(rows);
-        if (state.currentPage > pages) state.currentPage = pages;
+      function renderPager() {
+        const pages = totalPages();
         document.getElementById("pageLabel").textContent = `Página ${state.currentPage} de ${pages}`;
         document.getElementById("prevPageButton").disabled = state.currentPage <= 1;
         document.getElementById("nextPageButton").disabled = state.currentPage >= pages;
-        document.getElementById("pagerControls").style.display = rows.length > PAGE_SIZE ? "flex" : "none";
+        document.getElementById("pagerControls").style.display = state.total > PAGE_SIZE ? "flex" : "none";
       }
 
       function renderTable(rows) {
-        document.getElementById("resultCount").textContent = `${rows.length} registro(s)`;
-        renderPager(rows);
+        // Conta o total do filtro, nao o tamanho da pagina.
+        document.getElementById("resultCount").textContent = `${state.total} registro(s)`;
+        renderPager();
         if (!rows.length) {
           document.getElementById("reportBody").innerHTML = `<tr><td colspan="9"><div class="empty-state"><strong>Nenhum registro encontrado para os filtros aplicados</strong></div></td></tr>`;
           return;
         }
-        const start = (state.currentPage - 1) * PAGE_SIZE;
-        const pageRows = rows.slice(start, start + PAGE_SIZE);
-        document.getElementById("reportBody").innerHTML = pageRows
+        // `rows` JA e' a pagina: o recorte acontece no banco (range), nao aqui.
+        document.getElementById("reportBody").innerHTML = rows
           .map((r) => {
             const organizacao = r.groups?.organizations?.nome || "—";
             const grupo = r.groups?.nome || "—";
@@ -437,7 +490,7 @@
         writeFiltersToUrl();
         try {
           await fetchLogs();
-          renderSummary(state.logs);
+          renderSummary();
           renderTable(state.logs);
         } catch (error) {
           renderLoadError(error);
@@ -508,17 +561,19 @@
         }
       });
 
-      document.getElementById("prevPageButton").addEventListener("click", () => {
+      // Trocar de pagina agora busca a pagina no servidor, em vez de recortar
+      // um array que ja estava todo em memoria.
+      document.getElementById("prevPageButton").addEventListener("click", async () => {
         if (state.currentPage > 1) {
           state.currentPage--;
-          renderTable(state.logs);
+          await renderAll();
         }
       });
 
-      document.getElementById("nextPageButton").addEventListener("click", () => {
-        if (state.currentPage < totalPages(state.logs)) {
+      document.getElementById("nextPageButton").addEventListener("click", async () => {
+        if (state.currentPage < totalPages()) {
           state.currentPage++;
-          renderTable(state.logs);
+          await renderAll();
         }
       });
 
@@ -527,7 +582,11 @@
         return /[",\n;]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
       }
 
-      document.getElementById("exportCsvButton").addEventListener("click", () => {
+      // A exportacao precisa do conjunto INTEIRO do filtro, nao da pagina
+      // exibida. Com a paginacao no servidor, `state.logs` passou a ser so a
+      // pagina atual - exportar dali geraria uma planilha com 100 linhas sem
+      // avisar. Busca todas as paginas explicitamente.
+      document.getElementById("exportCsvButton").addEventListener("click", async () => {
         const headers = [
           "Data/Hora",
           "Horário envio",
@@ -544,8 +603,21 @@
           "Detalhe do cancelamento",
           "ID da mensagem no provedor",
         ];
+        let rows;
+
+        try {
+          window.estimuloShowLoading && window.estimuloShowLoading();
+          rows = await fetchAllLogsForExport();
+        } catch (error) {
+          window.estimuloHideLoading && window.estimuloHideLoading();
+          renderLoadError(error);
+          return;
+        }
+
+        window.estimuloHideLoading && window.estimuloHideLoading();
+
         const lines = [headers.join(";")].concat(
-          state.logs.map((r) =>
+          rows.map((r) =>
             [
               formatDateTime(r.criado_em),
               formatDateTime(r.horario_envio_planejado),

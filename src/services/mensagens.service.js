@@ -14,6 +14,7 @@ const defaultWhatsappInstancesRepository = require("../repositories/whatsapp-ins
 const defaultWhatsappInstancesService = require("./whatsapp-instances.service");
 const { formatAdHocCampaignName, formatDateOnlyInTimezone } = require("../utils/campaign-naming");
 const { prepareAdHocMediaContent } = require("./adhoc-media");
+const { putMediaInSpool } = require("./media-spool");
 
 const CLASSIFICACOES = ["evento", "credito", "pesquisa", "aviso", "capacitacao", "outro"];
 
@@ -67,6 +68,46 @@ function normalizeContent(payload = {}) {
   return { texto, content, tipoConteudo: link ? tipoConteudo : null };
 }
 
+// Teto de envios simultaneos do disparo pontual sincrono.
+//
+// Antes era Promise.all sobre a lista inteira de grupos: 30 grupos = 30
+// requisicoes concorrentes a Evolution, cada uma serializando a MESMA midia em
+// base64 (ate ~136 MB por payload). Dois problemas de uma vez - pico de heap
+// multiplicado pelo numero de grupos, e uma rajada simultanea pelo mesmo numero,
+// que e' o padrao que o WhatsApp trata como spam. O jitter existe no caminho de
+// campanha exatamente para evitar isso, e aqui nao existia teto nenhum.
+const DEFAULT_ADHOC_DISPATCH_CONCURRENCY = 2;
+
+function resolveAdHocDispatchConcurrency() {
+  const configured = Number(process.env.ADHOC_DISPATCH_CONCURRENCY);
+
+  if (!Number.isFinite(configured) || configured < 1) {
+    return DEFAULT_ADHOC_DISPATCH_CONCURRENCY;
+  }
+
+  return Math.trunc(configured);
+}
+
+// Executa `worker` sobre `items` com no maximo `limit` em voo, preservando a
+// ordem do resultado. Nunca rejeita: quem chama trata o desfecho item a item
+// (aqui, gravando "enviado"/"falhou" no log daquele grupo).
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  async function runNext() {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, runNext));
+
+  return results;
+}
+
 function normalizeClassificacao(payload = {}) {
   const classificacao = typeof payload.tipo === "string" ? payload.tipo.trim() : "";
 
@@ -106,6 +147,7 @@ function createMensagensService(dependencies = {}) {
   // Recomprime/remuxa o anexo de video antes de qualquer envio ou enfileiramento.
   // Injetavel para os testes nao dependerem do ffmpeg.
   const prepareMedia = dependencies.prepareAdHocMediaContent || prepareAdHocMediaContent;
+  const depositMedia = dependencies.putMediaInSpool || putMediaInSpool;
 
   async function resolveGroups(groupIds) {
     return Promise.all(groupIds.map((groupId) => repository.findById(groupId)));
@@ -158,6 +200,38 @@ function createMensagensService(dependencies = {}) {
     const nomes = groups.filter((group) => ineligibleSet.has(group.id)).map((group) => group.nome || group.id);
 
     throw new Error(`Grupo(s) sem vinculo com todos os numeros de WhatsApp ativos: ${nomes.join(", ")}`);
+  }
+
+  // Fecha o log pendente de um grupo do disparo pontual sincrono com o desfecho
+  // real do envio.
+  //
+  // Best-effort, e por um motivo especifico: quando esta funcao roda, a mensagem
+  // ja esta (ou nao esta) no grupo, e esse fato nao muda mais. Propagar um erro
+  // de banco daqui transformaria um envio bem-sucedido em erro na resposta.
+  // Mas a falha nao pode ser muda: um log preso em "pendente" nao tem job
+  // apontando para ele e nenhum worker vai alcanca-lo, entao o evento abaixo e'
+  // a unica pista de que aquele envio precisa de conciliacao manual.
+  async function updateAdHocLogOutcome(log, status, mensagemErro, whatsappInstanceId) {
+    if (!log || !log.id || typeof dispatchLogs.updateStatus !== "function") {
+      return;
+    }
+
+    try {
+      await dispatchLogs.updateStatus(log.id, status, mensagemErro || null, whatsappInstanceId || null);
+    } catch (error) {
+      logger.error &&
+        logger.error(
+          JSON.stringify({
+            event: "mensagens.ad_hoc_log_outcome_failed",
+            dispatch_log_id: log.id,
+            campaign_id: log.campaign_id || null,
+            group_id: log.group_id || null,
+            intended_status: status,
+            note: "log ficou preso em pendente apesar do envio ter desfecho conhecido; exige conciliacao manual",
+            error_message: error?.message,
+          })
+        );
+    }
   }
 
   // Best-effort: a mensagem ja saiu e o log ja registra "enviado". Perder a
@@ -223,6 +297,13 @@ function createMensagensService(dependencies = {}) {
   // reenvia so o texto, sem a midia, silenciosamente. Aceito como tradeoff:
   // e um caso raro (o job so desaparece do Redis nesse meio tempo) e
   // consistente com a exigencia de nao persistir o arquivo.
+  //
+  // O spool (services/media-spool.js) NAO muda isto, de proposito. Ele guarda o
+  // anexo por TTL, mas quem sabe a chave e' o job - e e' justamente o job que se
+  // perdeu neste cenario. Recuperar exigiria gravar a chave do anexo na
+  // campanha, ou seja, um ponteiro persistente para o arquivo no banco: e'
+  // exatamente a decisao que o usuario tomou em contrario, e nao se reabre sem
+  // pedido explicito.
   async function requeuePendingMessages(campaign, pendingLogs) {
     if (!Array.isArray(pendingLogs) || pendingLogs.length === 0) {
       return [];
@@ -397,11 +478,11 @@ function createMensagensService(dependencies = {}) {
     pendentes ja foram criados pelo chamador, entao a tela tem o que acompanhar
     por getDispatchStatus desde o primeiro instante.
 
-    LIMITACAO CONHECIDA: o anexo so existe na RAM deste processo (exigencia de
-    nunca persistir o arquivo). Se a API reiniciar durante a compressao, o envio
-    se perde e os logs ficam pendentes ate a trava de atraso do worker
-    (resolveJobStaleReason) cancela-los. Consistente com o tradeoff ja assumido
-    em requeuePendingMessages.
+    LIMITACAO CONHECIDA: ate o deposito no spool, o anexo so existe na RAM deste
+    processo. Se a API reiniciar DURANTE a compressao, o envio se perde e os logs
+    ficam pendentes ate a trava de atraso do worker (resolveJobStaleReason)
+    cancela-los. Depois do deposito a janela fecha: os bytes ja nao dependem
+    deste processo.
   */
   async function prepareMediaAndEnqueue({ content, logIds, enqueueJobs, onError }) {
     let prepared = content;
@@ -428,8 +509,48 @@ function createMensagensService(dependencies = {}) {
       return;
     }
 
+    /*
+      Deposita o anexo UMA vez e passa a referencia aos jobs, em vez de copiar o
+      base64 para dentro de cada um.
+
+      Antes, cada grupo do lote levava o arquivo inteiro no seu job data - e o
+      worker reescrevia esse payload completo a cada `job.updateData`, duas ou
+      tres vezes por envio. Um video de 100 MB para 30 grupos escrevia da ordem
+      de 9 GB no Redis (que roda com appendonly) por disparo. Ver
+      services/media-spool.js para o desenho e para o que isso significa perante
+      a exigencia de nao persistir o anexo.
+
+      Falha no deposito nao e' silenciada: sem a referencia os jobs sairiam sem
+      anexo, entregando ao grupo algo diferente do que foi agendado.
+    */
+    let mediaReference = null;
+
+    if (prepared && typeof prepared.base64 === "string" && prepared.base64.length > 0) {
+      try {
+        mediaReference = await depositMedia(prepared, { consumers: logIds.length || 1 });
+      } catch (error) {
+        logger.error &&
+          logger.error(
+            JSON.stringify({
+              event: "mensagens.media_spool_failed",
+              error_message: error?.message,
+            })
+          );
+
+        const mensagemErro = `Falha ao preparar o anexo para envio: ${error?.message || "erro desconhecido"}`;
+
+        await failPendingLogs(logIds, mensagemErro);
+
+        if (typeof onError === "function") {
+          await onError(error);
+        }
+
+        return;
+      }
+    }
+
     try {
-      await enqueueJobs(prepared);
+      await enqueueJobs(prepared, mediaReference);
     } catch (error) {
       // O enfileiramento em si falhou (Redis fora do ar, por exemplo). Sem isto
       // os logs ficariam "pendente" para sempre, do mesmo jeito que numa falha
@@ -487,23 +608,85 @@ function createMensagensService(dependencies = {}) {
         ? null
         : (await resolveInstance(undefined, { whatsappInstancesRepository: whatsappInstances })).instance?.id || null;
 
-    const results = await Promise.all(
-      groupIds.map(async (groupId) => {
+    // ORDEM CRITICA: registrar antes de enviar.
+    //
+    // Antes, esta funcao enviava para todos os grupos e SO DEPOIS criava a
+    // campanha ancora e os logs, dentro de um try/catch que apenas registrava o
+    // evento. Quando o INSERT falhava, as mensagens ja estavam nos grupos e
+    // nenhuma linha existia em `logs` - e a resposta HTTP ainda dizia
+    // "enviados: N". Aconteceu duas vezes em producao (04/09/2026, 21:13 e
+    // 21:45 UTC): a constraint de campaigns.classificacao nao aceitava
+    // "capacitacao", que a tela oferece (ver migration 202609070001). Dois
+    // disparos entregues e invisiveis no relatorio.
+    //
+    // Agora a ancora e os logs "pendente" nascem primeiro. Se essa gravacao
+    // falhar, o erro sobe e NADA e enviado - o pior caso passa a ser um envio
+    // que nao aconteceu, em vez de um envio que aconteceu e ninguem registrou.
+    // Mesma ordem que dispatchAdHocAsync e scheduleAdHoc ja usavam.
+    const groups = await resolveGroups(groupIds);
+    const campaign = await createAdHocCampaign({
+      payload,
+      texto,
+      link: content?.url,
+      linkConteudoTipo: tipoConteudo,
+      possuiMidia: Boolean(content),
+      // "programado" enquanto os envios acontecem; vira "concluido" no fim.
+      // Antes nascia "concluido" porque a campanha era criada depois de tudo.
+      status: "programado",
+      hidden: !payload.persist_as_campaign,
+    });
+    const plannedAt = new Date().toISOString();
+    const entries = [];
+
+    for (const [index, group] of groups.entries()) {
+      const groupId = groupIds[index];
+
+      // Grupo invalido continua sendo falha DAQUELE grupo (e nao da requisicao
+      // inteira), como antes - mas agora com log, para nao virar envio que
+      // ninguem pediu e nao aparece em lugar nenhum.
+      const invalidReason = !group
+        ? "Grupo nao encontrado"
+        : !group.evolution_group_id
+          ? "Grupo sem evolution_group_id"
+          : !group.segmento
+            ? "Grupo sem classificacao (segmento)"
+            : null;
+
+      if (group) {
+        await campaignGroups.associateGroup(campaign.id, group.id, group.organization_id);
+      }
+
+      const log = group
+        ? await dispatchLogs.createLog({
+            campaign_id: campaign.id,
+            group_id: group.id,
+            video_id: null,
+            status: invalidReason ? "falhou" : "pendente",
+            mensagem_erro: invalidReason,
+            horario_envio_planejado: plannedAt,
+            usuario_responsavel_id: context.userId || null,
+            whatsapp_instance_id: resolvedInstanceId,
+          })
+        : null;
+
+      entries.push({ group, groupId, log, invalidReason });
+    }
+
+    const results = await mapWithConcurrency(
+      entries,
+      resolveAdHocDispatchConcurrency(),
+      async ({ group, groupId, log, invalidReason }) => {
+        if (invalidReason) {
+          return {
+            group_id: groupId,
+            group_nome: group?.nome,
+            organization_id: group?.organization_id,
+            ok: false,
+            error: invalidReason,
+          };
+        }
+
         try {
-          const group = await repository.findById(groupId);
-
-          if (!group) {
-            return { group_id: groupId, ok: false, error: "Grupo nao encontrado" };
-          }
-
-          if (!group.evolution_group_id) {
-            return { group_id: groupId, group_nome: group.nome, ok: false, error: "Grupo sem evolution_group_id" };
-          }
-
-          if (!group.segmento) {
-            return { group_id: groupId, group_nome: group.nome, ok: false, error: "Grupo sem classificacao (segmento)" };
-          }
-
           const sendParams = { groupId: group.evolution_group_id };
 
           if (texto) {
@@ -524,6 +707,9 @@ function createMensagensService(dependencies = {}) {
             context: { group_id: groupId, group_nome: group.nome },
           });
 
+          await updateAdHocLogOutcome(log, "enviado", null, resolvedInstanceId);
+          await recordProviderDelivery(log && log.id, response);
+
           return {
             group_id: groupId,
             group_nome: group.nome,
@@ -531,77 +717,45 @@ function createMensagensService(dependencies = {}) {
             response,
             organization_id: group.organization_id,
             whatsapp_instance_id: resolvedInstanceId,
+            dispatch_log_id: (log && log.id) || null,
           };
         } catch (error) {
-          const group = await repository.findById(groupId).catch(() => null);
+          const mensagemErro = error?.message || "Falha ao enviar";
+
+          await updateAdHocLogOutcome(log, "falhou", mensagemErro, resolvedInstanceId);
+
           return {
             group_id: groupId,
             group_nome: group?.nome,
             organization_id: group?.organization_id,
             ok: false,
-            error: error?.message || "Falha ao enviar",
+            error: mensagemErro,
+            dispatch_log_id: (log && log.id) || null,
           };
         }
-      })
+      }
     );
 
     const enviados = results.filter((result) => result.ok).length;
     const falhas = results.filter((result) => !result.ok).length;
 
-    // Todo e qualquer envio precisa aparecer no relatorio operacional - por isso este bloco
-    // NAO e mais condicionado a payload.persist_as_campaign. Antes, uma chamada
-    // ao POST /mensagens/dispatch sem essa flag (qualquer cliente que nao fosse
-    // a tela mensagens.html, que e a unica que a envia) entregava a mensagem no
-    // WhatsApp e nao gravava linha nenhuma em `logs`: o envio chegava no grupo e
-    // sumia do relatorio. A flag agora decide apenas se a campanha ad-hoc fica
-    // visivel como campanha na UI (persist_as_campaign=true), nunca se o disparo
-    // e registrado.
-    {
-      try {
-        const campaign = await createAdHocCampaign({
-          payload,
-          texto,
-          link: content?.url,
-          linkConteudoTipo: tipoConteudo,
-          possuiMidia: Boolean(content),
-          status: "concluido",
-          hidden: !payload.persist_as_campaign,
-        });
-
-        await Promise.all(
-          results.map(async (result) => {
-            if (!result.group_id) {
-              return;
-            }
-
-            await campaignGroups.associateGroup(campaign.id, result.group_id, result.organization_id);
-            const log = await dispatchLogs.createLog({
-              campaign_id: campaign.id,
-              group_id: result.group_id,
-              video_id: null,
-              status: result.ok ? "enviado" : "falhou",
-              mensagem_erro: result.ok ? null : result.error,
-              usuario_responsavel_id: context.userId || null,
-              whatsapp_instance_id: result.whatsapp_instance_id || null,
-            });
-
-            if (result.ok) {
-              await recordProviderDelivery(log && log.id, result.response);
-            }
-          })
-        );
-      } catch (error) {
+    // Fecha a campanha ancora. Best-effort de proposito: os logs (que sao a
+    // fonte do relatorio) ja carregam o desfecho de cada grupo, entao falhar
+    // aqui atrasa o rotulo da campanha, nao perde registro de envio.
+    if (typeof campaigns.update === "function") {
+      await campaigns.update(campaign.id, { status: "concluido" }).catch((error) => {
         logger.error &&
           logger.error(
             JSON.stringify({
-              event: "mensagens.persist_ad_hoc_campaign_failed",
+              event: "mensagens.ad_hoc_campaign_close_failed",
+              campaign_id: campaign.id,
               error_message: error?.message,
             })
           );
-      }
+      });
     }
 
-    return { enviados, falhas, results };
+    return { campaign_id: campaign.id, enviados, falhas, results };
   }
 
   // Envio imediato assincrono (usado pelo botao "Enviar teste para este grupo").
@@ -693,7 +847,7 @@ function createMensagensService(dependencies = {}) {
       });
     }
 
-    async function enqueueJobs(preparedContent) {
+    async function enqueueJobs(preparedContent, mediaReference) {
       // O horario planejado e reescrito depois do preparo: a trava de atraso do
       // worker (resolveJobStaleReason) compara o job com este horario, e uma
       // compressao de varios minutos faria um job recem-criado ja nascer
@@ -716,7 +870,10 @@ function createMensagensService(dependencies = {}) {
             internal_group_id: group.id,
             group_nome: group.nome,
             message: texto || "",
-            content: preparedContent || null,
+            // Anexo pelo spool (uma copia por lote) em vez do base64 dentro de
+            // cada job - ver services/media-spool.js.
+            content: mediaReference ? null : preparedContent || null,
+            content_ref: mediaReference,
             scheduled_at: dispatchAt,
             dispatch_log_id: entry.dispatch_log_id,
             whatsapp_instance_id: whatsappInstanceId,
@@ -975,7 +1132,11 @@ function createMensagensService(dependencies = {}) {
       });
     }
 
-    async function enqueueJobs(preparedContent) {
+    // `mediaReference` aponta para o anexo depositado uma unica vez no spool; o
+    // base64 nao entra no job data. Quando nao ha anexo (texto, ou link por URL,
+    // que o worker resolve sozinho) a referencia e' nula e `content` segue como
+    // antes.
+    async function enqueueJobs(preparedContent, mediaReference) {
       for (let index = 0; index < schedule.length; index += 1) {
         const item = schedule[index];
         const group = groups[index];
@@ -987,7 +1148,8 @@ function createMensagensService(dependencies = {}) {
             internal_group_id: group.id,
             group_nome: group.nome,
             message: texto,
-            content: preparedContent,
+            content: mediaReference ? null : preparedContent,
+            content_ref: mediaReference,
             // Nao re-estampado (ao contrario do disparo imediato): estes sao
             // horarios futuros escolhidos pelo usuario na janela, e a compressao
             // termina muito antes deles.
@@ -1047,3 +1209,9 @@ function createMensagensService(dependencies = {}) {
 
 module.exports = createMensagensService();
 module.exports.createMensagensService = createMensagensService;
+// Exportado para que tests/mensagens-classificacao-schema-contract.test.js
+// possa travar esta lista contra a constraint CHECK de campaigns.classificacao
+// e contra as opcoes da tela. As tres divergiram em producao ("capacitacao"
+// existia aqui e na tela, nao no banco) e o efeito foi envio entregue sem
+// nenhuma linha em `logs` - ver a migration 202609070001.
+module.exports.CLASSIFICACOES = CLASSIFICACOES;

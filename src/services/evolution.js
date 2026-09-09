@@ -116,10 +116,35 @@ async function buildMediaPayload(params) {
   };
 }
 
-// Mede o corpo que sera realmente enviado (base64 + campos do JSON) e barra o
-// envio quando ele passa do limite do body-parser da Evolution. Sem isso o
-// backend fazia o upload inteiro de um payload condenado a HTTP 413 — e, no caso
-// de video, depois de ja ter baixado ~125 MB do Google Drive.
+// Tamanho do corpo que sera enviado, SEM materializar uma copia dele.
+//
+// A versao anterior era `Buffer.byteLength(JSON.stringify(payload))`. Correta,
+// mas caríssima no unico caso que importa: com um video em base64 de ~136 MB, o
+// stringify criava uma segunda string de 136 MB so para medir - e o axios criava
+// a terceira, logo depois, para enviar. Somando o Buffer original do arquivo,
+// o pico passava de 400 MB por envio, num container sem limite de memoria
+// declarado e com oito processos Node dividindo a RAM da VM. Pior, tanto o
+// `toString("base64")` quanto o `JSON.stringify` sao SINCRONOS: o event loop
+// ficava bloqueado segundos, atrasando a renovacao de lock da BullMQ.
+//
+// A midia domina o tamanho e seu comprimento ja e' conhecido, entao ela e'
+// medida por `length` (base64 e' ASCII: 1 char = 1 byte) e o resto do envelope
+// e' serializado sem ela - alguns bytes de JSON.
+function measurePayloadBytes(payload) {
+  const media = payload.media;
+
+  if (typeof media !== "string") {
+    return Buffer.byteLength(JSON.stringify(payload));
+  }
+
+  const envelope = { ...payload, media: "" };
+
+  return Buffer.byteLength(JSON.stringify(envelope)) + media.length;
+}
+
+// Barra o envio quando o corpo passa do limite do body-parser da Evolution. Sem
+// isso o backend fazia o upload inteiro de um payload condenado a HTTP 413 — e,
+// no caso de video, depois de ja ter baixado ~125 MB do Google Drive.
 function assertMediaPayloadWithinLimit(payload, config = evolutionConfig) {
   const limitBytes = Number(config.maxMediaPayloadBytes);
 
@@ -127,7 +152,7 @@ function assertMediaPayloadWithinLimit(payload, config = evolutionConfig) {
     return;
   }
 
-  const payloadBytes = Buffer.byteLength(JSON.stringify(payload));
+  const payloadBytes = measurePayloadBytes(payload);
 
   if (payloadBytes <= limitBytes) {
     return;

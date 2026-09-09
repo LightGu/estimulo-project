@@ -1,7 +1,20 @@
 const defaultSettingsService = require("./settings.service");
 const defaultGroupsRepository = require("../repositories/groups.repository");
 const { isTestEnvironment, parseBooleanEnv } = require("../config/notifications");
-const { sendToEvolution } = require("./evolution");
+// resolveInstanceSender, e nao sendToEvolution: este era o ULTIMO caminho de
+// envio do sistema que ainda batia no EVOLUTION_INSTANCE_NAME fixo do .env
+// (historicamente "estimulo-mvp"). Todo o resto foi migrado porque essa
+// instancia deixa de existir na Evolution assim que o numero e' trocado - "o
+// caso normal", nas palavras do comentario em evolution-instance-sender.js - e
+// as chamadas passam a responder 404 mesmo com um numero conectado e saudavel.
+//
+// Aqui o efeito era pior do que em um envio comum: dispatchMessage devolve
+// { sent: false, reason: "send_failed" } e TODOS os chamadores descartam o
+// retorno, entao "campanha iniciada", "campanha concluida", "falha no envio" e
+// "erro na IA" simplesmente nunca chegavam - inclusive as de falha, que sao o
+// principal canal de alerta do operador. Um alerta que falha em silencio e' pior
+// do que nao ter alerta, porque a ausencia e lida como "nao houve problema".
+const { resolveInstanceSender } = require("./evolution-instance-sender");
 
 const AI_STAGE_LABELS = {
   transcricao: "transcrição",
@@ -12,7 +25,9 @@ const AI_STAGE_LABELS = {
 function createNotificationsService(dependencies = {}) {
   const settingsService = dependencies.settingsService || defaultSettingsService;
   const groupsRepository = dependencies.groupsRepository || defaultGroupsRepository;
-  const sender = dependencies.sendToEvolution || sendToEvolution;
+  const sender =
+    dependencies.sendToEvolution ||
+    (async (params) => (await resolveInstanceSender(undefined))(params));
   const logger = dependencies.logger || console;
   const hasInjectedSender = Boolean(dependencies.sendToEvolution);
 

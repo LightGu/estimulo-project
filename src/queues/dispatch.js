@@ -1,6 +1,7 @@
 const { createQueue, createQueueEvents, createWorker } = require("./bullmq");
 const { queueNames } = require("./names");
 const { UUID_PATTERN } = require("../utils/uuid");
+const { buildDispatchRef } = require("../utils/dispatch-ref");
 const { buildJitteredDispatchSchedule } = require("./dispatch-jitter");
 const { resolveInstanceSender } = require("../services/evolution-instance-sender");
 const { assertDeliveryConfirmed, confirmProviderDelivery } = require("../services/delivery-confirmation");
@@ -85,6 +86,22 @@ function assertRequiredField(params, fieldName) {
   }
 }
 
+// Ref de correlacao deste envio, calculado a partir dos campos que ja estao no
+// job. Deterministico de proposito: o log pendente criado na confirmacao (na
+// API) e o job criado pelo trigger (no worker) chegam ao MESMO valor sem
+// precisarem se falar. Ver src/utils/dispatch-ref.js.
+function resolveDispatchRefForJob(jobData = {}) {
+  return (
+    jobData.dispatch_ref ||
+    buildDispatchRef({
+      campaignId: jobData.campaign_id,
+      groupId: jobData.progress_group_id || jobData.group_id,
+      videoId: jobData.video_id || jobData.drive_file_id || jobData.link_video,
+      scheduledAt: jobData.scheduled_at,
+    })
+  );
+}
+
 function buildDispatchJobData(params) {
   if (params && params.envia_video === false) {
     throw new Error("grupo com envia_video=false nao pode ser enfileirado para dispatch de video");
@@ -98,8 +115,7 @@ function buildDispatchJobData(params) {
   }
 
   const scheduledDate = normalizeScheduledDate(params.scheduled_at || params.scheduledAt);
-
-  return {
+  const jobData = {
     group_id: params.group_id,
     progress_group_id: params.progress_group_id || params.progressGroupId || (params.group && params.group.id),
     campaign_id: params.campaign_id,
@@ -112,6 +128,11 @@ function buildDispatchJobData(params) {
     caption_id: params.caption_id || params.captionId,
     caption_generated: params.caption_generated ?? params.captionGenerated,
     scheduled_at: scheduledDate.toISOString(),
+    // Fim da janela de envio escolhida pelo usuario. A trava de atraso na
+    // entrada do worker usa este valor para nao cancelar um envio que ainda
+    // esta DENTRO da janela pedida, apenas atrasado pela fila - ver o comentario
+    // em dispatch-jitter.js e resolveStaleDispatchReason.
+    window_end: params.window_end || params.windowEnd || null,
     status: params.status || DISPATCH_INITIAL_STATUS,
     dispatch_order: params.dispatch_order,
     jitter_delay_ms: params.jitter_delay_ms,
@@ -130,6 +151,13 @@ function buildDispatchJobData(params) {
     // BullMQ descartaria o retry em silencio.
     retry_count: Number(params.retry_count) || 0,
   };
+
+  // Calculado depois do resto: depende de scheduled_at e retry_count ja
+  // normalizados. Um ref explicito no params tem prioridade, para o caminho de
+  // resume/retry poder reusar o ref do envio original em vez de criar outro.
+  jobData.dispatch_ref = params.dispatch_ref || resolveDispatchRefForJob(jobData);
+
+  return jobData;
 }
 
 // Identidade logica de um envio de video: campanha + grupo + video + horario.
@@ -632,18 +660,37 @@ async function maybeNotifyCampaignFinished(jobData, dependencies = {}) {
 // quando o portao de entrada barra o envio. Nunca pode derrubar o job: o que
 // importa e nao enviar.
 async function cancelPendingLogForBlockedDispatch(jobData, dispatchLogs, reason, logger = console, origem = "atraso") {
-  if (!dispatchLogs || typeof dispatchLogs.listByCampaign !== "function" || !jobData.campaign_id) {
+  const canQuery =
+    dispatchLogs &&
+    (typeof dispatchLogs.findByTrio === "function" || typeof dispatchLogs.listByCampaign === "function");
+
+  if (!canQuery || !jobData.campaign_id) {
     return null;
   }
 
   try {
-    const logs = await dispatchLogs.listByCampaign(jobData.campaign_id);
-    const pending = (logs || []).find(
-      (entry) =>
-        entry.status === "pendente" &&
-        entry.group_id === jobData.progress_group_id &&
-        (!jobData.video_id || entry.video_id === jobData.video_id)
-    );
+    // findByTrio filtra no banco; a varredura completa da campanha ficou como
+    // fallback para repositorios de teste. Este caminho roda no portao de
+    // entrada de TODO job barrado, entao pagar uma varredura da tabela aqui era
+    // custo puro (ver findByTrio em dispatch-logs.repository.js).
+    let pending = null;
+
+    if (typeof dispatchLogs.findByTrio === "function") {
+      pending = await dispatchLogs.findByTrio(
+        jobData.campaign_id,
+        jobData.progress_group_id,
+        jobData.video_id,
+        ["pendente"]
+      );
+    } else {
+      const logs = await dispatchLogs.listByCampaign(jobData.campaign_id);
+      pending = (logs || []).find(
+        (entry) =>
+          entry.status === "pendente" &&
+          entry.group_id === jobData.progress_group_id &&
+          (!jobData.video_id || entry.video_id === jobData.video_id)
+      );
+    }
 
     if (!pending || typeof dispatchLogs.cancelIfPending !== "function") {
       return null;
@@ -706,6 +753,12 @@ function createDispatchProcessor(options = {}) {
     const staleReason = resolveJobStaleReason(job.data.scheduled_at, {
       maxDelayMs: resolveMaxVideoDispatchDelayMs(),
       now,
+      // Sem isto a regra de janela ficava inacessivel para o caminho de video:
+      // valia so o teto de 6h, e a cauda de uma campanha grande (concorrencia 1,
+      // ate 25 min por job) se auto-cancelava dentro da janela que o usuario
+      // pediu. O teto absoluto de 24h continua barrando o job zumbi de boot,
+      // que e' o caso que esta trava existe para conter.
+      windowEnd: job.data.window_end,
     });
 
     if (staleReason) {
@@ -724,6 +777,7 @@ function createDispatchProcessor(options = {}) {
           JSON.stringify({
             event: "dispatch.cancelled_stale",
             job_id: job.id,
+            dispatch_ref: job.data.dispatch_ref,
             campaign_id: job.data.campaign_id,
             group_id: job.data.group_id,
             progress_group_id: job.data.progress_group_id,
@@ -766,6 +820,7 @@ function createDispatchProcessor(options = {}) {
               JSON.stringify({
                 event: "dispatch.campaign_status_check_failed",
                 job_id: job.id,
+                dispatch_ref: job.data.dispatch_ref,
                 campaign_id: job.data.campaign_id,
                 error_message: error && error.message,
               })
@@ -801,6 +856,7 @@ function createDispatchProcessor(options = {}) {
             JSON.stringify({
               event: "dispatch.skipped_campaign_not_active",
               job_id: job.id,
+              dispatch_ref: job.data.dispatch_ref,
               campaign_id: job.data.campaign_id,
               group_id: job.data.group_id,
               campaign_status: campaign && campaign.status,
@@ -823,6 +879,7 @@ function createDispatchProcessor(options = {}) {
         JSON.stringify({
           event: "dispatch.started",
           job_id: job.id,
+          dispatch_ref: job.data.dispatch_ref,
           campaign_id: job.data.campaign_id,
           group_id: job.data.group_id,
           progress_group_id: job.data.progress_group_id,
@@ -861,6 +918,13 @@ function createDispatchProcessor(options = {}) {
           // createAttemptLog nasce sem horario_envio_planejado, e sem este
           // valor a checagem de atraso ficava cega justamente nos logs novos.
           scheduledAt: job.data.scheduled_at,
+          // Mesma isencao de janela aplicada no portao de entrada acima: a
+          // trava lá dentro roda de novo contra o log e precisa do mesmo
+          // contexto, senao ela cancela o que este worker acabou de autorizar.
+          windowEnd: job.data.window_end,
+          // Correlacao: os eventos de estagio de dentro do service passam a
+          // carregar o mesmo ref do job, e ele e' gravado na linha de `logs`.
+          dispatchRef: job.data.dispatch_ref,
           sender: executeDelivery,
           whatsappInstanceId: job.data.whatsapp_instance_id,
         });
@@ -901,6 +965,7 @@ function createDispatchProcessor(options = {}) {
         JSON.stringify({
           event: "dispatch.sent",
           job_id: job.id,
+          dispatch_ref: job.data.dispatch_ref,
           campaign_id: job.data.campaign_id,
           group_id: job.data.group_id,
           progress_group_id: job.data.progress_group_id,
@@ -953,6 +1018,7 @@ function createDispatchProcessor(options = {}) {
             JSON.stringify({
               event: "dispatch.update_data_failed",
               job_id: job.id,
+              dispatch_ref: job.data.dispatch_ref,
               error_message: updateDataError.message,
             })
           );
@@ -962,6 +1028,7 @@ function createDispatchProcessor(options = {}) {
         JSON.stringify({
           event: "dispatch.failed",
           job_id: job.id,
+          dispatch_ref: job.data.dispatch_ref,
           campaign_id: job.data.campaign_id,
           group_id: job.data.group_id,
           started_at: startedAt,
@@ -992,6 +1059,7 @@ function createDispatchProcessor(options = {}) {
               JSON.stringify({
                 event: "dispatch.notification_failed",
                 job_id: job.id,
+                dispatch_ref: job.data.dispatch_ref,
                 error_message: notifyError.message,
               })
             );

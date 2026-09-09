@@ -26,6 +26,7 @@ const {
 } = require("../services/dispatch-staleness");
 const { queueNames } = require("./names");
 const { UUID_PATTERN } = require("../utils/uuid");
+const { buildDispatchRef } = require("../utils/dispatch-ref");
 const {
   CAMPAIGN_TRIGGER_ACTIVE_STATUS,
   CAMPAIGN_TRIGGER_INACTIVE_STATUS,
@@ -175,12 +176,61 @@ async function resolveDispatchRules(settingsService = defaultSettingsService, lo
   }
 }
 
+/*
+  Repositorio de fluxo de video para o trigger de campanha.
+
+  O custo dominante aqui era um N+1 grave, e invisivel na leitura casual:
+  `listApproved()` traz o catalogo GLOBAL de videos aprovados, e era chamado uma
+  vez POR GRUPO, so para montar um Map descartado no fim da iteracao. Com 200
+  grupos, 200 leituras da mesma tabela inteira - e `resolveGroupsVideoFlow`
+  percorre os grupos em serie, entao os round-trips somam direto na latencia de
+  "Disparar campanha". A mesma trilha tambem era relida uma vez por grupo que a
+  usa.
+
+  Agora o catalogo e as trilhas sao carregados UMA vez por resolucao de fluxo.
+  O cache vive apenas dentro de uma resolucao: `beginResolution()` o descarta, e
+  group-video-flow.js o chama no inicio de resolveGroupsVideoFlow. Isso importa
+  porque este objeto e' criado uma vez por processor (nao por job): um cache sem
+  escopo serviria dados velhos do catalogo entre execucoes da campanha, e um
+  video recem-aprovado deixaria de ser enviado sem explicacao.
+*/
 function buildCampaignVideoFlowRepository(dependencies = {}) {
   const videosRepository = dependencies.videoCatalogRepository || videoCatalogRepository;
   const progressRepository = dependencies.groupVideoProgressRepository || groupVideoProgressRepository;
   const trilhasRepositoryDependency = dependencies.trilhasRepository || trilhasRepository;
 
+  let approvedByIdPromise = null;
+  let linksByTrailPromise = new Map();
+
+  function loadApprovedById() {
+    if (!approvedByIdPromise) {
+      approvedByIdPromise = (async () => {
+        const approved =
+          typeof videosRepository.listApproved === "function" ? await videosRepository.listApproved() : [];
+
+        return new Map(approved.map((video) => [video.id, video]));
+      })();
+    }
+
+    return approvedByIdPromise;
+  }
+
+  function loadLinksByTrail(trailId) {
+    if (!linksByTrailPromise.has(trailId)) {
+      linksByTrailPromise.set(trailId, trilhasRepositoryDependency.listVideoLinksByTrilha(trailId));
+    }
+
+    return linksByTrailPromise.get(trailId);
+  }
+
   return {
+    // Chamado por resolveGroupsVideoFlow antes de percorrer os grupos. Sem isto
+    // o cache atravessaria execucoes da campanha e esconderia mudancas no
+    // catalogo.
+    beginResolution() {
+      approvedByIdPromise = null;
+      linksByTrailPromise = new Map();
+    },
     async findNextApprovedUnsentVideoForGroup(group, options = {}) {
       const trailId = resolveGroupTrailId(group);
 
@@ -190,13 +240,12 @@ function buildCampaignVideoFlowRepository(dependencies = {}) {
 
       const [delivered, links] = await Promise.all([
         typeof progressRepository.listDelivered === "function" ? progressRepository.listDelivered(group.id) : [],
-        trilhasRepositoryDependency.listVideoLinksByTrilha(trailId),
+        loadLinksByTrail(trailId),
       ]);
 
       const videos = links.length
         ? await (async () => {
-            const approved = typeof videosRepository.listApproved === "function" ? await videosRepository.listApproved() : [];
-            const approvedById = new Map(approved.map((video) => [video.id, video]));
+            const approvedById = await loadApprovedById();
 
             return links
               .filter((link) => approvedById.has(link.video_id))
@@ -419,6 +468,10 @@ async function enqueueResolvedDispatchJobs(jobData, dispatchGroups, dependencies
         ...group,
         campaign_id: group.campaign_id || jobData.campaign_id,
         scheduled_at: (precomputed && precomputed.scheduled_at) || group.scheduled_at || scheduledAt,
+        // Caminho sem jitter: o window_end vem da janela do proprio job de
+        // trigger. Sem ele a trava de atraso do worker de video ficaria
+        // limitada ao teto fixo, cancelando envios ainda dentro da janela.
+        window_end: (jobData.time_window && jobData.time_window.end) || null,
         dispatch_order: dispatchOrder,
         whatsapp_instance_id: resolveInstanceForOrder(dispatchOrder, whatsappInstances, rotationGroupCount),
       })
@@ -454,6 +507,10 @@ function extractDispatchLogPayloadFromJob(job) {
     // nulo e so era preenchido no updateStatus final - deixando o relatorio com
     // "-" na coluna numero enquanto o disparo nao concluia.
     whatsapp_instance_id: data.whatsapp_instance_id || null,
+    // Correlacao do envio. O job ja carrega o ref (buildDispatchJobData o
+    // calcula), e gravar o MESMO valor na linha de `logs` e' o que liga o
+    // relatorio ao log dos workers e as tags do Sentry por uma unica chave.
+    dispatch_ref: data.dispatch_ref || null,
   };
 }
 
@@ -463,6 +520,43 @@ function hasExistingDispatchLog(existingLogs, payload) {
     entry.group_id === payload.group_id &&
     entry.video_id === payload.video_id
   ));
+}
+
+// Log ativo do trio, consultado NO BANCO no momento da decisao.
+//
+// Substitui a consulta em `existingLogs` (um snapshot lido uma vez antes do
+// laco). O snapshot era metade de uma corrida real: enquanto o laco percorria os
+// grupos inserindo um por vez, o primeiro job de disparo - que sai com delay 0 -
+// ja estava no worker, onde createAttemptLog nao encontrava log pendente e criava
+// o seu. O snapshot nao via essa linha nova, criava a segunda, e o trio ficava
+// com duas linhas: uma virava "enviado", a outra ficava presa em "pendente" para
+// sempre (nenhum job apontando para ela, e o sweep de retry so varre "falhou").
+//
+// Cai para o snapshot quando o repositorio nao tem findByTrio - vale para os
+// testes que injetam um falso com apenas listByCampaign.
+async function findActiveDispatchLog(dispatchLogs, payload, existingLogs) {
+  if (typeof dispatchLogs.findByTrio === "function") {
+    return dispatchLogs.findByTrio(payload.campaign_id, payload.group_id, payload.video_id);
+  }
+
+  return (existingLogs || []).find((entry) => (
+    entry.campaign_id === payload.campaign_id &&
+    entry.group_id === payload.group_id &&
+    entry.video_id === payload.video_id
+  )) || null;
+}
+
+// Violacao do indice unico do trio (idx_logs_trio_ativo, migration
+// 202609070002): outro produtor criou o log deste trio no meio do caminho.
+// Mesma regra de dispatch-consistency.service.js.
+function isTrioUniqueViolation(error) {
+  if (!error || String(error.code) !== "23505") {
+    return false;
+  }
+
+  const haystack = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
+
+  return !/idx_logs_/i.test(haystack) || haystack.includes("idx_logs_trio_ativo");
 }
 
 // Best-effort: grava o id do job do BullMQ no log correspondente, para o
@@ -502,17 +596,16 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
     return 0;
   }
 
-  const existingLogs = typeof dispatchLogs.listByCampaign === "function"
+  // O snapshot so e' carregado como fallback (repositorio de teste sem
+  // findByTrio). No caminho real, cada decisao consulta o banco - ver
+  // findActiveDispatchLog.
+  const existingLogs = typeof dispatchLogs.findByTrio !== "function" && typeof dispatchLogs.listByCampaign === "function"
     ? await dispatchLogs.listByCampaign(campaignId)
     : [];
   let created = 0;
 
   for (const { job, payload } of entries) {
-    const existingLog = existingLogs.find((entry) => (
-      entry.campaign_id === payload.campaign_id &&
-      entry.group_id === payload.group_id &&
-      entry.video_id === payload.video_id
-    ));
+    const existingLog = await findActiveDispatchLog(dispatchLogs, payload, existingLogs);
 
     if (existingLog) {
       // Os logs podem ter sido criados antes de o worker montar os jobs. O
@@ -574,7 +667,39 @@ async function ensurePendingDispatchLogs(dispatchLogs, campaignId, dispatchJobs,
       continue;
     }
 
-    const log = await dispatchLogs.createLog(payload);
+    let log;
+
+    try {
+      log = await dispatchLogs.createLog(payload);
+    } catch (error) {
+      if (!isTrioUniqueViolation(error)) {
+        throw error;
+      }
+
+      // O dispatch worker criou o log deste trio entre a checagem acima e este
+      // INSERT (o job dele saiu com delay 0). O indice recusou a duplicata, que
+      // e' o desfecho desejado: segue com o log dele em vez de propagar.
+      log = await findActiveDispatchLog(dispatchLogs, payload, existingLogs);
+
+      logger.info &&
+        logger.info(
+          JSON.stringify({
+            event: "dispatch_log.pending_race_lost",
+            campaign_id: payload.campaign_id,
+            group_id: payload.group_id,
+            video_id: payload.video_id,
+            log_id: log && log.id,
+            note: "log deste trio ja havia sido criado pelo worker; indice unico recusou a duplicata",
+          })
+        );
+
+      if (log) {
+        await recordDispatchJobId(dispatchLogs, log, job, logger);
+      }
+
+      continue;
+    }
+
     existingLogs.push(log || payload);
     created += 1;
     await recordDispatchJobId(dispatchLogs, log, job, logger);
@@ -830,21 +955,55 @@ async function createPendingDispatchLogsForCampaign(campaignId, options = {}) {
         horario_envio_planejado: (planned && planned.scheduled_at) || null,
         usuario_responsavel_id: options.usuario_responsavel_id || null,
         whatsapp_instance_id: resolveInstanceForOrder(dispatchOrder, whatsappInstances, rotationGroupCount),
+        // Deterministico: o job que o trigger criar depois para este mesmo trio
+        // e horario chega ao MESMO ref sem precisar ler esta linha.
+        dispatch_ref: buildDispatchRef({
+          campaignId,
+          groupId: group.progress_group_id,
+          videoId: group.video_id,
+          scheduledAt: (planned && planned.scheduled_at) || null,
+        }),
       };
     })
     .filter((payload) => payload.group_id && payload.video_id);
 
-  const existingLogs = typeof dispatchLogs.listByCampaign === "function"
+  const existingLogs = typeof dispatchLogs.findByTrio !== "function" && typeof dispatchLogs.listByCampaign === "function"
     ? await dispatchLogs.listByCampaign(campaignId)
     : [];
   let created = 0;
 
   for (const payload of logPayloads) {
-    if (hasExistingDispatchLog(existingLogs, payload)) {
+    const existingLog = await findActiveDispatchLog(dispatchLogs, payload, existingLogs);
+
+    if (existingLog || hasExistingDispatchLog(existingLogs, payload)) {
       continue;
     }
 
-    const log = await dispatchLogs.createLog(payload);
+    let log;
+
+    try {
+      log = await dispatchLogs.createLog(payload);
+    } catch (error) {
+      if (!isTrioUniqueViolation(error)) {
+        throw error;
+      }
+
+      // Confirmacao concorrente do mesmo disparo (dois cliques, duas abas): o
+      // indice unico do trio recusou a segunda linha. Nao e' erro - o log que
+      // interessa ja existe.
+      logger.info &&
+        logger.info(
+          JSON.stringify({
+            event: "dispatch_log.pending_race_lost",
+            campaign_id: payload.campaign_id,
+            group_id: payload.group_id,
+            video_id: payload.video_id,
+          })
+        );
+
+      continue;
+    }
+
     existingLogs.push(log || payload);
     created += 1;
 
@@ -935,6 +1094,54 @@ function resolveTriggerStaleReason(jobData = {}, options = {}) {
   });
 }
 
+// Falhas que repetir NAO resolve: o dado de entrada esta errado, e a proxima
+// execucao daria o mesmo resultado. Sao as unicas que justificam desativar a
+// campanha (ver o catch do processor).
+//
+// Deliberadamente uma lista fechada, e nao o inverso: erro de rede, timeout,
+// indisponibilidade do Supabase ou do Redis, e qualquer coisa que nao esteja
+// aqui, sao tratados como transitorios. Errar para o lado de "transitorio"
+// deixa uma campanha viva para o operador reprocessar; errar para o lado de
+// "deterministico" a mata em silencio, que e' o bug que este classificador
+// existe para nao repetir.
+const DETERMINISTIC_FAILURE_CODES = new Set([
+  // Janela de envio que nao comporta os grupos com o jitter configurado
+  // (windowTooShortError em dispatch-jitter.js).
+  "DISPATCH_WINDOW_TOO_SHORT",
+  // Violacoes de constraint do Postgres: check, not-null, FK, unique. O payload
+  // esta invalido para o schema e repetir da o mesmo erro.
+  "23514",
+  "23502",
+  "23503",
+  "23505",
+]);
+
+const DETERMINISTIC_FAILURE_PATTERNS = [
+  /Campaign not found/i,
+  /Group not found/i,
+  /Video not found/i,
+  /e obrigatorio/i,
+  /deve ser uma data valida/i,
+  /nao comporta todos os grupos/i,
+  /violates check constraint/i,
+  /violates not-null constraint/i,
+  /violates foreign key constraint/i,
+];
+
+function isDeterministicCampaignFailure(error) {
+  if (!error) {
+    return false;
+  }
+
+  if (error.code && DETERMINISTIC_FAILURE_CODES.has(String(error.code))) {
+    return true;
+  }
+
+  const message = String(error.message || "");
+
+  return DETERMINISTIC_FAILURE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
 function createCampaignTriggerProcessor(options = {}) {
   const {
     campaignGroups = campaignGroupsRepository,
@@ -953,6 +1160,7 @@ function createCampaignTriggerProcessor(options = {}) {
 
   return async function campaignTriggerWorker(job) {
     const startedAt = new Date().toISOString();
+    let enqueuedDispatchJobs = null;
 
     await job.updateData({
       ...job.data,
@@ -1108,7 +1316,12 @@ function createCampaignTriggerProcessor(options = {}) {
         }
       }
 
+      // `enqueuedDispatchJobs` fica visivel para o catch: e' a diferenca entre
+      // "falhou sem efeito nenhum" (da para liberar o claim e tentar de novo) e
+      // "falhou com jobs a caminho dos grupos" (nao da - liberar duplicaria o
+      // envio). Ver o tratamento no catch.
       const dispatchJobs = await enqueueResolvedDispatchJobs(job.data, dispatchGroupsWithCaptions, options);
+      enqueuedDispatchJobs = dispatchJobs;
       const pendingLogsCreated = await ensurePendingDispatchLogs(dispatchLogs, job.data.campaign_id, dispatchJobs, logger);
       await updateCampaignScheduledDispatch(campaigns, job.data.campaign_id, dispatchJobs, job.data.timezone);
       const completedAt = new Date().toISOString();
@@ -1170,9 +1383,67 @@ function createCampaignTriggerProcessor(options = {}) {
       return result;
     } catch (error) {
       const failedAt = new Date().toISOString();
+      const isCampaignUuid = UUID_PATTERN.test(String(job.data.campaign_id || ""));
+      const enqueuedAny = Array.isArray(enqueuedDispatchJobs) && enqueuedDispatchJobs.length > 0;
+      const deterministic = isDeterministicCampaignFailure(error);
 
-      if (campaigns && typeof campaigns.update === "function" && UUID_PATTERN.test(String(job.data.campaign_id || ""))) {
-        await campaigns.update(job.data.campaign_id, { ativo: false }).catch(() => undefined);
+      // ANTES: toda excecao daqui gravava `ativo: false`, com
+      // `.catch(() => undefined)` descartando ate a falha de desativar.
+      //
+      // O problema nao era o registro, era o veredito: um erro transitorio do
+      // Supabase ao criar o 37o log pendente tinha exatamente o mesmo desfecho
+      // que uma campanha malformada. E como esta fila roda com attempts: 1 e o
+      // claimTriggerFired ja tinha sido reivindicado, a campanha nunca mais
+      // disparava - nem manualmente. Da tela, indistinguivel de "o sistema
+      // cancelou sozinho".
+      //
+      // Agora o desfecho depende da natureza da falha:
+      //
+      //   deterministico (campanha/grupo inexistente, janela impossivel):
+      //     repetir daria o mesmo erro. Desativar e' a resposta certa, como antes.
+      //
+      //   transitorio, SEM job criado: nada aconteceu. Libera o claim para a
+      //     campanha poder disparar de novo, e NAO desativa.
+      //
+      //   transitorio, COM jobs criados: os jobs estao a caminho dos grupos e
+      //     sao envios legitimos. Nao desativa (a campanha esta em andamento) e
+      //     nao libera o claim (uma segunda rodada enfileiraria o mesmo trio de
+      //     novo). So registra alto: e' o unico caso que fica com estado parcial
+      //     e exige um humano olhando.
+      let recovery = "nenhuma";
+
+      if (isCampaignUuid && campaigns) {
+        if (deterministic && typeof campaigns.update === "function") {
+          recovery = "campanha_desativada";
+          await campaigns.update(job.data.campaign_id, { ativo: false }).catch((updateError) => {
+            logger.error &&
+              logger.error(
+                JSON.stringify({
+                  event: "campaign_trigger.deactivate_failed",
+                  job_id: job.id,
+                  campaign_id: job.data.campaign_id,
+                  error_message: updateError && updateError.message,
+                })
+              );
+          });
+        } else if (!deterministic && !enqueuedAny && typeof campaigns.releaseTriggerClaim === "function") {
+          recovery = "claim_liberado";
+          await campaigns.releaseTriggerClaim(job.data.campaign_id).catch((releaseError) => {
+            recovery = "claim_preso";
+            logger.error &&
+              logger.error(
+                JSON.stringify({
+                  event: "campaign_trigger.release_claim_failed",
+                  job_id: job.id,
+                  campaign_id: job.data.campaign_id,
+                  error_message: releaseError && releaseError.message,
+                  note: "campanha segue reivindicada e nao disparara sozinha; exige acao manual",
+                })
+              );
+          });
+        } else if (!deterministic && enqueuedAny) {
+          recovery = "jobs_em_voo_estado_parcial";
+        }
       }
 
       await job.updateData({
@@ -1190,8 +1461,28 @@ function createCampaignTriggerProcessor(options = {}) {
             job_id: job.id,
             campaign_id: job.data.campaign_id,
             error_message: error.message,
+            error_code: error && error.code,
+            deterministic,
+            dispatch_jobs_enqueued: enqueuedAny ? enqueuedDispatchJobs.length : 0,
+            recovery,
           })
         );
+
+      // A falha do trigger nao chegava a lugar nenhum que o operador olhasse -
+      // so no stdout do container. Uma campanha que nao disparou (ou que
+      // disparou pela metade) e' exatamente o que ele precisa saber na hora.
+      if (notificationsService && typeof notificationsService.notifyDispatchFailure === "function") {
+        await notificationsService
+          .notifyDispatchFailure({
+            campaignId: job.data.campaign_id,
+            groupId: null,
+            videoId: null,
+            errorMessage:
+              `Falha ao iniciar a campanha (${recovery}): ${error.message}` +
+              (enqueuedAny ? ` - ${enqueuedDispatchJobs.length} envio(s) ja enfileirado(s).` : ""),
+          })
+          .catch(() => undefined);
+      }
 
       throw error;
     }
@@ -1262,6 +1553,7 @@ module.exports = {
   filterGroupsMissingInstanceCoverage,
   formatScheduledDateTime,
   ensurePendingDispatchLogs,
+  isDeterministicCampaignFailure,
   isVideoEnabledGroup,
   requeuePendingDispatchJobsForCampaign,
   resolveTriggerStaleReason,
