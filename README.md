@@ -1,8 +1,8 @@
 # estimulo-project
 
-MVP para organizar campanhas de envio de conteudos em grupos de WhatsApp. A aplicacao combina uma API Node.js/Express, workers BullMQ, Redis, Evolution API, Google Drive, Gemini e Supabase.
+MVP para organizar campanhas de envio de conteudos em grupos de WhatsApp. A aplicacao combina uma API Node.js/Express, workers BullMQ, Redis, Evolution API, Google Drive, Gemini, Supabase e (opcionalmente) Sentry para rastreamento de erros.
 
-O fluxo principal funciona assim: campanhas sao cadastradas na API, o worker `campaign-trigger` identifica os grupos elegiveis, escolhe o proximo video conforme a trilha/perfil do grupo e cria jobs para a fila `dispatch`. O worker `dispatch` envia o conteudo pela Evolution API e registra historico, progresso e falhas no banco.
+O fluxo principal funciona assim: campanhas sao cadastradas na API, o worker `campaign-trigger` identifica os grupos elegiveis, escolhe o proximo video conforme a trilha/perfil do grupo e cria jobs. Campanhas de video passam primeiro pelo worker `campaign-captions` (Etapa 2: gera legenda e, se a revisao humana estiver desligada, confirma o disparo sozinho) antes de virar job na fila `dispatch`; disparos pontuais da tela de Mensagens vao direto para `mensagens-dispatch`. Os workers de disparo enviam o conteudo pela Evolution API e registram historico, progresso e falhas no banco (`logs`), incluindo quem cancelou o que e quando (ver "Quem cancelou um envio, e quando" mais abaixo). Erros de producao (API e workers) sao opcionalmente reportados ao Sentry — ver `docs/SENTRY.md`.
 
 O projeto ja possui um ambiente deployado para testes, rodando via Docker Compose numa VM Oracle Cloud (ver `docs/DEPLOY_ORACLE.md`), com HTTPS via Caddy + sslip.io:
 
@@ -77,7 +77,16 @@ TRANSCRIPTION_AUDIO_ONLY=true
 ADHOC_MEDIA_MAX_UPLOAD_BYTES=524288000
 ADHOC_IMAGE_MAX_UPLOAD_BYTES=16777216
 ADHOC_VIDEO_TARGET_BYTES=67108864
+
+# Sentry (rastreamento de erros e replay de sessao) - vazio = desligado
+SENTRY_DSN=
+SENTRY_ENVIRONMENT=
+SENTRY_TRACES_SAMPLE_RATE=0
+SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0
+SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1
 ```
+
+`SENTRY_DSN` vazio desliga o Sentry por completo (backend e painel) - rodar sem configurar segue funcionando exatamente como antes. Passo a passo de criacao do projeto no Sentry e onde ver os erros capturados: `docs/SENTRY.md`.
 
 A `SUPABASE_SERVICE_ROLE_KEY` deve ficar apenas no backend. Nunca exponha essa chave no frontend, em logs, prints, documentacao publica ou codigo versionado.
 
@@ -295,6 +304,8 @@ erDiagram
     WHATSAPP_INSTANCES ||--o{ GROUP_WHATSAPP_INSTANCES : sincroniza
     WHATSAPP_INSTANCES ||--o{ LOGS : enviou_por
     APP_USERS ||--o{ LOGS : responsavel_por
+    APP_USERS ||--o{ LOGS : cancelou
+    APP_USERS ||--o{ CAMPAIGNS : cancelou
     GROUPS ||--o{ NOTIFICATIONS : destino
     GROUPS ||--o{ SETTINGS : grupo_notificacao
 
@@ -404,6 +415,7 @@ erDiagram
         integer jitter_delay_min_ms
         integer jitter_delay_max_ms
         timestamptz hidden_at
+        uuid cancelado_por FK
         timestamptz created_at
         timestamptz updated_at
     }
@@ -443,12 +455,17 @@ erDiagram
         uuid video_id FK
         uuid whatsapp_instance_id FK
         uuid usuario_responsavel_id FK
+        uuid cancelado_por FK
         varchar status
         text mensagem_erro
+        text dispatch_ref
         integer retry_count
         timestamptz horario_envio_planejado
         timestamptz enviado_em
+        timestamptz cancelado_em
+        text cancelado_origem
         timestamptz hidden_at
+        timestamptz atualizado_em
         timestamptz criado_em
     }
 
@@ -532,7 +549,7 @@ erDiagram
     }
 ```
 
-O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes, incluindo `app_users` (login do painel) e as colunas de `logs`/`campaigns`/`whatsapp_instances` adicionadas em agosto/2026 (pausa de numero, instancia responsavel pelo envio, ocultar registros). Para o historico completo coluna a coluna, `supabase/migrations/` continua sendo a fonte de verdade.
+O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes, incluindo `app_users` (login do painel) e as colunas de `logs`/`campaigns`/`whatsapp_instances` adicionadas em agosto e setembro/2026 (pausa de numero, instancia responsavel pelo envio, ocultar registros, auditoria de cancelamento - ver "Quem cancelou um envio, e quando" abaixo - e `dispatch_ref` para correlacao de log). Para o historico completo coluna a coluna, `supabase/migrations/` continua sendo a fonte de verdade.
 
 ## Filas e Workers
 
@@ -648,7 +665,7 @@ Suite completa:
 npm test
 ```
 
-Testes especificos:
+Testes especificos (lista curada - o `package.json` tem um `test:<nome>` para cada arquivo de `tests/`, use `npm run` sem argumento pra ver todos):
 
 ```bash
 npm run test:api
@@ -669,7 +686,10 @@ npm run test:dispatch-media-limit
 npm run test:audio-extraction
 npm run test:video-compression
 npm run test:ai-http-utils
+npm run test:boot-replay        # regressao do incidente de spam no boot do Docker
+npm run test:cancel-audit       # quem cancelou um envio, e quando
 npm run db:test
+npm run sentry:test             # valida SENTRY_DSN antes de configurar em producao
 ```
 
 ## Deploy
@@ -712,4 +732,7 @@ Detalhes de rede, firewall, HTTPS sem dominio proprio e configuracao completa do
 - `docs/evolution-api.md`: integracao local com Evolution API.
 - `docs/estrutura.md`: estrutura do projeto.
 - `docs/documentacao_banco.md`: documentacao detalhada do banco.
+- `docs/DEPLOY_ORACLE.md`: guia completo de deploy na VM Oracle Cloud (manual e automatico via GitHub Actions).
+- `docs/SENTRY.md`: como criar o projeto no Sentry, preencher o `.env` e onde ver os erros capturados.
+- `docs/ERROS_E_APRENDIZADOS.md`: incidentes de producao ja enfrentados, causa raiz e o que ficou como trava contra repeticao.
 - `supabase/migrations`: historico da evolucao do schema.
