@@ -8,10 +8,25 @@
   video do catalogo, e o alvo de tamanho e outro (ver adhocVideoTargetBytes).
   A compressao em si nao e reimplementada: reusa services/video-compression.js.
 
-  Restricao que este modulo respeita: o anexo NUNCA e persistido. Ele chega em
+  Restricao que ESTE modulo respeita: ele nao persiste nada. O anexo chega em
   base64 (multer memoryStorage), vira Buffer aqui e volta a base64 - nada e
   gravado em disco alem do scratch que o proprio ffmpeg cria em os.tmpdir() e
   apaga num `finally`.
+
+  Onde a invariante do projeto ("o anexo nunca e' persistido em disco nem no
+  banco") de fato vale e onde nao vale, para nao induzir a erro quem ler so este
+  cabecalho:
+
+    - DISPARO IMEDIATO SINCRONO: vale integralmente. Os bytes vao daqui direto
+      para a Evolution, dentro da requisicao, e morrem com ela.
+
+    - DISPARO AGENDADO / ASSINCRONO: nao vale, e nao e' alcancavel - um envio
+      marcado para daqui a horas exige que os bytes sobrevivam a requisicao, fora
+      do processo. Ate hoje isso acontecia sem estar dito em lugar nenhum: o
+      base64 ia dentro do job da BullMQ e portanto para o AOF do Redis, uma copia
+      por grupo. Hoje passa por services/media-spool.js, que mantem o mesmo meio
+      (Redis) com uma unica copia, TTL explicito e remocao ao fim do lote. Ver o
+      cabecalho de la.
 
   Por que comprimir: sem isso, video acima do limite de corpo da Evolution
   (136 MB, +33% do base64) tomava HTTP 413 na hora do envio. O alvo por padrao

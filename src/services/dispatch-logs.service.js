@@ -27,6 +27,20 @@ function assertValidReportDateRange(startDate, endDate) {
   }
 }
 
+// Fallback do resumo quando o repositorio nao sabe contar por status (mocks de
+// teste). Conta o que esta em maos - correto quando o array e' o conjunto todo.
+function buildSummaryFromRows(rows = []) {
+  const counts = { pendente: 0, processando: 0, enviado: 0, erro: 0, falhou: 0, cancelado: 0 };
+
+  for (const row of rows) {
+    if (counts[row.status] !== undefined) {
+      counts[row.status] += 1;
+    }
+  }
+
+  return counts;
+}
+
 function createDispatchLogsService(dependencies = {}) {
   const repository = dependencies.repository || dispatchLogsRepository;
   const campaignsRepositoryDependency = dependencies.campaignsRepository || campaignsRepository;
@@ -129,8 +143,24 @@ function createDispatchLogsService(dependencies = {}) {
     return repository.listRecent(limit);
   }
 
+  /*
+    Uma pagina do relatorio, mais o resumo do filtro inteiro.
+
+    Antes devolvia um array com TODAS as linhas do periodo (cinco tabelas
+    embutidas, sem limite) e o filtro por organizacao era aplicado aqui, em
+    memoria, depois do fetch - o custo completo pago para descartar a maior
+    parte. A tela recortava com slice() e chamava isso de paginacao.
+
+    O resumo vem separado de proposito: os cartoes contam o conjunto INTEIRO do
+    filtro, nao a pagina exibida. Sem uma contagem propria, paginar faria os
+    cartoes passarem a refletir apenas 100 linhas - trocar um problema de
+    desempenho por um numero errado na tela nao e conserto.
+
+    O retorno e um objeto, e o formato antigo (array puro) fica disponivel para
+    quem ainda dependa dele via `data`. A tela foi atualizada junto.
+  */
   async function listForReport(filters = {}) {
-    const { startDate, endDate, organizationId, groupId, status } = filters;
+    const { startDate, endDate, organizationId, groupId, status, limit, offset } = filters;
     const today = new Date().toISOString().slice(0, 10);
 
     if (startDate && startDate > today) {
@@ -145,18 +175,47 @@ function createDispatchLogsService(dependencies = {}) {
       throw new Error("Start date cannot be after end date");
     }
 
-    const logs = await repository.listWithFilters({
+    const repositoryFilters = {
       startDate: startDate ? `${startDate}T00:00:00.000Z` : null,
       endDate: endDate ? `${endDate}T23:59:59.999Z` : null,
       groupId: groupId || null,
       status: status || null,
-    });
+      organizationId: organizationId || null,
+      limit,
+      offset,
+    };
 
-    if (!organizationId) {
-      return logs;
+    const page = await repository.listWithFilters(repositoryFilters);
+
+    // Compatibilidade com repositorios injetados em teste que ainda devolvem um
+    // array puro.
+    if (Array.isArray(page)) {
+      const rows = organizationId
+        ? page.filter((log) => log.groups?.organization_id === organizationId)
+        : page;
+
+      return {
+        data: rows,
+        pagination: { total: rows.length, limit: rows.length, offset: 0, has_more: false },
+        summary: buildSummaryFromRows(rows),
+      };
     }
 
-    return logs.filter((log) => log.groups?.organization_id === organizationId);
+    const summary =
+      typeof repository.countByStatusWithFilters === "function"
+        ? await repository.countByStatusWithFilters(repositoryFilters)
+        : buildSummaryFromRows(page.rows);
+
+    return {
+      data: page.rows,
+      pagination: {
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset,
+        has_more: page.offset + page.rows.length < page.total,
+      },
+      summary,
+    };
   }
 
   // "Apagar registros do relatorio por periodo": nunca remove do banco, so

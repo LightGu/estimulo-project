@@ -165,8 +165,25 @@ function testPermanentFailureDetection() {
   assert.equal(isPermanentFailureMessage("Payload de midia com 174000000 bytes excede o limite"), true);
   assert.equal(isPermanentFailureMessage("request entity too large"), true);
 
+  // MUDANCA DELIBERADA: o timeout passou de transitorio para permanente.
+  //
+  // Este assert esperava `false`, e essa expectativa era o bug. Um timeout NAO
+  // significa que a Evolution recusou o envio - a propria mensagem montada em
+  // parseEvolutionError diz "a midia pode ter sido entregue mesmo assim",
+  // porque a requisicao chegou e pode ter sido processada por completo. Como o
+  // sweep de reprocessamento tratava isso como falha transitoria, ele reenviava
+  // ate 3 vezes um video que provavelmente ja estava no grupo. E video grande
+  // e' exatamente o que estoura os 180s de mediaTimeoutMs.
+  //
+  // Mesmo raciocinio que ja valia para "nao confirmou a entrega" (acima):
+  // quando a mensagem pode ter saido, repetir e' pior do que parar e deixar a
+  // decisao para um humano com o log na mao.
+  assert.equal(isPermanentFailureMessage("Tempo limite excedido aguardando resposta da Evolution API"), true);
+
+  // "Indisponivel ou sem resposta" continua transitorio, e a distincao e' o
+  // ponto: ali a requisicao nao foi aceita, nao houve entrega possivel, e
+  // reenviar e' o comportamento certo.
   assert.equal(isPermanentFailureMessage("Evolution API indisponivel ou sem resposta"), false);
-  assert.equal(isPermanentFailureMessage("Tempo limite excedido aguardando resposta da Evolution API"), false);
   assert.equal(isPermanentFailureMessage("Falha na chamada para Evolution API (HTTP 500: erro interno)"), false);
   assert.equal(isPermanentFailureMessage("Falha na chamada para Evolution API (HTTP 429: rate limit)"), false);
   assert.equal(isPermanentFailureMessage(null), false);

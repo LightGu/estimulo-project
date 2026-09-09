@@ -124,6 +124,37 @@ async function claimTriggerFired(id, client) {
   return data || null;
 }
 
+// Devolve trigger_fired_at para nulo, para que a campanha possa disparar de
+// novo.
+//
+// Existe por causa de uma armadilha do claimTriggerFired acima: ele e' atomico e
+// irreversivel, e o campaign-trigger o reivindica ANTES de criar os jobs de
+// disparo. Se o processor falhasse depois disso por um erro transitorio (Supabase
+// instavel, Redis reconectando), a campanha ficava reivindicada para sempre - um
+// retry do job encontrava o claim perdido e virava no-op, e nem uma acao manual
+// fazia a campanha disparar. O catch entao gravava ativo:false e o operador via
+// "o sistema cancelou sozinho".
+//
+// So deve ser chamado quando NENHUM job de disparo foi criado ainda: com jobs na
+// fila, liberar o claim permitiria uma segunda rodada enfileirar o mesmo trio de
+// novo. A condicao `is("trigger_fired_at", not null)` evita competir com quem
+// ja liberou.
+async function releaseTriggerClaim(id, client) {
+  const { data, error } = await getClient(client)
+    .from("campaigns")
+    .update({ trigger_fired_at: null })
+    .eq("id", id)
+    .not("trigger_fired_at", "is", null)
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
 async function update(id, payload, client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
@@ -187,6 +218,7 @@ module.exports = {
   listActive,
   listActiveOverlappingWindow,
   listByStatusOlderThan,
+  releaseTriggerClaim,
   remove,
   update,
 };

@@ -410,6 +410,15 @@ async function resolveGroupsVideoFlow(params = {}) {
     throw new Error("groups deve ser uma lista para resolver fluxo de videos");
   }
 
+  // Abre uma nova resolucao no repositorio de fluxo: ele carrega o catalogo de
+  // videos aprovados e os vinculos de trilha UMA vez para todos os grupos desta
+  // passada, em vez de uma vez por grupo (ver buildCampaignVideoFlowRepository).
+  // O escopo e' esta chamada, e nao o processo, para nao servir catalogo velho
+  // entre execucoes da campanha.
+  if (params.repository && typeof params.repository.beginResolution === "function") {
+    params.repository.beginResolution();
+  }
+
   const results = [];
 
   for (const group of params.groups) {

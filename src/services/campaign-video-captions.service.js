@@ -199,15 +199,70 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
     }
   }
 
+  // Mesma tripla do UNIQUE de campaign_video_captions
+  // (campaign_id, group_id, video_id), que e' o que createManyPending usa como
+  // onConflict.
+  function captionRowKey(groupId, videoId) {
+    return `${groupId}::${videoId}`;
+  }
+
+  /*
+    Legendas ja prontas que uma nova rodada NAO deve refazer.
+
+    createManyPending e' um upsert que grava status "pendente" e limpa
+    erro_mensagem. Enquanto a geracao rodava uma unica vez, solta no processo da
+    API, isso nao tinha consequencia: nunca havia uma segunda rodada. Passou a
+    ter quando a geracao virou job com retry (queues/campaign-captions.js) - a
+    segunda tentativa apagaria o resultado da primeira, gastando a cota do
+    Gemini de novo e, pior, descartando texto que o usuario tenha ajustado a mao
+    na Etapa 2.
+
+    So "gerado" e' preservado. "erro" e "processando" voltam para a fila de
+    proposito: erro e' o que a retentativa existe para consertar, e
+    "processando" e' uma linha cuja geracao foi interrompida no meio (o deploy
+    que derrubou o processo), sem resultado para aproveitar.
+  */
+  async function resolveGeneratedRowsByKey(campaignId) {
+    const rows = (await repository.listByCampaign(campaignId)) || [];
+    const byKey = new Map();
+
+    for (const row of rows) {
+      if (row && row.status === "gerado") {
+        byKey.set(captionRowKey(row.group_id, row.video_id), row);
+      }
+    }
+
+    return byKey;
+  }
+
   // Devolve uma linha por grupo, na mesma ordem de dispatchGroups. O insert em
   // lote nao garante a ordem das linhas retornadas, entao o casamento e feito
   // pelo par (group_id, video_id) que identifica cada item da campanha.
-  async function createPendingRows(campaignId, dispatchGroups) {
-    const payloads = dispatchGroups.map((item) => ({
-      campaign_id: campaignId,
-      group_id: item.progress_group_id,
-      video_id: item.video_id,
+  async function createPendingRows(campaignId, dispatchGroups, options = {}) {
+    const preservedRows = options.preservedRows || new Map();
+    // Indice preservado nao entra no upsert (ele e' quem devolveria a linha para
+    // "pendente"); a linha existente e' reaproveitada na montagem do resultado.
+    const targets = dispatchGroups.map((item, index) => ({
+      index,
+      preserved: preservedRows.get(captionRowKey(item.progress_group_id, item.video_id)) || null,
+      payload: {
+        campaign_id: campaignId,
+        group_id: item.progress_group_id,
+        video_id: item.video_id,
+      },
     }));
+    const payloads = targets.filter((target) => !target.preserved).map((target) => target.payload);
+
+    function mergeWithPreserved(upserted) {
+      const rows = new Array(dispatchGroups.length);
+      let cursor = 0;
+
+      for (const target of targets) {
+        rows[target.index] = target.preserved || upserted[cursor++];
+      }
+
+      return rows;
+    }
 
     if (typeof repository.createManyPending !== "function") {
       const rows = [];
@@ -216,14 +271,14 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
         rows.push(await repository.createPending(payload));
       }
 
-      return rows;
+      return mergeWithPreserved(rows);
     }
 
     const inserted = await repository.createManyPending(payloads);
     const remainingByKey = new Map();
 
     inserted.forEach((row) => {
-      const key = `${row.group_id}::${row.video_id}`;
+      const key = captionRowKey(row.group_id, row.video_id);
       const bucket = remainingByKey.get(key);
 
       if (bucket) {
@@ -233,25 +288,32 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
       }
     });
 
-    return payloads.map((payload) => {
-      const bucket = remainingByKey.get(`${payload.group_id}::${payload.video_id}`);
+    return mergeWithPreserved(
+      payloads.map((payload) => {
+        const bucket = remainingByKey.get(captionRowKey(payload.group_id, payload.video_id));
 
-      return bucket && bucket.length ? bucket.shift() : undefined;
-    });
+        return bucket && bucket.length ? bucket.shift() : undefined;
+      })
+    );
   }
 
-  async function generateCaptionsForCampaign(campaignId) {
+  async function generateCaptionsForCampaign(campaignId, options = {}) {
     if (!campaignId) {
       throw new Error("Campaign id is required");
     }
 
     const { dispatchGroups, dispatchRules } = await resolveCampaignDispatchGroups(campaignId);
+    // `resume` e' passado pelo worker de queues/campaign-captions.js, onde a
+    // mesma campanha pode entrar mais de uma vez: retry por falha de cota/rede,
+    // ou o job voltando a rodar depois de um deploy que derrubou o processo no
+    // meio da geracao. Sem isto, cada retentativa recomecaria do zero.
+    const preservedRows = options.resume ? await resolveGeneratedRowsByKey(campaignId) : new Map();
     // Todas as linhas da campanha nascem juntas, antes de gerar a primeira
     // legenda. A tela da Etapa 2 trata a quantidade de linhas como o total
     // esperado: criar uma linha por vez dentro do laco fazia esse total crescer
     // aos poucos e, entre uma legenda pronta e a criacao da linha seguinte, a
     // tela lia "100% gerado" com so parte dos grupos e liberava o botao de envio.
-    const pendingRows = await createPendingRows(campaignId, dispatchGroups);
+    const pendingRows = await createPendingRows(campaignId, dispatchGroups, { preservedRows });
 
     logger.info &&
       logger.info(
@@ -260,13 +322,31 @@ function createCampaignVideoCaptionsService(dependencies = {}) {
           campaign_id: campaignId,
           dispatch_groups: dispatchGroups.length,
           pending_rows: pendingRows.length,
+          preserved_rows: preservedRows.size,
+          resume: Boolean(options.resume),
         })
       );
 
     const usedCaptionIds = new Set();
     const results = [];
 
+    // Legendas preservadas continuam ocupando o seu caption_id: sem isto, a
+    // retomada poderia sortear para um grupo a mesma legenda que outro grupo da
+    // campanha ja recebeu.
+    for (const row of preservedRows.values()) {
+      if (row && row.caption_id) {
+        usedCaptionIds.add(row.caption_id);
+      }
+    }
+
     for (const [index, item] of dispatchGroups.entries()) {
+      const preserved = preservedRows.get(captionRowKey(item.progress_group_id, item.video_id));
+
+      if (preserved) {
+        results.push(preserved);
+        continue;
+      }
+
       try {
         results.push(
           await generateCaptionForItem(item, campaignId, usedCaptionIds, {

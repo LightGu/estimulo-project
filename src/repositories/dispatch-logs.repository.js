@@ -88,9 +88,38 @@ function traceOrphanLogCreation(payload) {
   }
 }
 
-async function createLog(payload, client) {
-  traceOrphanLogCreation(payload);
+// Colunas acrescentadas por migration que o codigo passou a preencher, mas que
+// podem AINDA nao existir no banco.
+//
+// Isto existe por uma razao operacional concreta: o projeto nao tem CLI do
+// Supabase linkado, e o playbook de deploy (CLAUDE.md) aplica migrations
+// MANUALMENTE, no fim - depois de o codigo novo ja estar rodando. Sem tolerancia,
+// a janela entre "container novo no ar" e "SQL colado no editor" seria uma
+// interrupcao total: o Postgrest recusa o INSERT inteiro com PGRST204/42703 por
+// causa de uma coluna desconhecida, e NENHUM envio conseguiria criar log - ou
+// seja, nenhum envio aconteceria. Foi exatamente a forma do incidente de
+// organizations (migration 202608280001), com a diferenca de que ali a coluna
+// errada derrubava um PATCH e aqui derrubaria o disparo.
+//
+// Degradar e' seguro para estas colunas porque nenhuma delas participa de
+// decisao de envio: dispatch_ref e' correlacao de log. Perder o valor durante a
+// janela de deploy custa rastreabilidade daquelas linhas, nunca uma entrega.
+const OPTIONAL_LOG_COLUMNS = ["dispatch_ref"];
 
+const MISSING_COLUMN_ERROR_CODES = new Set(["PGRST204", "42703"]);
+const reportedMissingColumns = new Set();
+
+function findMissingOptionalColumn(error) {
+  if (!error || !MISSING_COLUMN_ERROR_CODES.has(String(error.code))) {
+    return null;
+  }
+
+  const haystack = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
+
+  return OPTIONAL_LOG_COLUMNS.find((column) => haystack.includes(column)) || null;
+}
+
+async function insertLog(payload, client) {
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
     .insert(payload)
@@ -102,6 +131,41 @@ async function createLog(payload, client) {
   }
 
   return data;
+}
+
+async function createLog(payload, client) {
+  traceOrphanLogCreation(payload);
+
+  try {
+    return await insertLog(payload, client);
+  } catch (error) {
+    const missingColumn = findMissingOptionalColumn(error);
+
+    if (!missingColumn) {
+      throw error;
+    }
+
+    // Uma vez por coluna por processo: repetir por envio afogaria o log sem
+    // informacao nova, mas silenciar por completo esconderia uma migration
+    // esquecida indefinidamente.
+    if (!reportedMissingColumns.has(missingColumn)) {
+      reportedMissingColumns.add(missingColumn);
+      console.warn(
+        JSON.stringify({
+          event: "dispatch_logs.optional_column_missing",
+          column: missingColumn,
+          note:
+            `a coluna "${missingColumn}" nao existe no banco; o log sera gravado sem ela. ` +
+            "Aplique as migrations pendentes de supabase/migrations para restaurar a rastreabilidade.",
+          error_code: error.code,
+        })
+      );
+    }
+
+    const { [missingColumn]: _dropped, ...withoutColumn } = payload;
+
+    return insertLog(withoutColumn, client);
+  }
 }
 
 async function updateStatus(id, status, mensagemErro = null, whatsappInstanceId, client) {
@@ -327,6 +391,99 @@ async function updateDispatchJobId(id, dispatchJobId, client) {
   return data;
 }
 
+// Estados que significam "este trio ja tem envio em andamento ou concluido".
+// Espelham o WHERE do indice unico parcial criado em
+// 202609070002_add_logs_trio_unique_index.sql.
+const ACTIVE_TRIO_STATUSES = ["pendente", "processando", "enviado"];
+
+// Log de UM trio campanha/grupo/video, filtrado no banco.
+//
+// Substitui o padrao "listByCampaign + .find() em memoria" que sustentava a
+// checagem de idempotencia do envio. Aquele padrao tinha dois problemas, e o
+// segundo era de correcao, nao de custo:
+//
+//  1. Escala quadratica: executeDispatch fazia TRES varreduras da tabela por
+//     grupo enviado, e isCampaignFullyTerminal uma quarta. Uma campanha
+//     recorrente ganha G linhas por execucao e paga 4G varreduras na seguinte.
+//
+//  2. O PostgREST aplica um teto de linhas por resposta (db-max-rows; 1000 no
+//     default do Supabase) e o corte e' SILENCIOSO. Como a ordem era
+//     criado_em DESC, o log "enviado" antigo era justamente o primeiro a cair
+//     fora do resultado - e a checagem de idempotencia deixava de ver o envio
+//     ja feito. O video seria postado de novo no grupo, sem nenhum erro em
+//     lugar nenhum.
+//
+// Com `limit(1)` e filtro no banco, nao existe teto para estourar.
+async function findByTrio(campaignId, groupId, videoId, statuses = ACTIVE_TRIO_STATUSES, client) {
+  if (!campaignId || !groupId) {
+    return null;
+  }
+
+  let query = getClient(client)
+    .from(LOGS_TABLE)
+    .select("*")
+    .eq("campaign_id", campaignId)
+    .eq("group_id", groupId);
+
+  // video_id e' nulo em disparo pontual (mensagem sem video). `.is` e `.eq` nao
+  // sao intercambiaveis no Postgrest: `eq.null` nao casa linha nenhuma.
+  query = videoId ? query.eq("video_id", videoId) : query.is("video_id", null);
+
+  if (Array.isArray(statuses) && statuses.length) {
+    query = query.in("status", statuses);
+  }
+
+  const { data, error } = await query
+    .order("criado_em", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || null;
+}
+
+// Quantos grupos da campanha ainda NAO tem log em estado terminal.
+//
+// Substitui a varredura completa que isCampaignFullyTerminal fazia para depois
+// reduzir em memoria. `head: true` nao transfere linha nenhuma - so a contagem.
+async function countNonTerminalByCampaign(campaignId, terminalStatuses, client) {
+  const { count, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .select("*", { count: "exact", head: true })
+    .eq("campaign_id", campaignId)
+    .not("status", "in", `(${terminalStatuses.join(",")})`);
+
+  if (error) {
+    throw error;
+  }
+
+  return count || 0;
+}
+
+// Grupos distintos da campanha que ja tem log em estado terminal.
+// Complementa countNonTerminalByCampaign: e' preciso saber se TODO grupo
+// associado chegou ao fim, nao apenas que nao sobrou log pendente.
+async function listTerminalGroupIdsByCampaign(campaignId, terminalStatuses, client) {
+  const { data, error } = await getClient(client)
+    .from(LOGS_TABLE)
+    .select("group_id")
+    .eq("campaign_id", campaignId)
+    .in("status", terminalStatuses);
+
+  if (error) {
+    throw error;
+  }
+
+  return [...new Set((data || []).map((row) => row.group_id).filter(Boolean))];
+}
+
+// ATENCAO: sem limite, e por isso NAO deve ser usada em caminho de envio.
+// Sobrou para telas e relatorios de uma campanha especifica (getDispatchStatus,
+// getGroupsDetail). A checagem de idempotencia usa findByTrio; a de campanha
+// concluida usa as duas funcoes acima.
 async function listByCampaign(campaignId, client) {
   const { data, error } = await getClient(client)
     .from(LOGS_TABLE)
@@ -369,42 +526,160 @@ async function listRecent(limit = 10, client) {
   return data || [];
 }
 
-async function listWithFilters(filters = {}, client) {
-  let query = getClient(client)
-    .from(LOGS_TABLE)
-    .select(
-      // O apelido de app_users precisa nomear a FK (`!logs_cancelado_por_fkey`):
-      // a tabela `logs` referencia app_users por DUAS colunas
-      // (usuario_responsavel_id e cancelado_por), e sem desambiguar o Postgrest
-      // recusa o embed inteiro - derrubando o relatorio, nao so a coluna.
-      "*, campaigns(id, trilha, data_envio, horario_envio, tipo, possui_midia, link_conteudo), groups(id, nome, organization_id, organizations(id, nome)), video_catalog(id, nome_do_arquivo), whatsapp_instances(id, instance_name, phone_number), cancelado_por_usuario:app_users!logs_cancelado_por_fkey(id, username, display_name)"
-    )
-    .is("hidden_at", null)
-    .order("criado_em", { ascending: false });
+// Statuses exibidos no resumo do relatorio.
+const REPORT_SUMMARY_STATUSES = ["pendente", "processando", "enviado", "erro", "falhou", "cancelado"];
+
+// Tamanho de pagina do relatorio. Espelha o PAGE_SIZE de relatorios.html, que
+// antes recortava em memoria um resultado que vinha inteiro do banco.
+const DEFAULT_REPORT_PAGE_SIZE = 100;
+const MAX_REPORT_PAGE_SIZE = 500;
+
+function resolveReportRange(filters = {}) {
+  const requested = Number(filters.limit);
+  const limit = Number.isFinite(requested) && requested > 0
+    ? Math.min(Math.trunc(requested), MAX_REPORT_PAGE_SIZE)
+    : DEFAULT_REPORT_PAGE_SIZE;
+  const rawOffset = Number(filters.offset);
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.trunc(rawOffset) : 0;
+
+  return { limit, offset };
+}
+
+// O apelido de app_users precisa nomear a FK (`!logs_cancelado_por_fkey`): a
+// tabela `logs` referencia app_users por DUAS colunas (usuario_responsavel_id e
+// cancelado_por), e sem desambiguar o Postgrest recusa o embed inteiro -
+// derrubando o relatorio, nao so a coluna.
+//
+// `groups` recebe `!inner` APENAS quando ha filtro por organizacao: ai o join
+// precisa ser interno para o filtro valer no banco. Sem o filtro ele fica
+// externo, senao um log cujo grupo foi removido desapareceria do relatorio.
+function buildReportSelect({ filterByOrganization }) {
+  const groupsEmbed = filterByOrganization
+    ? "groups!inner(id, nome, organization_id, organizations(id, nome))"
+    : "groups(id, nome, organization_id, organizations(id, nome))";
+
+  return (
+    "*, campaigns(id, trilha, data_envio, horario_envio, tipo, possui_midia, link_conteudo), " +
+    `${groupsEmbed}, ` +
+    "video_catalog(id, nome_do_arquivo), whatsapp_instances(id, instance_name, phone_number), " +
+    "cancelado_por_usuario:app_users!logs_cancelado_por_fkey(id, username, display_name)"
+  );
+}
+
+function applyReportFilters(query, filters = {}) {
+  let next = query.is("hidden_at", null);
 
   if (filters.startDate) {
-    query = query.gte("criado_em", filters.startDate);
+    next = next.gte("criado_em", filters.startDate);
   }
 
   if (filters.endDate) {
-    query = query.lte("criado_em", filters.endDate);
+    next = next.lte("criado_em", filters.endDate);
   }
 
   if (filters.groupId) {
-    query = query.eq("group_id", filters.groupId);
+    next = next.eq("group_id", filters.groupId);
   }
 
   if (filters.status) {
-    query = query.eq("status", filters.status);
+    next = next.eq("status", filters.status);
   }
 
-  const { data, error } = await query;
+  // Empurrado para o banco. Antes o service buscava TODAS as linhas do periodo e
+  // filtrava por organizacao em memoria com .filter() - o custo completo era
+  // pago para descartar a maior parte do resultado.
+  if (filters.organizationId) {
+    next = next.eq("groups.organization_id", filters.organizationId);
+  }
+
+  return next;
+}
+
+/*
+  Uma pagina do relatorio, com o total do filtro.
+
+  Antes esta funcao devolvia TODAS as linhas do periodo com cinco tabelas
+  embutidas, sem limit nem range - a requisicao mais pesada do sistema, disparada
+  pela tela mais usada, e materializada por inteiro no heap da API e no do
+  navegador. A "paginacao" existia so no cliente (rows.slice), ou seja, o custo
+  inteiro era pago para exibir 100 linhas.
+
+  E havia um risco de correcao junto: o PostgREST corta a resposta no
+  db-max-rows (1000 no default do Supabase) SEM avisar. Acima disso o relatorio
+  passava a mentir por omissao - mostrando "N registros" que nao eram o total.
+  Com range explicito e `count: "exact"`, o total vem do banco e a pagina e' o
+  que foi pedido.
+*/
+async function listWithFilters(filters = {}, client) {
+  const { limit, offset } = resolveReportRange(filters);
+  const select = buildReportSelect({ filterByOrganization: Boolean(filters.organizationId) });
+
+  const query = applyReportFilters(
+    getClient(client).from(LOGS_TABLE).select(select, { count: "exact" }),
+    filters
+  );
+
+  const { data, error, count } = await query
+    .order("criado_em", { ascending: false })
+    .range(offset, offset + limit - 1);
 
   if (error) {
     throw error;
   }
 
-  return data || [];
+  const rows = data || [];
+
+  return {
+    rows,
+    total: typeof count === "number" ? count : rows.length,
+    limit,
+    offset,
+  };
+}
+
+/*
+  Contagem por status para os cartoes de resumo do relatorio.
+
+  Necessaria porque a tela calcula o resumo sobre o conjunto INTEIRO do filtro,
+  nao sobre a pagina exibida - paginar sem isto faria os cartoes passarem a
+  contar so 100 linhas. Sao consultas com `head: true`, que devolvem apenas o
+  numero e nao transferem linha nenhuma; rodam em paralelo.
+
+  O Postgrest nao faz GROUP BY sem RPC/view, entao uma contagem por status e' a
+  forma honesta de obter isso sem criar objeto novo no banco.
+*/
+async function countByStatusWithFilters(filters = {}, client) {
+  const select = buildReportSelect({ filterByOrganization: Boolean(filters.organizationId) });
+  const statuses = filters.status ? [filters.status] : REPORT_SUMMARY_STATUSES;
+
+  const entries = await Promise.all(
+    statuses.map(async (status) => {
+      const query = applyReportFilters(
+        getClient(client).from(LOGS_TABLE).select(select, { count: "exact", head: true }),
+        { ...filters, status }
+      );
+
+      const { error, count } = await query;
+
+      if (error) {
+        throw error;
+      }
+
+      return [status, count || 0];
+    })
+  );
+
+  const counts = {};
+
+  for (const status of REPORT_SUMMARY_STATUSES) {
+    counts[status] = 0;
+  }
+
+  for (const [status, count] of entries) {
+    counts[status] = count;
+  }
+
+  return counts;
 }
 
 // Usado pelo worker de "reprocessar falhas automaticamente": traz o suficiente
@@ -516,15 +791,23 @@ async function listResponsibleUsersByCampaigns(campaignIds, client) {
 }
 
 module.exports = {
+  ACTIVE_TRIO_STATUSES,
   CANCEL_ORIGENS,
+  DEFAULT_REPORT_PAGE_SIZE,
+  MAX_REPORT_PAGE_SIZE,
+  REPORT_SUMMARY_STATUSES,
+  countByStatusWithFilters,
   DEFAULT_FAILED_RETRY_BATCH_SIZE,
   DEFAULT_MAX_RETRY_COUNT,
   cancelIfPending,
   cancelPendingByCampaign,
   claimForSend,
+  countNonTerminalByCampaign,
   countVisibleByCampaignIds,
   createLog,
   findById,
+  findByTrio,
+  listTerminalGroupIdsByCampaign,
   hideByDateRange,
   listByCampaign,
   listByGroup,

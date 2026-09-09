@@ -1,7 +1,7 @@
-const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { buildFfmpegTimeoutMessage, resolveTimeoutMs, runFfmpegProcess } = require("./ffmpeg-process");
 
 const { resolveFfmpegPath } = require("./video-audio-extraction");
 
@@ -37,42 +37,17 @@ function fitsBase64Budget(byteLength, base64BudgetBytes) {
   return base64Length(byteLength) <= base64BudgetBytes;
 }
 
+// Mesmo desfecho de antes ({ code, signal, stderr }), agora com `timedOut` -
+// quem chama precisa poder distinguir "ffmpeg falhou" de "ffmpeg foi morto por
+// estourar o tempo". O timeout deixou de vir da opcao `timeout` do spawn, que
+// vaza o timer quando o processo nao consegue nascer (ver ffmpeg-process.js).
 function runFfmpeg(ffmpegPath, args, options = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(ffmpegPath, args, {
-      timeout: options.timeoutMs || DEFAULT_TIMEOUT_MS,
-      windowsHide: true,
-    });
-    let stderr = "";
-
-    child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
-    });
-
-    // Um "error" sem listener num stream e excecao nao capturada, que mata o
-    // processo inteiro. Os pipes do ffmpeg podem errar (EPIPE/ECONNRESET) quando o
-    // processo e derrubado pelo timeout no meio de um video longo. O desfecho real
-    // vem de "error"/"close" no proprio child, aqui so evitamos o evento solto.
-    child.stderr.on("error", () => {});
-    child.stdout && child.stdout.on("error", () => {});
-
-    child.on("error", (error) => {
-      if (error.code === "ENOENT") {
-        reject(
-          new Error(
-            `ffmpeg nao encontrado em "${ffmpegPath}". Instale as dependencias do projeto (npm install) ou defina FFMPEG_PATH.`
-          )
-        );
-
-        return;
-      }
-
-      reject(error);
-    });
-
-    child.on("close", (code, signal) => {
-      resolve({ code, signal, stderr });
-    });
+  // O default de 20 min e' deste modulo (recompressao e' lenta), nao o de
+  // ffmpeg-process (10 min); resolver aqui evita que a extracao do timeout para
+  // o modulo compartilhado encurte silenciosamente o teto da compressao.
+  return runFfmpegProcess(ffmpegPath, args, {
+    ...options,
+    timeoutMs: resolveTimeoutMs({ timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS }),
   });
 }
 
@@ -374,9 +349,18 @@ async function compressVideoToFitBase64Budget(downloadedVideo, options = {}) {
           })
         );
 
-      const { code, signal, stderr } = await runFfmpeg(ffmpegPath, args, options);
+      const { code, signal, stderr, timedOut } = await runFfmpeg(ffmpegPath, args, options);
 
       if (code !== 0) {
+        // Estouro de tempo com mensagem propria: sem isto, um ffmpeg morto pelo
+        // timeout chegava ao log como "code null, signal SIGTERM", que e' o mesmo
+        // texto de um ffmpeg morto por OOM ou por sinal externo.
+        if (timedOut) {
+          throw new Error(
+            buildFfmpegTimeoutMessage("recomprimir o video", options.timeoutMs || DEFAULT_TIMEOUT_MS)
+          );
+        }
+
         const details = String(stderr || "").trim().split("\n").slice(-5).join(" | ");
 
         throw new Error(

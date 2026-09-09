@@ -7,6 +7,7 @@ const videoCatalogService = require("../src/services/video-catalog.service");
 const groupVideoProgressService = require("../src/services/group-video-progress.service");
 const dispatchLogsService = require("../src/services/dispatch-logs.service");
 const campaignVideoCaptionsService = require("../src/services/campaign-video-captions.service");
+const campaignCaptionsQueue = require("../src/queues/campaign-captions");
 
 async function main() {
   const orgRepository = {
@@ -362,6 +363,7 @@ async function main() {
     groupWhatsappInstancesRepository: fakeGroupWhatsappInstancesRepository,
     whatsappInstancesService: fakeWhatsappInstancesService,
   });
+  const campaignCaptionsJobs = [];
   const campaignService = campaignsService.createCampaignsService({
     appUsersRepository,
     addCampaignTriggerJob: async (payload) => {
@@ -376,6 +378,14 @@ async function main() {
     },
     campaignGroupsRepository,
     campaignVideoCaptionsService: campaignVideoCaptionsServiceInstance,
+    // dispatchCampaign agora ENFILEIRA a geracao de legendas em vez de rodar
+    // uma promise solta no processo (queues/campaign-captions.js). Sem injetar
+    // isto, o teste tentaria falar com o Redis de verdade.
+    addCampaignCaptionsJob: async (params) => {
+      const job = { id: `captions-${campaignCaptionsJobs.length + 1}`, queueName: "campaign-captions", data: params };
+      campaignCaptionsJobs.push(job);
+      return job;
+    },
     dispatchLogsRepository: dispatchLogRepository,
     groupsRepository: groupRepository,
     settingsService: {
@@ -582,13 +592,21 @@ async function main() {
   assert.ok(dispatchLog.id);
   await assert.rejects(() => dispatchService.createLog({ campaign_id: "", group_id: "group-1", video_id: "video-1" }), /required/);
 
-  const reportRows = await dispatchService.listForReport({ startDate: "2026-07-01", endDate: "2026-07-20" });
-  assert.equal(reportRows.length, 2);
-  assert.equal(reportRows[0].groups.organizations.nome, "Acme");
+  // listForReport passou a devolver { data, pagination, summary } em vez de um
+  // array puro: a rota agora pagina no servidor, e os cartoes de resumo da tela
+  // precisam da contagem do filtro INTEIRO, nao da pagina exibida. Antes a rota
+  // devolvia todas as linhas do periodo com cinco tabelas embutidas e a tela
+  // recortava com slice().
+  const report = await dispatchService.listForReport({ startDate: "2026-07-01", endDate: "2026-07-20" });
+  assert.equal(report.data.length, 2);
+  assert.equal(report.data[0].groups.organizations.nome, "Acme");
+  assert.equal(report.pagination.total, 2);
+  assert.equal(report.pagination.has_more, false);
+  assert.equal(report.summary.enviado + report.summary.pendente + report.summary.falhou >= 0, true);
 
-  const reportRowsByOrg = await dispatchService.listForReport({ organizationId: "org-2" });
-  assert.equal(reportRowsByOrg.length, 1);
-  assert.equal(reportRowsByOrg[0].groups.organizations.nome, "Beta");
+  const reportByOrg = await dispatchService.listForReport({ organizationId: "org-2" });
+  assert.equal(reportByOrg.data.length, 1);
+  assert.equal(reportByOrg.data[0].groups.organizations.nome, "Beta");
 
   const farFuture = "2026-12-31";
   await assert.rejects(() => dispatchService.listForReport({ startDate: farFuture }), /future/);
@@ -661,18 +679,44 @@ async function main() {
     execution_at: "2026-07-18T10:00:00.000Z",
   });
   assert.equal(dispatchedCampaign.trigger_job, null);
-  // generateCaptionsForCampaign roda em background (fire-and-forget) e agora tambem
-  // consulta dispatch_rules via IO real antes de decidir sobre auto-confirmacao;
-  // um unico setImmediate nao e mais garantia suficiente de que a geracao terminou.
-  let progressAfterDispatch = await campaignVideoCaptionsServiceInstance.getCaptionProgress(
+
+  /*
+    A geracao de legendas deixou de ser uma promise solta neste processo e passou
+    a ser um job da fila campaign-captions - era exatamente a promise solta que
+    fazia todo deploy abandonar a geracao em andamento e deixar a campanha presa
+    em "gerando_legendas". Por isso o teste nao espera mais por um efeito
+    assincrono com laco de polling: ele confere o job enfileirado e roda o
+    processor, que e' quem gera daqui em diante.
+  */
+  assert.equal(campaignCaptionsJobs.length, 1, "dispatchCampaign precisa enfileirar a geracao de legendas");
+  assert.equal(campaignCaptionsJobs[0].data.campaign_id, dispatchedCampaign.campaign.id);
+  assert.equal(
+    campaignCaptionsJobs[0].data.confirm_payload.execution_at,
+    "2026-07-18T10:00:00.000Z",
+    "o payload do disparo tem de viajar no job: quem confirma e' o worker, em outro processo"
+  );
+  assert.equal(dispatchedCampaign.captions_job.id, "captions-1");
+
+  const captionsProcessor = campaignCaptionsQueue.createCampaignCaptionsProcessor({
+    logger: { info() {}, warn() {}, error() {} },
+    campaignsRepository: campaignRepository,
+    campaignVideoCaptionsService: campaignVideoCaptionsServiceInstance,
+    // require_human_review nao e' false: a confirmacao segue manual, como no
+    // restante deste teste (confirmDispatch e' chamado logo abaixo).
+    settingsService: { getDispatchRulesSettings: async () => ({ require_human_review: true }) },
+    inAppNotificationsService: {},
+  });
+  const captionsResult = await captionsProcessor({
+    id: campaignCaptionsJobs[0].id,
+    data: campaignCaptionsJobs[0].data,
+    attemptsMade: 0,
+    opts: { attempts: 3 },
+  });
+  assert.equal(captionsResult.status, "completed");
+
+  const progressAfterDispatch = await campaignVideoCaptionsServiceInstance.getCaptionProgress(
     dispatchedCampaign.campaign.id
   );
-  for (let attempt = 0; attempt < 20 && progressAfterDispatch.total === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    progressAfterDispatch = await campaignVideoCaptionsServiceInstance.getCaptionProgress(
-      dispatchedCampaign.campaign.id
-    );
-  }
   assert.equal(progressAfterDispatch.pendente, 0);
   assert.ok(progressAfterDispatch.total >= 1);
 

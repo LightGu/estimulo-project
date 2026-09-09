@@ -1,4 +1,5 @@
 const queueNames = {
+  campaignCaptions: "campaign-captions",
   campaignTrigger: "campaign-trigger",
   dispatch: "dispatch",
   dispatchReviewTimeout: "dispatch-review-timeout",

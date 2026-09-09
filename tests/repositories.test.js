@@ -58,6 +58,14 @@ function createMockClient() {
     limit() {
       return Promise.resolve({ data: result, error: null });
     },
+    // O relatorio passou a paginar no banco com .range(); antes trazia o
+    // periodo inteiro e a tela recortava com slice(). O `count` acompanha
+    // porque listWithFilters usa select(..., { count: "exact" }) para saber o
+    // total do filtro sem depender do tamanho da pagina.
+    range() {
+      const rows = Array.isArray(result) ? result : [result];
+      return Promise.resolve({ data: result, error: null, count: rows.length });
+    },
     maybeSingle() {
       return Promise.resolve({ data: result, error: null });
     },

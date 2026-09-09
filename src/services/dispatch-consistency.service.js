@@ -8,6 +8,30 @@ const defaultSettingsService = require("./settings.service");
 const { assertDeliveryConfirmed, extractProviderDelivery } = require("./delivery-confirmation");
 const { resolveMaxVideoDispatchDelayMs, resolveStaleDispatchReason } = require("./dispatch-staleness");
 
+// Violacao do indice unico parcial idx_logs_trio_ativo (migration 202609070002).
+//
+// O Postgres devolve 23505; o Postgrest repassa o codigo e cita o nome do
+// indice na mensagem. Casar tambem pelo nome evita tratar como corrida do trio
+// uma violacao de OUTRA constraint unica que venha a existir na tabela.
+const UNIQUE_VIOLATION_CODE = "23505";
+const TRIO_UNIQUE_INDEX_NAME = "idx_logs_trio_ativo";
+
+function isUniqueTrioViolation(error) {
+  if (!error) {
+    return false;
+  }
+
+  if (String(error.code) !== UNIQUE_VIOLATION_CODE) {
+    return false;
+  }
+
+  const haystack = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`;
+
+  // Sem mencao a indice nenhum, assume que e' o do trio: e' a unica constraint
+  // unica que este caminho de insercao pode violar hoje.
+  return !/idx_logs_/i.test(haystack) || haystack.includes(TRIO_UNIQUE_INDEX_NAME);
+}
+
 function writeStageLog(logger, level, event, payload = {}) {
   const writer = logger && (logger[level] || logger.info);
 
@@ -61,7 +85,23 @@ function createDispatchConsistencyService(dependencies = {}) {
     return { campaign, group, video };
   }
 
+  // Log do trio, filtrado NO BANCO.
+  //
+  // Antes esta funcao carregava todos os logs da campanha (listByCampaign,
+  // select("*") sem limite) e reduzia em memoria. Executada tres vezes por
+  // envio, era o maior custo do caminho critico - e, pior, ficava exposta ao
+  // teto de linhas do PostgREST: acima dele o resultado e' truncado em
+  // silencio, comecando pelas linhas mais antigas (a ordem era criado_em DESC),
+  // que sao exatamente os logs "enviado" que esta checagem precisa encontrar
+  // para NAO reenviar. Ver findByTrio em dispatch-logs.repository.js.
+  //
+  // Mantem o fallback para o caminho antigo porque varios testes injetam um
+  // repositorio falso que so implementa listByCampaign.
   async function findExistingLog(campaignId, groupId, videoId, statuses = ["pendente", "processando", "enviado", "falhou"]) {
+    if (typeof dispatchLogsRepositoryDependency.findByTrio === "function") {
+      return dispatchLogsRepositoryDependency.findByTrio(campaignId, groupId, videoId, statuses);
+    }
+
     const logs = await dispatchLogsRepositoryDependency.listByCampaign(campaignId);
 
     return (logs || []).find((entry) => {
@@ -77,33 +117,27 @@ function createDispatchConsistencyService(dependencies = {}) {
     }) || null;
   }
 
-  // LIMITACAO CONHECIDA (segura na configuracao atual, perigosa se escalar).
-  //
   // As tres etapas abaixo - buscar log "processando", buscar "pendente", criar -
-  // sao round-trips separados, sem atomicidade. Com DOIS workers de dispatch
-  // rodando, ambos podem passar pelas buscas antes de qualquer um criar, e cada
-  // um cria a SUA linha em `logs`. Como o claimForSend seguinte e' um
-  // compare-and-set por `id` de linha, os dois claims tem sucesso: o CAS protege
-  // uma linha, nao o trio logico campanha/grupo/video. Resultado: o mesmo video
-  // postado duas vezes no grupo.
+  // sao round-trips separados, sem atomicidade entre si. Dois produtores podem
+  // passar pelas buscas antes de qualquer um criar, e cada um cria a SUA linha
+  // em `logs`. Como o claimForSend seguinte e' um compare-and-set por `id` de
+  // LINHA, os dois claims tem sucesso: o CAS protege uma linha, nao o trio
+  // logico campanha/grupo/video. Resultado: o mesmo video postado duas vezes.
   //
-  // Por que e' seguro hoje: infra/docker-compose.yml declara UMA instancia de
-  // dispatch-worker (sem deploy.replicas) e a BullMQ usa concurrency 1 por
-  // padrao - nenhum dos dois e' sobrescrito no projeto. A serializacao e'
-  // operacional, nao estrutural.
+  // Isso NAO exigia escalar nada para acontecer, ao contrario do que este
+  // comentario dizia antes: a corrida entre ensurePendingDispatchLogs (que lia
+  // a lista de logs uma vez e decidia contra um array em memoria) e este
+  // createAttemptLog bastava, com um unico worker - o primeiro job de disparo
+  // sai com delay 0 e chega aqui enquanto o trigger ainda percorre os outros
+  // grupos inserindo. A linha perdedora ficava presa em "pendente" para sempre.
   //
-  // ANTES DE ESCALAR (`--scale dispatch-worker=N` ou concurrency > 1) e preciso:
-  //   1. auditar duplicatas historicas em `logs` para o trio
-  //      (campaign_id, group_id, video_id) - o indice abaixo falha se existirem;
-  //   2. criar o indice unico parcial:
-  //      CREATE UNIQUE INDEX CONCURRENTLY idx_logs_trio_ativo
-  //        ON public.logs (campaign_id, group_id, video_id)
-  //        WHERE status IN ('pendente','processando','enviado');
-  //   3. tratar a violacao aqui, relendo o log vencedor em vez de propagar o erro;
-  //   4. reverificar requeuePendingDispatchJobsForCampaign (campaign-trigger.js),
-  //      que reenfileira para o mesmo trio.
-  // O retry (markRetrying em dispatch-logs.repository.js) reutiliza o log
-  // existente, entao ja e' compativel com o indice.
+  // A defesa nao esta mais na ordem de execucao: o indice unico parcial
+  // idx_logs_trio_ativo (migration 202609070002) torna o segundo INSERT um erro
+  // 23505, e o catch abaixo rele o log vencedor em vez de propagar. O resultado
+  // passa a ser o mesmo independente de quem chegou primeiro - o que tambem
+  // libera `--scale dispatch-worker=N` / concurrency > 1, antes bloqueados por
+  // esta janela. O retry (markRetrying) reutiliza o log existente, entao ja era
+  // compativel com o indice.
   async function createAttemptLog(payload) {
     const existing = await findExistingLog(payload.campaignId, payload.groupId, payload.videoId, ["processando"]);
 
@@ -117,21 +151,64 @@ function createDispatchConsistencyService(dependencies = {}) {
       return { log: existingPending, created: false, skipSend: false };
     }
 
-    const log = await dispatchLogsRepositoryDependency.createLog({
-      campaign_id: payload.campaignId,
-      group_id: payload.groupId,
-      video_id: payload.videoId,
-      status: "pendente",
-      mensagem_erro: null,
-      // Grava o horario do job. Sem isto o log nascia com
-      // horario_envio_planejado NULL - a origem dos "logs orfaos" que apareciam
-      // no relatorio com "-" e, pior, que faziam todo caminho de resume/retry
-      // reenfileirar o envio sem nenhum horario em que ancorar a trava de
-      // atraso (o default `new Date()` assumia e o envio antigo saia como novo).
-      horario_envio_planejado: payload.scheduledAt || null,
-    });
+    try {
+      const log = await dispatchLogsRepositoryDependency.createLog({
+        campaign_id: payload.campaignId,
+        group_id: payload.groupId,
+        video_id: payload.videoId,
+        status: "pendente",
+        mensagem_erro: null,
+        // Grava o horario do job. Sem isto o log nascia com
+        // horario_envio_planejado NULL - a origem dos "logs orfaos" que apareciam
+        // no relatorio com "-" e, pior, que faziam todo caminho de resume/retry
+        // reenfileirar o envio sem nenhum horario em que ancorar a trava de
+        // atraso (o default `new Date()` assumia e o envio antigo saia como novo).
+        horario_envio_planejado: payload.scheduledAt || null,
+        // Correlacao: o job que originou esta tentativa carrega o mesmo valor.
+        dispatch_ref: payload.dispatchRef || null,
+      });
 
-    return { log, created: true, skipSend: false };
+      return { log, created: true, skipSend: false };
+    } catch (error) {
+      if (!isUniqueTrioViolation(error)) {
+        throw error;
+      }
+
+      // Perdemos a corrida: outro produtor criou o log deste trio entre as
+      // buscas acima e este INSERT, e o indice unico idx_logs_trio_ativo
+      // (migration 202609070002) recusou a duplicata. Rele o vencedor e siga
+      // com ELE - o envio continua acontecendo uma unica vez, por quem detiver
+      // o claim.
+      const winner = await findExistingLog(payload.campaignId, payload.groupId, payload.videoId, [
+        "pendente",
+        "processando",
+        "enviado",
+      ]);
+
+      writeStageLog(logger, "info", "dispatch_consistency.attempt_log_race_lost", {
+        campaign_id: payload.campaignId,
+        group_id: payload.groupId,
+        video_id: payload.videoId,
+        log_id: winner && winner.id,
+        winner_status: winner && winner.status,
+        note: "indice unico do trio recusou a linha duplicada; seguindo com o log existente",
+      });
+
+      if (!winner) {
+        // O indice recusou mas nada foi encontrado: so acontece se o vencedor
+        // saiu de um estado ativo nesse meio-tempo. Propaga - e' recuperavel
+        // pelo sweep de retry e nao arrisca envio duplicado.
+        throw error;
+      }
+
+      return {
+        log: winner,
+        created: false,
+        // "processando"/"enviado" ja tem envio em andamento ou concluido: nao
+        // reenviar. "pendente" segue para o claim, que decide quem envia.
+        skipSend: winner.status !== "pendente",
+      };
+    }
   }
 
   async function registerProgress(groupId, videoId, trilhaId, options = {}) {
@@ -245,19 +322,23 @@ function createDispatchConsistencyService(dependencies = {}) {
       neverRepeatVideo,
       forcedNextVideoId,
       scheduledAt,
+      windowEnd,
       whatsappInstanceId,
+      dispatchRef,
     } = options;
 
     writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.started", {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
     });
     const { campaign } = await ensureDispatchEntities(campaignId, groupId, videoId);
     writeStageLog(logger, "info", "dispatch_consistency.ensure_entities.completed", {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
     });
 
     // Pausa/cancelamento nao mudam o status do log de disparo pendente (fica
@@ -281,12 +362,14 @@ function createDispatchConsistencyService(dependencies = {}) {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
     });
     const completedLog = await findExistingLog(campaignId, groupId, videoId, ["enviado"]);
     writeStageLog(logger, "info", "dispatch_consistency.find_completed_log.completed", {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
       log_id: completedLog && completedLog.id,
     });
 
@@ -303,17 +386,20 @@ function createDispatchConsistencyService(dependencies = {}) {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
     });
     const { log, skipSend } = await createAttemptLog({
       campaignId,
       groupId,
       videoId,
       scheduledAt,
+      dispatchRef,
     });
     writeStageLog(logger, "info", "dispatch_consistency.create_attempt_log.completed", {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
       log_id: log && log.id,
       skipped_send: skipSend,
     });
@@ -340,6 +426,11 @@ function createDispatchConsistencyService(dependencies = {}) {
       // concorrencia 1 os ultimos grupos de uma campanha grande acumulam atraso
       // legitimo, e o teto de 30 min do envio pontual cancelaria esses envios.
       maxDelayMs: resolveMaxVideoDispatchDelayMs(),
+      // E a janela do usuario por cima do teto: enquanto o horario de FIM nao
+      // chegou, entregar continua sendo exatamente o que foi pedido. Sem isto o
+      // teto de 6h cancelava a cauda de campanhas grandes por um atraso que o
+      // proprio processamento serial produziu.
+      windowEnd,
     });
 
     if (staleReason) {
@@ -347,6 +438,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
         scheduled_at: log.horario_envio_planejado,
         reason: staleReason,
@@ -375,6 +467,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
       log_id: log.id,
     });
     // Reivindicacao atomica (so avanca se o log ainda estiver pendente): fecha
@@ -388,6 +481,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
       });
 
@@ -403,6 +497,7 @@ function createDispatchConsistencyService(dependencies = {}) {
       campaign_id: campaignId,
       group_id: groupId,
       video_id: videoId,
+      dispatch_ref: dispatchRef,
       log_id: log.id,
     });
 
@@ -411,6 +506,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
       });
       const result = await sender(deliveryPayload);
@@ -418,6 +514,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
       });
       assertDeliveryConfirmed(result);
@@ -426,6 +523,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
       });
       await dispatchLogsRepositoryDependency.updateStatus(log.id, "enviado", null, whatsappInstanceId || null);
@@ -433,6 +531,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
       });
 
@@ -440,12 +539,14 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
       });
 
       writeStageLog(logger, "info", "dispatch_consistency.progress.started", {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
       });
       const progress = await registerProgress(groupId, videoId, trilhaId, { neverRepeatVideo, forcedNextVideoId });
@@ -453,6 +554,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
         duplicate: Boolean(progress && progress.duplicate),
       });
@@ -470,6 +572,7 @@ function createDispatchConsistencyService(dependencies = {}) {
         campaign_id: campaignId,
         group_id: groupId,
         video_id: videoId,
+        dispatch_ref: dispatchRef,
         log_id: log.id,
         error_message: error.message || String(error),
       });

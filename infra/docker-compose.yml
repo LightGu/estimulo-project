@@ -24,6 +24,21 @@ x-app: &app
     # instancia la ANTES de remover do banco, ate o botao Remover devolvia 500.
     # Aqui o hostname vira o nome do servico; o .env segue valido fora do Docker.
     EVOLUTION_API_URL: ${EVOLUTION_API_URL_INTERNAL:-http://evolution-api:8080}
+    # Mesmo raciocinio do EVOLUTION_API_URL acima, para o BANCO da Evolution -
+    # e por muito tempo isto faltava aqui, com uma consequencia silenciosa.
+    #
+    # A confirmacao de entrega (services/delivery-confirmation.js) le o ACK do
+    # WhatsApp direto no Postgres da Evolution. Sem estas duas variaveis,
+    # config/evolution.js caia nos defaults `localhost:5433`: dentro do
+    # container, "localhost" e o proprio container, e 5433 nao existe em lugar
+    # nenhum (o servico evolution-postgres escuta em 5432 e nao publica porta).
+    # A consulta falhava sempre, o catch de evolution-message-status.js devolvia
+    # `null`, e TODO envio era gravado com provider_status "NAO_VERIFICADO" -
+    # inclusive os que o WhatsApp marcou com ACK de erro, que e o unico sinal
+    # capaz de reprovar um envio para grupo. O recurso inteiro ficava inerte em
+    # producao e funcionava na maquina do dev, onde localhost resolve de fato.
+    EVOLUTION_DB_HOST: ${EVOLUTION_DB_HOST_INTERNAL:-evolution-postgres}
+    EVOLUTION_DB_PORT: ${EVOLUTION_DB_PORT_INTERNAL:-5432}
   volumes:
     - app-storage:/app/storage
     # `credentials/` fica fora da imagem de proposito (esta no .dockerignore),
@@ -100,6 +115,14 @@ services:
     <<: *app
     profiles: ["workers"]
     command: ["node", "scripts/start-campaign-trigger-worker.js"]
+
+  # Geracao de legendas da Etapa 2. Antes rodava como promise solta dentro do
+  # container `api`, o que fazia todo deploy (que recria a api) abandonar a
+  # geracao em andamento e deixar a campanha presa em "gerando_legendas".
+  campaign-captions-worker:
+    <<: *app
+    profiles: ["workers"]
+    command: ["node", "scripts/start-campaign-captions-worker.js"]
 
   dispatch-worker:
     <<: *app

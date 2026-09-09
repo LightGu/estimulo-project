@@ -12,6 +12,19 @@ async function main() {
       redisClient: {
         ping: async () => "PONG",
       },
+      // O /health passou a olhar tambem o Supabase e o banco de ACK da
+      // Evolution (antes so o Redis, o que deixava a API "saudavel" com o banco
+      // fora). Sem injetar essas duas dependencias, o teste tentaria falar com
+      // os servicos reais.
+      databaseClient: {
+        from: () => ({
+          select: async () => ({ data: [], error: null, count: 1 }),
+        }),
+      },
+      messageStatusReader: {
+        isDatabaseConfigured: () => true,
+        findMessageAckStatus: async () => ({ found: false, status: null }),
+      },
       dispatchQueueFactory: () => ({
         getJobCounts: async () => ({ waiting: 0, active: 0, completed: 2, failed: 0, delayed: 0 }),
       }),
@@ -970,6 +983,72 @@ async function main() {
     assert.equal(healthPayload.checks.application.status, "ok");
     assert.equal(healthPayload.checks.redis.status, "ok");
     assert.ok(healthPayload.checks.redis);
+    // Novas dependencias observadas: o banco (essencial) e a consulta de ACK.
+    assert.equal(healthPayload.checks.database.status, "ok");
+    assert.equal(healthPayload.checks.delivery_confirmation.status, "ok");
+
+    // "degraded" existe para a dependencia NAO essencial: com o banco de ACK
+    // fora, a API continua enfileirando e registrando normalmente, entao
+    // responder 503 faria o healthcheck do compose reiniciar a API por causa de
+    // um servico externo - interrompendo envios em andamento sem consertar nada.
+    // Este era o estado real de producao, e antes ele era invisivel.
+    const degradedApp = createApp({
+      authGate: { enabled: false },
+      healthController: {
+        redisClient: { ping: async () => "PONG" },
+        databaseClient: {
+          from: () => ({ select: async () => ({ data: [], error: null, count: 1 }) }),
+        },
+        messageStatusReader: {
+          isDatabaseConfigured: () => true,
+          // null = "nao consegui consultar", que e' o que acontecia em producao
+          // com EVOLUTION_DB_HOST apontando para o proprio container.
+          findMessageAckStatus: async () => null,
+        },
+      },
+    });
+    const degradedServer = degradedApp.listen(0);
+    await new Promise((resolve) => degradedServer.once("listening", resolve));
+    const degradedPort = degradedServer.address().port;
+
+    const degradedResponse = await fetch(`http://127.0.0.1:${degradedPort}/health`);
+    assert.equal(degradedResponse.status, 200, "degradado nao pode derrubar o healthcheck do container");
+    const degradedPayload = await degradedResponse.json();
+    assert.equal(degradedPayload.status, "degraded");
+    assert.equal(degradedPayload.checks.redis.status, "ok");
+    assert.equal(degradedPayload.checks.database.status, "ok");
+    assert.equal(degradedPayload.checks.delivery_confirmation.status, "error");
+
+    await new Promise((resolve) => degradedServer.close(resolve));
+
+    // Banco fora, por outro lado, e' essencial: sem ele nao ha como registrar
+    // envio nenhum, e 503 e' a resposta certa.
+    const databaseDownApp = createApp({
+      authGate: { enabled: false },
+      healthController: {
+        redisClient: { ping: async () => "PONG" },
+        databaseClient: {
+          from: () => ({
+            select: async () => ({ data: null, error: new Error("Supabase unavailable"), count: null }),
+          }),
+        },
+        messageStatusReader: {
+          isDatabaseConfigured: () => true,
+          findMessageAckStatus: async () => ({ found: false, status: null }),
+        },
+      },
+    });
+    const databaseDownServer = databaseDownApp.listen(0);
+    await new Promise((resolve) => databaseDownServer.once("listening", resolve));
+    const databaseDownPort = databaseDownServer.address().port;
+
+    const databaseDownResponse = await fetch(`http://127.0.0.1:${databaseDownPort}/health`);
+    assert.equal(databaseDownResponse.status, 503, "Supabase fora precisa reprovar o health check");
+    const databaseDownPayload = await databaseDownResponse.json();
+    assert.equal(databaseDownPayload.status, "error");
+    assert.equal(databaseDownPayload.checks.database.status, "error");
+
+    await new Promise((resolve) => databaseDownServer.close(resolve));
 
     const unhealthyApp = createApp({
       healthController: {
@@ -977,6 +1056,13 @@ async function main() {
           ping: async () => {
             throw new Error("Redis unavailable");
           },
+        },
+        databaseClient: {
+          from: () => ({ select: async () => ({ data: [], error: null, count: 1 }) }),
+        },
+        messageStatusReader: {
+          isDatabaseConfigured: () => true,
+          findMessageAckStatus: async () => ({ found: false, status: null }),
         },
       },
       campaignService: {

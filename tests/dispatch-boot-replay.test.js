@@ -644,7 +644,84 @@ async function testReviewTimeoutAindaConfirmaCampanhaRecemTravada() {
   assert.equal(result.confirmed, 1);
 }
 
+/*
+  A CAUDA DA CAMPANHA NAO PODE SE AUTO-CANCELAR.
+
+  O worker de video roda com concorrencia 1 e cada job baixa do Drive, remuxa,
+  comprime e sobe em base64 - DISPATCH_JOB_TIMEOUT_MS admite 25 min por job.
+  Numa campanha com dezenas de grupos, os ultimos acumulam horas de atraso em
+  relacao ao proprio horario sorteado. Com o teto fixo de 6h e SEM window_end,
+  esses envios eram cancelados com "ultrapassou 360 min de atraso" - ainda
+  dentro da janela que o usuario escolheu. O operador via a campanha cancelar
+  metade dos grupos sozinha, e nada disso reproduzia local (video de teste
+  processa em segundos).
+
+  O caminho de mensagem pontual sempre teve window_end e por isso nunca sofreu
+  disso; era uma assimetria entre as duas filas, nao uma decisao.
+
+  Os dois testes abaixo fixam as duas metades da regra: dentro da janela,
+  entrega; passada a janela, cancela.
+*/
+async function testVideoAtrasadoDentroDaJanelaAindaEnvia() {
+  const harness = buildDispatchHarness();
+  const job = createFakeJob(
+    buildVideoJobData({
+      // 7h de atraso: passou do teto de 6h do caminho de video.
+      scheduled_at: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(),
+      // ... mas a janela escolhida pelo usuario so termina daqui a 1h.
+      window_end: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    })
+  );
+
+  const result = await harness.processor(job);
+
+  assert.equal(
+    harness.sent.length,
+    1,
+    "envio atrasado pela fila, mas ainda dentro da janela pedida, precisa acontecer"
+  );
+  assert.notEqual(result.status, "cancelado");
+  assert.equal(harness.cancelledLogs.length, 0, "nao pode cancelar log de envio que ainda cabe na janela");
+}
+
+async function testVideoAtrasadoAposFimDaJanelaEhCancelado() {
+  const harness = buildDispatchHarness();
+  const job = createFakeJob(
+    buildVideoJobData({
+      scheduled_at: new Date(Date.now() - 7 * 60 * 60 * 1000).toISOString(),
+      // Janela terminou 2h atras: nao ha mais envio a fazer.
+      window_end: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    })
+  );
+
+  const result = await harness.processor(job);
+
+  assert.equal(harness.sent.length, 0, "passada a janela, o envio nao deve sair");
+  assert.equal(result.status, "cancelado");
+  assert.match(String(result.reason), /janela de envio terminou/i);
+}
+
+// E o teto ABSOLUTO continua valendo por cima da janela: uma janela mal
+// preenchida (fim daqui a uma semana) nao pode reabrir o replay de boot.
+async function testJanelaLongaNaoReabreReplayDeBoot() {
+  const harness = buildDispatchHarness();
+  const job = createFakeJob(
+    buildVideoJobData({
+      scheduled_at: daysAgoIso(4),
+      window_end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    })
+  );
+
+  const result = await harness.processor(job);
+
+  assert.equal(harness.sent.length, 0, "job de dias atras nao pode ser liberado por uma janela larga");
+  assert.equal(result.status, "cancelado");
+}
+
 async function main() {
+  await testVideoAtrasadoDentroDaJanelaAindaEnvia();
+  await testVideoAtrasadoAposFimDaJanelaEhCancelado();
+  await testJanelaLongaNaoReabreReplayDeBoot();
   await testJobDeDiasAtrasNaoChamaOSender();
   await testJobVencidoSemConsistenciaTambemNaoEnvia();
   await testJobSemHorarioNaoEnvia();

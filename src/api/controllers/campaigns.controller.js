@@ -39,6 +39,14 @@ function createCampaignsController(dependencies = {}) {
         return res.status(409).json({ error: message, group_ids: error.groupIds });
       }
 
+      // A geracao de legendas passou a ser um job da fila campaign-captions. Com
+      // o Redis indisponivel, a campanha e' criada mas nada a tira de
+      // "gerando_legendas" - 503 diz que o problema e' de infraestrutura e que
+      // repetir o disparo resolve, em vez do 500 generico logo abaixo.
+      if (error?.code === "CAMPAIGN_CAPTIONS_ENQUEUE_FAILED") {
+        return res.status(503).json({ error: message, campaign_id: error.campaignId });
+      }
+
       console.error(
         JSON.stringify({
           event: "campaigns.create.failed",

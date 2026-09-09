@@ -89,6 +89,88 @@ function createSettingsService(dependencies = {}) {
   const indexer = dependencies.indexGoogleDriveVideos || indexGoogleDriveVideos;
   const stateStore = dependencies.stateStore || createGoogleDriveVideoIndexStateStore();
 
+  /*
+    Cache da linha unica de `settings`.
+
+    Por que valia a pena: `settings` e' UMA linha (key = 'global') e era relida
+    do Supabase em todo envio, todo sweep de retry (a cada 5 min), toda falha e
+    toda notificacao. Alem do round-trip no caminho critico, isso criava um
+    ponto unico de falha com consequencia desproporcional: quando a leitura
+    falhava, era o FALLBACK que decidia o comportamento. markCampaignFailed
+    documenta o caso - assumir `auto_retry_failures: false` desativava a
+    campanha inteira, e a correcao na epoca foi trocar o default, nao remover a
+    dependencia.
+
+    TTL curto (30s por padrao) porque estas configuracoes mudam por acao manual
+    na tela, nunca por processo automatico. Toda funcao update* deste service
+    invalida o cache explicitamente, entao a janela de 30s so se aplica a uma
+    alteracao feita em OUTRO processo (a API muda, os workers levam ate 30s para
+    ver) - aceitavel para regras de disparo, e o motivo de o TTL ser curto.
+
+    Deliberadamente NAO cacheia para testDatabaseConnection: ali a leitura e' a
+    propria prova de vida do banco, e responder do cache tornaria o teste
+    inutil.
+  */
+  const SETTINGS_CACHE_TTL_MS = Number(process.env.SETTINGS_CACHE_TTL_MS ?? 30000);
+  let settingsCache = null;
+
+  function invalidateSettingsCache() {
+    settingsCache = null;
+  }
+
+  // Todo caminho de escrita passa por aqui: gravar sem invalidar deixaria a
+  // propria requisicao que mudou a configuracao lendo o valor antigo por ate
+  // TTL segundos, o que apareceria na tela como "salvou e nao aplicou".
+  //
+  // A invalidacao vem ANTES da escrita e o cache e' zerado de novo depois: se a
+  // escrita falhar no meio, o pior caso e' um cache frio (uma consulta extra),
+  // nunca um valor obsoleto servido como atual.
+  async function updateSettingsAndInvalidate(payload) {
+    invalidateSettingsCache();
+
+    try {
+      return await repository.updateSettings(payload);
+    } finally {
+      invalidateSettingsCache();
+    }
+  }
+
+  async function readSettings() {
+    if (!Number.isFinite(SETTINGS_CACHE_TTL_MS) || SETTINGS_CACHE_TTL_MS <= 0) {
+      return repository.getSettings();
+    }
+
+    const now = Date.now();
+
+    if (settingsCache && settingsCache.expiresAt > now) {
+      return settingsCache.value;
+    }
+
+    // A promessa em voo tambem e' compartilhada: sem isso, N chamadas
+    // concorrentes no mesmo tick (o laco de grupos de uma campanha) disparariam
+    // N consultas identicas antes de a primeira responder.
+    if (settingsCache && settingsCache.pending) {
+      return settingsCache.pending;
+    }
+
+    const pending = repository
+      .getSettings()
+      .then((value) => {
+        settingsCache = { value, expiresAt: Date.now() + SETTINGS_CACHE_TTL_MS };
+        return value;
+      })
+      .catch((error) => {
+        // Falha nao e' cacheada: a proxima chamada tenta de novo em vez de
+        // repetir o fallback por 30s.
+        settingsCache = null;
+        throw error;
+      });
+
+    settingsCache = { pending };
+
+    return pending;
+  }
+
   let lazyUpsertVideo;
 
   function resolveUpsertVideo() {
@@ -122,7 +204,7 @@ function createSettingsService(dependencies = {}) {
   }
 
   async function getDriveSettings() {
-    const settings = await repository.getSettings();
+    const settings = await readSettings();
     const { hour, minute } = parseDailyCronExpression(settings && settings.drive_index_cron);
     const rootFolderId = (settings && settings.drive_root_folder_id) || null;
 
@@ -149,7 +231,7 @@ function createSettingsService(dependencies = {}) {
   }
 
   async function testDriveConnection() {
-    const settings = await repository.getSettings();
+    const settings = await readSettings();
     const rootFolderId = settings && settings.drive_root_folder_id;
 
     if (!rootFolderId) {
@@ -179,7 +261,7 @@ function createSettingsService(dependencies = {}) {
 
     const folderId = extractDriveFolderId(rawValue);
 
-    await repository.updateSettings({ drive_root_folder_id: folderId });
+    await updateSettingsAndInvalidate({ drive_root_folder_id: folderId });
 
     return getDriveSettings();
   }
@@ -199,7 +281,7 @@ function createSettingsService(dependencies = {}) {
     const timezone = input.timezone || undefined;
     const cronExpression = buildDailyCronExpression(hour, minute);
 
-    await repository.updateSettings({
+    await updateSettingsAndInvalidate({
       drive_index_cron: cronExpression,
       drive_index_timezone: timezone || null,
     });
@@ -234,7 +316,7 @@ function createSettingsService(dependencies = {}) {
   }
 
   async function getScheduleSettings() {
-    const settings = await repository.getSettings();
+    const settings = await readSettings();
 
     return {
       timezone: (settings && settings.default_timezone) || DEFAULT_SCHEDULE_TIMEZONE,
@@ -274,7 +356,7 @@ function createSettingsService(dependencies = {}) {
     const dispatchPeriods = normalizeDispatchPeriods(input.dispatch_periods);
     assertValidDispatchPeriods(dispatchPeriods);
 
-    await repository.updateSettings({
+    await updateSettingsAndInvalidate({
       default_timezone: timezone,
       default_min_interval_min: minInterval,
       default_max_interval_min: maxInterval,
@@ -285,7 +367,7 @@ function createSettingsService(dependencies = {}) {
   }
 
   async function reindexDriveNow() {
-    const settings = await repository.getSettings();
+    const settings = await readSettings();
     const rootFolderId = settings && settings.drive_root_folder_id;
 
     if (!rootFolderId) {
@@ -347,7 +429,7 @@ function createSettingsService(dependencies = {}) {
   }
 
   async function getNotificationSettings() {
-    const settings = await repository.getSettings();
+    const settings = await readSettings();
     const groupId = (settings && settings.notification_group_id) || null;
     const group = groupId ? await groupsRepositoryDependency.findById(groupId) : null;
 
@@ -389,14 +471,14 @@ function createSettingsService(dependencies = {}) {
     }
 
     if (Object.keys(updatePayload).length > 0) {
-      await repository.updateSettings(updatePayload);
+      await updateSettingsAndInvalidate(updatePayload);
     }
 
     return getNotificationSettings();
   }
 
   async function getAIAgentsSettings() {
-    const settings = await repository.getSettings();
+    const settings = await readSettings();
     const stored = (settings && settings.ai_agents) || {};
 
     return {
@@ -453,13 +535,13 @@ function createSettingsService(dependencies = {}) {
       };
     }
 
-    await repository.updateSettings({ ai_agents: next });
+    await updateSettingsAndInvalidate({ ai_agents: next });
 
     return getAIAgentsSettings();
   }
 
   async function getDispatchRulesSettings() {
-    const settings = await repository.getSettings();
+    const settings = await readSettings();
 
     return {
       ...DEFAULT_DISPATCH_RULES,
@@ -517,7 +599,7 @@ function createSettingsService(dependencies = {}) {
       };
     }
 
-    await repository.updateSettings({ dispatch_rules: next });
+    await updateSettingsAndInvalidate({ dispatch_rules: next });
 
     return getDispatchRulesSettings();
   }

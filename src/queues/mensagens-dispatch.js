@@ -8,6 +8,8 @@ const {
   extractProviderDelivery,
 } = require("../services/delivery-confirmation");
 const { resolveJobStaleReason } = require("../services/dispatch-staleness");
+const { buildMensagensRef } = require("../utils/dispatch-ref");
+const { readMediaFromSpool, releaseMediaFromSpool } = require("../services/media-spool");
 const dispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
 
@@ -33,12 +35,70 @@ function resolveMensagensDispatchJobTimeoutMs() {
   return Math.trunc(timeoutMs);
 }
 
+// Teto do tamanho do job serializado. Generoso de proposito: o anexo em base64
+// legitimamente ocupa dezenas de MB e o objetivo aqui e' barrar o absurdo (ou um
+// bug de montagem de payload), nao o uso normal.
+const DEFAULT_MENSAGENS_JOB_SIZE_LIMIT_BYTES = 200 * 1024 * 1024;
+
+function resolveMensagensJobSizeLimitBytes() {
+  const configured = Number(process.env.MENSAGENS_DISPATCH_JOB_SIZE_LIMIT_BYTES);
+
+  if (!Number.isFinite(configured) || configured <= 0) {
+    return DEFAULT_MENSAGENS_JOB_SIZE_LIMIT_BYTES;
+  }
+
+  return Math.trunc(configured);
+}
+
+// Identidade logica de um envio pontual, usada como `jobId`.
+//
+// A BullMQ recusa em silencio um add() com jobId ja existente - e e' essa recusa
+// que protege contra envio duplicado. O caminho de video ganhou
+// buildDispatchJobId por esse motivo; esta fila ficou sem equivalente, com id
+// sequencial gerado pela BullMQ. Consequencia: qualquer enfileiramento repetido
+// do mesmo envio (resume que nao achou o job original, reprocesso de
+// prepareMediaAndEnqueue, dois cliques) criava um segundo job para o MESMO
+// dispatch_log_id. O claimForSend cobre o caso comum, mas o ramo legado sem
+// dispatch_log_id (buildMensagensJobData aceita null) ficava sem protecao alguma.
+//
+// A chave preferida e' o dispatch_log_id: ele identifica o envio daquele grupo
+// naquela campanha, e e' exatamente o que o worker usa para reivindicar. Sem
+// ele, cai para grupo + horario, que e' o melhor disponivel.
+//
+// O saneamento de ":" e obrigatorio: a BullMQ so aceita ":" num jobId customizado
+// se o resultado tiver EXATAMENTE 3 segmentos (formato reservado de repeatable
+// jobs - ver Job.validateOptions). O horario ISO sempre tem ":" e o JID do grupo
+// pode ter, entao todo componente e' normalizado antes de juntar.
+function buildMensagensJobId(jobData = {}) {
+  const sanitize = (value) => String(value).replace(/:/g, "_");
+
+  if (jobData.dispatch_log_id) {
+    return `mensagens|log|${sanitize(jobData.dispatch_log_id)}`;
+  }
+
+  return [
+    "mensagens",
+    sanitize(jobData.internal_group_id || jobData.group_id),
+    sanitize(jobData.scheduled_at),
+  ].join("|");
+}
+
 function getMensagensDispatchQueue() {
   if (!mensagensDispatchQueueInstance) {
     mensagensDispatchQueueInstance = createQueue(queueNames.mensagensDispatch, {
       defaultJobOptions: {
         attempts: 1,
-        timeout: resolveMensagensDispatchJobTimeoutMs(),
+        // `timeout` NAO existe mais nas opcoes de job da BullMQ (removido na v2;
+        // aqui roda a 5.x) - ficava aqui sendo ignorado em silencio, sugerindo
+        // uma garantia inexistente. Quem de fato limita a duracao e o
+        // `lockDuration` do worker, configurado com o mesmo valor mais abaixo.
+        //
+        // `sizeLimit`, ao contrario, e' real e vale a pena: o job desta fila
+        // carrega a midia em base64 dentro de `content`, ou seja, o payload
+        // inteiro vai para o Redis. Sem teto, um anexo grande multiplicado pelo
+        // numero de grupos escrevia gigabytes no AOF. Aqui o enfileiramento
+        // falha cedo, com erro claro, em vez de degradar o Redis.
+        sizeLimit: resolveMensagensJobSizeLimitBytes(),
       },
     });
   }
@@ -65,7 +125,7 @@ function assertRequiredField(params, fieldName) {
 function buildMensagensJobData(params = {}) {
   assertRequiredField(params, "group_id");
 
-  if (!params.message && !params.content) {
+  if (!params.message && !params.content && !params.content_ref && !params.contentRef) {
     throw new Error("message ou content e obrigatorio para enfileirar mensagens-dispatch");
   }
 
@@ -77,6 +137,20 @@ function buildMensagensJobData(params = {}) {
     group_nome: params.group_nome || params.groupNome,
     message: params.message || "",
     content: params.content || null,
+    /*
+      Referencia ao anexo depositado em services/media-spool.js, em vez do
+      base64 dentro do job.
+
+      Antes o anexo inteiro ia em `content`, o que o replicava por grupo (um job
+      cada) e, pior, era reescrito a cada `job.updateData({ ...job.data })` do
+      worker - duas ou tres vezes por envio, sempre o payload completo. Um video
+      de 100 MB para 30 grupos escrevia da ordem de 9 GB no Redis, que roda com
+      appendonly, num unico disparo.
+
+      `content` continua sendo aceito e tratado pelo worker: jobs enfileirados
+      antes deste deploy ainda carregam o base64 e precisam sair normalmente.
+    */
+    content_ref: params.content_ref || params.contentRef || null,
     scheduled_at: scheduledDate.toISOString(),
     // Fim da janela escolhida pelo usuario, propagado ate o worker: e' o que
     // permite a trava de atraso distinguir "job zumbi de dias atras" de "envio
@@ -92,6 +166,16 @@ function buildMensagensJobData(params = {}) {
     // Sem este campo o job perdia a instancia sorteada no agendamento e o worker
     // enviava tudo pelo numero do .env, independente do rodizio configurado.
     whatsapp_instance_id: params.whatsapp_instance_id || params.whatsappInstanceId || null,
+    // Correlacao do envio, no mesmo formato do caminho de video (prefixo "m:"
+    // para dizer de qual fila veio). Ver src/utils/dispatch-ref.js.
+    dispatch_ref:
+      params.dispatch_ref ||
+      buildMensagensRef({
+        dispatchLogId: params.dispatch_log_id,
+        internalGroupId: params.internal_group_id || params.internalGroupId,
+        groupId: params.group_id,
+        scheduledAt: scheduledDate.toISOString(),
+      }),
   };
 }
 
@@ -100,6 +184,7 @@ function buildMensagensJobOptions(jobData, options = {}) {
   const delay = Math.max(scheduledTime - Date.now(), 0);
 
   return {
+    jobId: buildMensagensJobId(jobData),
     ...options,
     delay: options.delay ?? delay,
   };
@@ -131,8 +216,33 @@ function createMensagensDispatchProcessor(options = {}) {
     whatsappInstancesRepository,
     campaignsRepository = defaultCampaignsRepository,
     confirmDelivery = confirmProviderDelivery,
+    readSpooledMedia = readMediaFromSpool,
+    releaseSpooledMedia = releaseMediaFromSpool,
     now = () => new Date(),
   } = options;
+
+  // Best-effort em qualquer desfecho: o job nao vai mais ler o anexo, e nao
+  // liberar e' recuperavel pelo TTL do spool. Um erro aqui nunca pode derrubar
+  // um envio que ja aconteceu.
+  async function releaseMediaReference(jobData, logger_) {
+    if (!jobData.content_ref) {
+      return;
+    }
+
+    try {
+      await releaseSpooledMedia(jobData.content_ref);
+    } catch (error) {
+      logger_.warn &&
+        logger_.warn(
+          JSON.stringify({
+            event: "mensagens_dispatch.media_release_failed",
+            dispatch_ref: jobData.dispatch_ref,
+            spool_key: jobData.content_ref.spool_key,
+            error_message: error && error.message,
+          })
+        );
+    }
+  }
 
   async function updateDispatchLogStatus(dispatchLogId, status, mensagemErro, whatsappInstanceId) {
     if (!dispatchLogId) {
@@ -215,6 +325,7 @@ function createMensagensDispatchProcessor(options = {}) {
           JSON.stringify({
             event: "mensagens_dispatch.cancelled_stale",
             job_id: job.id,
+            dispatch_ref: job.data.dispatch_ref,
             group_id: job.data.group_id,
             internal_group_id: job.data.internal_group_id,
             dispatch_log_id: job.data.dispatch_log_id,
@@ -222,6 +333,8 @@ function createMensagensDispatchProcessor(options = {}) {
             reason: staleReason,
           })
         );
+
+      await releaseMediaReference(job.data, logger);
 
       return { status: "cancelado", reason: staleReason };
     }
@@ -254,6 +367,7 @@ function createMensagensDispatchProcessor(options = {}) {
             JSON.stringify({
               event: "mensagens_dispatch.pause_check_failed",
               job_id: job.id,
+              dispatch_ref: job.data.dispatch_ref,
               dispatch_log_id: job.data.dispatch_log_id,
               error_message: error && error.message,
             })
@@ -265,6 +379,12 @@ function createMensagensDispatchProcessor(options = {}) {
       }
 
       if (pausedCampaign && (pausedCampaign.status === "pausado" || pausedCampaign.status === "cancelado")) {
+        // Este job nao vai mais ler o anexo. Um resume cria job NOVO, que
+        // passa por requeuePendingMessages e nao tem referencia de anexo
+        // (limitacao ja conhecida e documentada la), entao liberar aqui nao
+        // tira midia de ninguem - so evita esperar o TTL.
+        await releaseMediaReference(job.data, logger);
+
         return { status: pausedCampaign.status === "cancelado" ? "skipped_cancelled" : "skipped_paused" };
       }
     }
@@ -291,9 +411,12 @@ function createMensagensDispatchProcessor(options = {}) {
               JSON.stringify({
                 event: "mensagens_dispatch.claim_lost",
                 job_id: job.id,
+                dispatch_ref: job.data.dispatch_ref,
                 dispatch_log_id: job.data.dispatch_log_id,
               })
             );
+
+          await releaseMediaReference(job.data, logger);
 
           return { status: "skipped" };
         }
@@ -308,6 +431,7 @@ function createMensagensDispatchProcessor(options = {}) {
           JSON.stringify({
             event: "mensagens_dispatch.started",
             job_id: job.id,
+            dispatch_ref: job.data.dispatch_ref,
             group_id: job.data.group_id,
             internal_group_id: job.data.internal_group_id,
             scheduled_at: job.data.scheduled_at,
@@ -320,8 +444,28 @@ function createMensagensDispatchProcessor(options = {}) {
         sendParams.message = job.data.message;
       }
 
+      // `content` inline: jobs enfileirados antes da introducao do spool, que
+      // ainda carregam o base64 no payload. Precisam continuar saindo.
       if (job.data.content) {
         sendParams.content = job.data.content;
+      } else if (job.data.content_ref) {
+        // Lido aqui, no ultimo instante antes do envio, e nao no inicio do job:
+        // e' o que mantem o base64 fora da memoria durante a checagem de pausa,
+        // o claim e a espera na fila.
+        const spooled = await readSpooledMedia(job.data.content_ref);
+
+        if (!spooled) {
+          // Anexo sumiu do spool (TTL vencido com o job atrasado, ou Redis
+          // limpo). Falhar e' obrigatorio: enviar so o texto entregaria ao grupo
+          // uma mensagem diferente da que foi agendada, e sem aviso.
+          throw new Error(
+            `Anexo do envio nao esta mais disponivel para envio (${
+              job.data.content_ref.file_name || "arquivo"
+            }): o agendamento expirou antes de ser processado`
+          );
+        }
+
+        sendParams.content = spooled;
       }
 
       // Resolvido por job (e nao uma vez no processor) porque cada grupo da
@@ -338,6 +482,7 @@ function createMensagensDispatchProcessor(options = {}) {
         logger,
         context: {
           job_id: job.id,
+          dispatch_ref: job.data.dispatch_ref,
           group_id: job.data.group_id,
           internal_group_id: job.data.internal_group_id,
         },
@@ -353,12 +498,16 @@ function createMensagensDispatchProcessor(options = {}) {
 
       await updateDispatchLogStatus(job.data.dispatch_log_id, "enviado", null, job.data.whatsapp_instance_id || null);
       await recordProviderDelivery(job.data.dispatch_log_id, result);
+      // Depois de gravar o log: o anexo ja foi entregue, e perder a liberacao e'
+      // recuperavel pelo TTL, enquanto perder o registro do envio nao e'.
+      await releaseMediaReference(job.data, logger);
 
       logger.info &&
         logger.info(
           JSON.stringify({
             event: "mensagens_dispatch.sent",
             job_id: job.id,
+            dispatch_ref: job.data.dispatch_ref,
             group_id: job.data.group_id,
             internal_group_id: job.data.internal_group_id,
             started_at: startedAt,
@@ -384,12 +533,15 @@ function createMensagensDispatchProcessor(options = {}) {
       });
 
       await updateDispatchLogStatus(job.data.dispatch_log_id, "falhou", error.message, job.data.whatsapp_instance_id || null);
+      // attempts: 1 nesta fila - a falha e' final, o anexo nao sera lido de novo.
+      await releaseMediaReference(job.data, logger);
 
       logger.error &&
         logger.error(
           JSON.stringify({
             event: "mensagens_dispatch.failed",
             job_id: job.id,
+            dispatch_ref: job.data.dispatch_ref,
             group_id: job.data.group_id,
             internal_group_id: job.data.internal_group_id,
             started_at: startedAt,
@@ -446,6 +598,7 @@ module.exports = {
   addJitteredMensagensDispatchJobs,
   addMensagensDispatchJob,
   buildMensagensJobData,
+  buildMensagensJobId,
   createMensagensDispatchEvents,
   createMensagensDispatchProcessor,
   createMensagensDispatchWorker,

@@ -61,6 +61,7 @@
                 <input id="rollupDataFim" type="date">
               </div>
             </div>
+            <p class="text-muted" id="orgRollupTruncatedNote" hidden></p>
             <div class="table-wrap">
               <table>
                 <thead>
@@ -144,8 +145,10 @@
         organizations: [],
         groups: [],
         campaigns: [],
-        todayDispatches: [],
+        todaySummary: null,
+        todayTotal: 0,
         allDispatches: [],
+        allDispatchesTruncated: false,
       };
 
 
@@ -174,13 +177,60 @@
       }
 
 
+      /*
+        Linhas de envio para os graficos e o rollup do painel.
+
+        A rota /reports/dispatches devolvia TODO o historico numa resposta e o
+        painel agregava em memoria. Alem do custo, o corte do PostgREST
+        (db-max-rows) truncava o resultado em silencio - o rollup passava a
+        somar menos envios do que existem, sem nenhum aviso.
+
+        Aqui a busca e' paginada e o teto e' EXPLICITO: se ele for atingido, o
+        painel avisa em vez de mostrar um numero incompleto como se fosse o
+        total. Os KPIs de hoje nao dependem disto (vem do `summary` contado no
+        banco), entao o teto so afeta grafico e rollup.
+      */
+      const DASHBOARD_PAGE_SIZE = 500;
+      const DASHBOARD_MAX_ROWS = 5000;
+
+      async function fetchDispatchesForDashboard() {
+        const rows = [];
+        let offset = 0;
+        let truncated = false;
+
+        for (;;) {
+          const params = new URLSearchParams({
+            limit: String(DASHBOARD_PAGE_SIZE),
+            offset: String(offset),
+          });
+          const payload = await requestJson(`/reports/dispatches?${params.toString()}`);
+          const page = payload.data || [];
+
+          rows.push(...page);
+          offset += page.length;
+
+          if (!page.length || !(payload.pagination && payload.pagination.has_more)) {
+            break;
+          }
+
+          if (rows.length >= DASHBOARD_MAX_ROWS) {
+            truncated = true;
+            break;
+          }
+        }
+
+        return { rows, truncated };
+      }
+
       function renderKpis() {
         const groups = state.groups;
         const naoClassificados = groups.filter((g) => !g.segmento).length;
         const campanhasEnviadas = state.campaigns.filter((c) => c.status === "concluido").length;
 
-        const enviosHoje = state.todayDispatches.length;
-        const errosHoje = state.todayDispatches.filter((d) => d.status === "erro" || d.status === "falhou").length;
+        // Contados no banco sobre o dia inteiro, nao sobre uma pagina.
+        const resumoHoje = state.todaySummary || {};
+        const enviosHoje = state.todayTotal;
+        const errosHoje = (resumoHoje.erro || 0) + (resumoHoje.falhou || 0);
         const taxaErro = enviosHoje ? Math.round((errosHoje / enviosHoje) * 100) : 0;
 
         const cards = [
@@ -456,6 +506,22 @@
         const dispatches = filteredDispatchForRollup();
         const orgs = state.organizations;
 
+        // Se o teto de linhas do painel foi atingido, o rollup esta somando os
+        // envios MAIS RECENTES, nao todos. Dizer isso e' o ponto: antes o
+        // resultado tambem era incompleto (o PostgREST truncava a resposta) e
+        // nada avisava - o operador lia um total menor do que o real como se
+        // fosse o total.
+        const aviso = document.getElementById("orgRollupTruncatedNote");
+
+        if (aviso) {
+          aviso.hidden = !state.allDispatchesTruncated;
+          if (state.allDispatchesTruncated) {
+            aviso.textContent =
+              `Mostrando os ${DASHBOARD_MAX_ROWS.toLocaleString("pt-BR")} envios mais recentes. ` +
+              "Use o relatório para consultar períodos maiores.";
+          }
+        }
+
         if (!orgs.length) {
           document.getElementById("orgRollupBody").innerHTML = `<tr><td colspan="6"><div class="empty-state"><strong>Nenhuma organização encontrada</strong></div></td></tr>`;
           return;
@@ -489,19 +555,25 @@
 
         window.estimuloShowLoading();
         try {
-          const [organizations, groups, campaigns, todayDispatches, allDispatches] = await Promise.all([
+          const [organizations, groups, campaigns, todayReport, allDispatches] = await Promise.all([
             requestJson("/organizations"),
             requestJson("/groups/search"),
             requestJson("/campaigns"),
-            requestJson(`/reports/dispatches?start_date=${today}&end_date=${today}`),
-            requestJson("/reports/dispatches"),
+            // Os KPIs de hoje sao CONTAGENS, nao linhas. O relatorio passou a
+            // devolver { data, pagination, summary } com o resumo contado no
+            // banco sobre o filtro inteiro, entao limit=1 basta: os numeros
+            // ficam exatos e nao se transfere linha nenhuma.
+            requestJson(`/reports/dispatches?start_date=${today}&end_date=${today}&limit=1`),
+            fetchDispatchesForDashboard(),
           ]);
 
           state.organizations = organizations;
           state.groups = groups;
           state.campaigns = campaigns;
-          state.todayDispatches = todayDispatches;
-          state.allDispatches = allDispatches;
+          state.todaySummary = todayReport.summary || null;
+          state.todayTotal = (todayReport.pagination && todayReport.pagination.total) || 0;
+          state.allDispatches = allDispatches.rows;
+          state.allDispatchesTruncated = allDispatches.truncated;
 
           renderKpis();
           renderDispatchLog();

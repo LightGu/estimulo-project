@@ -355,6 +355,18 @@ function buildJitteredDispatchSchedule(params = {}) {
       caption_id: group.caption_id || params.caption_id,
       caption_generated: group.caption_generated ?? params.caption_generated,
       scheduled_at: new Date(scheduledTime).toISOString(),
+      // Fim da janela escolhida pelo usuario, propagado ate o worker de video.
+      //
+      // Faltava. O caminho de mensagem pontual ja carregava window_end e por
+      // isso a trava de atraso conseguia distinguir "job zumbi de dias atras"
+      // de "envio desta janela que a fila atrasou"; o caminho de VIDEO nao,
+      // entao ele so tinha o teto fixo de 6h. Com concorrencia 1 e ate 25 min
+      // por job (download do Drive + ffmpeg + upload em base64), os ultimos
+      // grupos de uma campanha grande estouram 6h de atraso em relacao ao
+      // proprio horario sorteado e eram CANCELADOS - dentro da janela que o
+      // usuario pediu, com a mensagem "ultrapassou 360 min de atraso". Do
+      // ponto de vista do operador, a campanha se cancelava sozinha pela metade.
+      window_end: params.window_end || params.windowEnd || (params.time_window && params.time_window.end) || null,
       status: group.status || params.status || DISPATCH_INITIAL_STATUS,
       dispatch_order: group.order,
       jitter_delay_ms: jitterDelayMs,

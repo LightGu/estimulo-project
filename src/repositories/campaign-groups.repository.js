@@ -48,6 +48,19 @@ async function removeGroup(campaignId, groupId, client) {
   return data || null;
 }
 
+// Roda depois de CADA envio (maybeNotifyCampaignFinished em queues/dispatch.js).
+//
+// Antes carregava todos os logs da campanha com select("*") para depois reduzir
+// em memoria - a quarta varredura completa da tabela `logs` por grupo enviado.
+// Agora sao duas consultas que nao transferem linha de log: uma contagem e uma
+// lista de group_id distintos.
+//
+// A regra tambem ficou mais correta. A versao antiga olhava o status do log MAIS
+// RECENTE de cada grupo; com duas linhas para o mesmo trio (a corrida corrigida
+// pelo indice idx_logs_trio_ativo), uma linha "pendente" orfa mais nova
+// escondia o "enviado" real e a campanha nunca era considerada concluida. Agora
+// a pergunta e' direta: sobrou algum log NAO terminal, e todos os grupos
+// associados ja tem algum log terminal?
 async function isCampaignFullyTerminal(campaignId, options = {}) {
   const dispatchLogsRepositoryDependency = options.dispatchLogsRepository || require("./dispatch-logs.repository");
   const client = options.client;
@@ -58,6 +71,26 @@ async function isCampaignFullyTerminal(campaignId, options = {}) {
     return false;
   }
 
+  const canUseTargetedQueries =
+    typeof dispatchLogsRepositoryDependency.countNonTerminalByCampaign === "function" &&
+    typeof dispatchLogsRepositoryDependency.listTerminalGroupIdsByCampaign === "function";
+
+  if (canUseTargetedQueries) {
+    const [pendingCount, terminalGroupIds] = await Promise.all([
+      dispatchLogsRepositoryDependency.countNonTerminalByCampaign(campaignId, TERMINAL_LOG_STATUSES, client),
+      dispatchLogsRepositoryDependency.listTerminalGroupIdsByCampaign(campaignId, TERMINAL_LOG_STATUSES, client),
+    ]);
+
+    if (pendingCount > 0) {
+      return false;
+    }
+
+    const terminalGroups = new Set(terminalGroupIds);
+
+    return groupRows.every((row) => terminalGroups.has(row.group_id));
+  }
+
+  // Fallback para repositorios injetados em teste que so tem listByCampaign.
   const logs = await dispatchLogsRepositoryDependency.listByCampaign(campaignId, client);
   const latestStatusByGroup = new Map();
 

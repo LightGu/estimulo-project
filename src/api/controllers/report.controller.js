@@ -3,17 +3,23 @@ function createReportController(dependencies = {}) {
 
   async function listDispatches(req, res) {
     try {
-      const { start_date, end_date, organization_id, group_id, status } = req.query;
+      const { start_date, end_date, organization_id, group_id, status, limit, offset } = req.query;
 
-      const logs = await dispatchLogsService.listForReport({
+      const result = await dispatchLogsService.listForReport({
         startDate: start_date || null,
         endDate: end_date || null,
         organizationId: organization_id || null,
         groupId: group_id || null,
         status: status || null,
+        // Paginacao no servidor. Antes a rota devolvia o periodo inteiro com
+        // cinco tabelas embutidas e a tela recortava com slice() - o custo todo
+        // pago para exibir 100 linhas, e o corte silencioso do PostgREST
+        // (db-max-rows) transformando "N registros" numa contagem errada.
+        limit: limit || null,
+        offset: offset || null,
       });
 
-      return res.status(200).json(logs);
+      return res.status(200).json(result);
     } catch (error) {
       const message = error?.message || "Internal server error";
 

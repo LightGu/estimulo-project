@@ -2,6 +2,7 @@ const defaultNotificationsRepository = require("../repositories/notifications.re
 
 const TRAIL_FINISHED_TYPE = "trail_finished";
 const TRAIL_ADVANCED_TYPE = "trail_advanced";
+const CAMPAIGN_STUCK_TYPE = "campaign_stuck_generating_captions";
 
 const TRAIL_ADVANCED_REASON_LABEL = {
   sequencia: "trilha seguinte da jornada",
@@ -70,16 +71,53 @@ function createInAppNotificationsService(dependencies = {}) {
     });
   }
 
+  /*
+    Campanha parada em "gerando_legendas" ha tempo demais.
+
+    A geracao de legendas roda como promise solta dentro do processo da API
+    (dispatchCampaign inicia e nao aguarda). Se a API reiniciar no meio - e o
+    deploy recria os containers - o trabalho morre com o processo e nao ha estado
+    de onde retomar: a campanha fica em "gerando_legendas" para sempre.
+
+    O sweep de dispatch-review-timeout ate encontrava essas campanhas, mas saia
+    cedo quando `auto_send_after_timeout.enabled` era false - que e' o DEFAULT.
+    Ou seja: na configuracao padrao, uma campanha travada era completamente
+    invisivel. O operador via "Processando" e nao tinha como saber que ninguem
+    mais ia processar.
+
+    Esta notificacao nao retoma nada de proposito: retomar sozinha uma campanha
+    abandonada significa montar uma janela nova e disparar para todos os grupos,
+    que e' exatamente o que gerou spam a cada boot antes do teto de idade. A
+    decisao continua sendo do operador - o que muda e' que agora ele sabe que
+    precisa toma-la.
+  */
+  async function notifyCampaignStuckGeneratingCaptions({ campaignId, campaignLabel, ageHours } = {}) {
+    const label = campaignLabel || campaignId;
+    const idade = Number.isFinite(ageHours) ? ` ha ${ageHours}h` : "";
+    const message =
+      `A campanha "${label}" esta parada na geração de legendas${idade} e não vai continuar sozinha. ` +
+      "Isso acontece quando a geração é interrompida (por exemplo, um reinício do servidor). " +
+      "Abra a campanha para revisar as legendas e iniciar o envio, ou cancele-a.";
+
+    return repository.create({
+      type: CAMPAIGN_STUCK_TYPE,
+      message,
+      group_id: null,
+    });
+  }
+
   return {
     list,
     markAllRead,
     markRead,
     clearRead,
+    notifyCampaignStuckGeneratingCaptions,
     notifyTrailAdvanced,
     notifyTrailFinished,
   };
 }
 
 module.exports = createInAppNotificationsService();
+module.exports.CAMPAIGN_STUCK_TYPE = CAMPAIGN_STUCK_TYPE;
 module.exports.TRAIL_ADVANCED_TYPE = TRAIL_ADVANCED_TYPE;
 module.exports.TRAIL_FINISHED_TYPE = TRAIL_FINISHED_TYPE;

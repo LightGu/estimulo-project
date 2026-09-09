@@ -100,12 +100,53 @@ async function findMessageAckStatus(messageId, options = {}) {
 
     return { found: true, status: row.status || null };
   } catch (error) {
+    // Este catch devolvia `null` sem uma linha de log, e foi o que manteve um
+    // problema de configuracao invisivel por semanas: com EVOLUTION_DB_HOST
+    // ausente, todo envio caia aqui com ECONNREFUSED e era registrado como
+    // "NAO_VERIFICADO", indistinguivel de uma instancia sem banco configurado
+    // de proposito. `null` continua sendo a resposta certa para quem chama
+    // ("nao sei" nunca pode reprovar um envio que talvez tenha dado certo) -
+    // o que faltava era dizer POR QUE nao se sabe.
+    //
+    // Uma vez por processo por codigo de erro: a alternativa e' uma linha por
+    // mensagem enviada, que afogaria o log do worker sem informacao nova.
+    reportLookupFailure(error);
+
     return null;
   }
+}
+
+const reportedLookupFailures = new Set();
+
+function reportLookupFailure(error, logger = console) {
+  const code = (error && (error.code || error.name)) || "UNKNOWN";
+
+  if (reportedLookupFailures.has(code)) {
+    return;
+  }
+
+  reportedLookupFailures.add(code);
+
+  logger.error &&
+    logger.error(
+      JSON.stringify({
+        event: "delivery_confirmation.lookup_unavailable",
+        error_code: code,
+        error_message: (error && error.message) || String(error),
+        host: deliveryConfirmationConfig.databaseUrl ? "(via EVOLUTION_DB_URL)" : deliveryConfirmationConfig.databaseHost,
+        port: deliveryConfirmationConfig.databaseUrl ? null : deliveryConfirmationConfig.databasePort,
+        note:
+          "sem esta consulta nenhum ACK e lido e todo envio fica com provider_status NAO_VERIFICADO; " +
+          "conferir EVOLUTION_DB_HOST/EVOLUTION_DB_PORT no ambiente do container",
+        // Registrado uma vez por codigo de erro, por processo.
+        once_per_process: true,
+      })
+    );
 }
 
 module.exports = {
   MESSAGE_STATUS_QUERY,
   findMessageAckStatus,
   isDatabaseConfigured,
+  reportLookupFailure,
 };

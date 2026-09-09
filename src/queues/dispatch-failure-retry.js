@@ -4,6 +4,7 @@ const { addDispatchJob } = require("./dispatch");
 const defaultDispatchLogsRepository = require("../repositories/dispatch-logs.repository");
 const defaultGroupsRepository = require("../repositories/groups.repository");
 const defaultCampaignsRepository = require("../repositories/campaigns.repository");
+const defaultCampaignVideoCaptionsRepository = require("../repositories/campaign-video-captions.repository");
 const defaultSettingsService = require("../services/settings.service");
 const { resolveLogScheduledAt } = require("../services/dispatch-staleness");
 
@@ -27,6 +28,16 @@ const FAILED_STATUS = "falhou";
 // services/delivery-confirmation.js) e arrisca postar o mesmo video de novo no
 // grupo que ja recebeu. Logs antigos com essa mensagem, gravados antes de a regra
 // de grupo ser corrigida, sao falso-negativo: precisam ficar de fora do sweep.
+// O TIMEOUT entra por exatamente o mesmo motivo que "nao confirmou a entrega":
+// a requisicao chegou na Evolution e pode ter sido processada por completo - a
+// propria mensagem de erro montada em parseEvolutionError diz "a midia pode ter
+// sido entregue mesmo assim". Reenviar nao corrige nada e arrisca postar o mesmo
+// video de novo num grupo que ja recebeu, que e' justamente o caso mais provavel
+// (video grande e' o que estoura os 180s de mediaTimeoutMs). Decidir repetir um
+// envio possivelmente entregue tem de ser uma acao humana, com o log na mao.
+//
+// EVOLUTION_NO_RESPONSE ("indisponivel ou sem resposta") NAO entra: ali a
+// requisicao nao foi aceita, nao ha entrega possivel e reenviar e' correto.
 const PERMANENT_FAILURE_PATTERNS = [
   /HTTP 413/i,
   /HTTP 40[0134]/i,
@@ -35,6 +46,7 @@ const PERMANENT_FAILURE_PATTERNS = [
   /excede o limite/i,
   /entity too large/i,
   /nao confirmou a entrega/i,
+  /Tempo limite excedido/i,
 ];
 
 function isPermanentFailureMessage(message) {
@@ -84,9 +96,40 @@ async function scheduleDispatchFailureRetrySweep(options = {}) {
 // Regra compartilhada com os caminhos de resume - ver dispatch-staleness.js.
 const resolveRetryScheduledAt = resolveLogScheduledAt;
 
-function buildRetryJobData(log) {
+// Remonta o job de dispatch a partir do log que falhou.
+//
+// O reenvio tem de ser o MESMO envio, nao um envio novo para o mesmo grupo.
+// Antes, sete campos do job original nao eram reconstruidos aqui - e cada um
+// deles mudava o que chegava no grupo:
+//
+//   whatsapp_instance_id  -> sem ele, resolveInstance(undefined) cai na
+//                            primeira instancia disponivel por prioridade. O
+//                            reenvio podia sair por um numero diferente do
+//                            sorteado pelo rodizio - e, se esse numero nao
+//                            participa do grupo, a Evolution responde 200 e o
+//                            Baileys descarta em silencio (ver
+//                            assertInstanceCoverage em mensagens.service.js).
+//                            Pior: updateStatus(..., whatsappInstanceId || null)
+//                            gravava null e o relatorio PERDIA o numero que ja
+//                            tinha registrado.
+//   legenda / caption_id / caption_generated
+//                         -> sem eles, resolveDispatchCaption pula o atalho de
+//                            "legenda ja revisada na Etapa 2" e chama a IA de
+//                            novo. O grupo recebia uma legenda que ninguem
+//                            aprovou, e cada reenvio gastava cota do Gemini
+//                            (causa conhecida de 429).
+//   never_repeat_video / auto_generate_caption / forced_next_video_id
+//                         -> regras do disparo, que voltavam ao default.
+//
+// A fonte de cada um agora e' explicita: instancia e legenda vem do proprio log
+// (whatsapp_instance_id) e de campaign_video_captions, resolvidos pelo chamador
+// e passados em `context`. Mesma estrategia de
+// requeuePendingDispatchJobsForCampaign (campaign-trigger.js), que ja fazia
+// certo para o caminho de resume.
+function buildRetryJobData(log, context = {}) {
   const group = log.groups || {};
   const video = log.video_catalog || {};
+  const caption = context.caption || null;
 
   return {
     group_id: group.evolution_group_id,
@@ -100,6 +143,18 @@ function buildRetryJobData(log) {
     // legado; resolveDispatchCaption/selectCaptionForVideo escolhem a legenda
     // automaticamente a partir do video_id no reprocessamento.
     link_video: video.drive_file_id ? undefined : video.link_video,
+    // O numero que o envio original usou. Sem isto o reenvio trocava de numero
+    // e apagava a coluna no relatorio.
+    whatsapp_instance_id: log.whatsapp_instance_id || undefined,
+    // A legenda que foi aprovada para este par grupo/video, quando existe.
+    // Vazio (e nao undefined) mantem o contrato de buildDispatchJobData.
+    legenda: (caption && caption.caption_text) || "",
+    caption_id: (caption && caption.id) || undefined,
+    caption_generated: caption ? true : undefined,
+    // Regras do disparo, preservadas do envio original quando o chamador as
+    // resolveu; undefined mantem o default de antes.
+    never_repeat_video: context.never_repeat_video,
+    auto_generate_caption: context.auto_generate_caption,
     // Propagado ate o dispatch worker para que ele so notifique a falha uma vez
     // (na primeira tentativa), em vez de reenviar a mesma notificacao a cada
     // sweep de retry.
@@ -117,10 +172,59 @@ function createDispatchFailureRetryProcessor(options = {}) {
     dispatchLogsRepository = defaultDispatchLogsRepository,
     groupsRepository = defaultGroupsRepository,
     campaignsRepository = defaultCampaignsRepository,
+    campaignVideoCaptionsRepository = defaultCampaignVideoCaptionsRepository,
     settingsService = defaultSettingsService,
     enqueueDispatch = addDispatchJob,
     logger = console,
   } = options;
+
+  // Legendas aprovadas dos pares grupo/video do lote, indexadas por
+  // "<group_id>::<video_id>".
+  //
+  // Sem isto o reenvio gerava uma legenda NOVA pela IA em vez de repetir a que
+  // foi aprovada na Etapa 2 - ver o cabecalho de buildRetryJobData. Uma consulta
+  // por campanha distinta do lote (nao uma por log), mesma estrategia de
+  // filterOutPausedOrCancelledCampaigns.
+  async function loadApprovedCaptions(logs) {
+    const byKey = new Map();
+
+    if (!logs.length || typeof campaignVideoCaptionsRepository.listByCampaign !== "function") {
+      return byKey;
+    }
+
+    const campaignIds = [...new Set(logs.map((log) => log.campaign_id).filter(Boolean))];
+    const rowsByCampaign = await Promise.all(
+      campaignIds.map((campaignId) =>
+        campaignVideoCaptionsRepository.listByCampaign(campaignId).catch((error) => {
+          // Best-effort: sem a legenda aprovada o reenvio ainda acontece (a IA
+          // escolhe uma), entao uma falha aqui nao pode barrar o reprocessamento
+          // inteiro. Mas ela precisa aparecer, porque muda o texto que o grupo
+          // recebe.
+          logger.warn &&
+            logger.warn(
+              JSON.stringify({
+                event: "dispatch_failure_retry.captions_unavailable",
+                campaign_id: campaignId,
+                error_message: error && error.message,
+                note: "reenvio seguira sem a legenda aprovada e podera gerar outra pela IA",
+              })
+            );
+
+          return [];
+        })
+      )
+    );
+
+    for (const rows of rowsByCampaign) {
+      for (const row of rows || []) {
+        if (row.status === "gerado" && row.caption_text) {
+          byKey.set(`${row.group_id}::${row.video_id}`, row);
+        }
+      }
+    }
+
+    return byKey;
+  }
 
   // Sem isto, o sweep reenfileirava um "falhou" mesmo com a campanha ja
   // pausada/cancelada pelo usuario - o reenvio automatico driblava a acao
@@ -195,6 +299,7 @@ function createDispatchFailureRetryProcessor(options = {}) {
     }
 
     let retried = 0;
+    const captionByKey = await loadApprovedCaptions(retryableLogs);
 
     for (const log of retryableLogs) {
       try {
@@ -226,7 +331,13 @@ function createDispatchFailureRetryProcessor(options = {}) {
 
         await dispatchLogsRepository.markRetrying(log.id, nextRetryCount);
         await enqueueDispatch(
-          { ...buildRetryJobData({ ...log, groups: group, retry_count: nextRetryCount }) },
+          {
+            ...buildRetryJobData({ ...log, groups: group, retry_count: nextRetryCount }, {
+              caption: captionByKey.get(`${log.group_id}::${log.video_id}`) || null,
+              never_repeat_video: dispatchRules.never_repeat_video,
+              auto_generate_caption: dispatchRules.auto_generate_caption,
+            }),
+          },
           { removeOnComplete: false, removeOnFail: false }
         );
 

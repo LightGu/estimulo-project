@@ -403,6 +403,11 @@ async function testProcessorCreatesPendingDispatchLogAfterEnqueue() {
       // Sem whatsapp_instances cadastradas neste teste, resolveInstanceForOrder
       // nao tem o que atribuir.
       whatsapp_instance_id: null,
+      // Correlacao do envio, copiada do job. Aqui e' null porque este teste
+      // injeta um addDispatchJob falso, que devolve o payload cru em vez de
+      // passar por buildDispatchJobData (quem calcula o ref). No caminho real o
+      // job sempre carrega um - ver tests/dispatch-ref.test.js.
+      dispatch_ref: null,
     },
   ]);
 }
