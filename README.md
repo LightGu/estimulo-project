@@ -1,5 +1,32 @@
 # estimulo-project
 
+## Resumo
+
+Este documento é a porta de entrada do projeto. Explica em poucas palavras o
+que o sistema faz: organizar e enviar conteúdos (vídeo, texto ou imagem) para
+grupos de WhatsApp, seguindo trilhas de aprendizagem adaptadas ao perfil de
+cada grupo, com legendas geradas por inteligência artificial e a
+possibilidade de programar envios recorrentes.
+
+As peças por trás disso têm nome próprio, bom de saber para entender o resto
+da documentação: uma **API** (o "cérebro" que recebe os pedidos do painel),
+**workers** rodando em segundo plano sobre uma fila chamada **BullMQ/Redis**
+(quem realmente executa os envios), a **Evolution API** (a ponte que fala
+com o WhatsApp de verdade), o **Supabase** (o banco de dados) e o **Gemini**
+(a IA do Google que ouve o vídeo e escreve a legenda). O fluxo principal é
+sempre o mesmo: uma campanha é cadastrada, o worker `campaign-trigger`
+decide quem recebe o quê, o worker `campaign-captions` prepara a legenda
+quando é vídeo, e por fim o disparo sai pela Evolution API, com tudo
+registrado em `logs` para auditoria.
+
+Descreve também como rodar o projeto (localmente ou em produção, numa VM da
+Oracle Cloud), que o painel exige login individual por usuário, e aponta
+para todos os outros documentos quando o assunto pede mais detalhe. É o
+documento que qualquer pessoa nova no projeto deveria ler primeiro, porque
+ele dá o mapa geral antes de entrar em qualquer parte específica.
+
+---
+
 MVP para gerenciar campanhas de envio de conteudos (video, texto ou imagem) em
 grupos de WhatsApp, com trilhas de aprendizagem por perfil de grupo,
 agendamento recorrente e legendas geradas por IA.

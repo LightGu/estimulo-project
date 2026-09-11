@@ -1,5 +1,31 @@
 # Filas com BullMQ
 
+## Resumo
+
+Este é a documentação de como o trabalho é dividido em segundo plano, em
+**8 filas** que rodam sobre uma tecnologia chamada **BullMQ** (que por sua
+vez usa o **Redis** como memória de apoio). Resumidamente: `campaign-trigger`
+decide quem recebe cada campanha, `campaign-captions` gera a legenda por IA
+antes do envio, `dispatch` manda o conteúdo das campanhas para o WhatsApp,
+`mensagens-dispatch` faz o mesmo para os disparos avulsos da tela de
+Mensagens, `dispatch-review-timeout` e `dispatch-failure-retry` cuidam de
+revisão pendente e de tentar de novo o que falhou, e `group-sync` /
+`drive-video-index` mantêm atualizadas a lista de grupos e o catálogo de
+vídeos.
+
+A parte mais relevante para quem opera o sistema no dia a dia é o registro
+de comportamentos que exigem atenção: o risco de **reenviar mensagens
+antigas em massa** se o sistema ficar parado e depois for religado (hoje sob
+controle, com travas automáticas de "prazo máximo de atraso"), como
+descobrir **quem cancelou um envio e quando** (colunas específicas para
+isso, porque o cancelamento pode vir do usuário, de uma trava automática ou
+de uma campanha cancelada em cascata), um detalhe técnico obrigatório
+(`--env-file`) para não derrubar as senhas do sistema ao reiniciá-lo
+manualmente, e a confirmação de que certos reenvios estranhos partem do
+próprio WhatsApp (o retry automático do Baileys), não do sistema.
+
+---
+
 O projeto usa BullMQ sobre Redis para processar tarefas assincronas, como
 agendamentos, distribuicao de conteudos e integracoes futuras.
 

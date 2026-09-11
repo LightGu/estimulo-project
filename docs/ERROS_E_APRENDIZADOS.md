@@ -1,5 +1,33 @@
 # Erros e Aprendizados
 
+## Resumo
+
+Este é o histórico dos problemas reais que já aconteceram em produção,
+contando o que deu errado, por que aconteceu e o que foi feito para impedir
+que se repita. São 7 casos registrados, cada um com sintoma, causa raiz,
+correção e a "trava" que impede a repetição (em geral um teste automatizado
+ou uma regra direto no banco de dados, que é mais forte do que só uma regra
+no código).
+
+Os mais sérios: **"Envio saiu, gravação falhou"**, o caso mais grave, em que
+mensagens reais chegaram a grupos de clientes sem deixar nenhum registro no
+relatório do sistema; **"Campanha cancelada continuava bloqueando sua janela
+de horário"**, uma campanha já cancelada que ainda impedia novos envios no
+mesmo horário; e **"Cancelamento sem auditoria"**, quando o sistema sabia
+dizer que algo foi cancelado mas não sabia dizer quem cancelou nem quando.
+
+Os outros quatro casos: **"Timeout de migration"**, um problema técnico de
+nomenclatura que travou a fila de mudanças pendentes no banco; **"Coluna
+nova quebrando 100% dos envios"**, um risco identificado a tempo (não
+chegou a virar incidente); **"Reenvio de dias atrás ao reiniciar a infra"**,
+o risco de disparar em massa mensagens antigas depois do sistema ficar
+desligado por um tempo; e **"Reenvio do Baileys"**, que documenta que parte
+dos reenvios estranhos observados não é bug do sistema, e sim comportamento
+do próprio WhatsApp. A intenção do documento não é apontar culpados, é
+registrar a lição para que o mesmo erro não custe caro duas vezes.
+
+---
+
 Registro dos incidentes de producao ja enfrentados neste projeto: o que
 aconteceu, a causa raiz, como foi corrigido e o que ficou como trava contra
 repeticao (teste, migration, mudanca de processo). Ordem cronologica.

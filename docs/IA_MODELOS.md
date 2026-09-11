@@ -1,5 +1,29 @@
 # IA no projeto: modelos, custos e alternativas
 
+## Resumo
+
+Este documento explica qual inteligência artificial o sistema usa e onde,
+hoje o **Gemini**, do Google. Não é um uso único: são **três "agentes" de
+IA** separados, cada um com sua própria tarefa e seu próprio modelo. O
+`transcription` ouve o áudio do vídeo e transforma em texto; o
+`caption_generation` pega esse texto e escreve a legenda pronta para
+WhatsApp; e o `caption_review` faz uma segunda checagem, revisando se a
+legenda gerada não inventou nada que não estava na transcrição original.
+
+Cada agente também tem uma **cascata de modelos de reserva**: se o modelo
+principal falhar ou for descontinuado pelo Google, o sistema tenta
+automaticamente o próximo da lista, sem que ninguém precise perceber ou
+intervir manualmente.
+
+Depois de pesquisar as alternativas gratuitas e pagas do mercado (incluindo
+concorrentes como Whisper, Claude e GPT), o documento conclui que a escolha
+atual é adequada para o volume de uso do projeto, sem qualidade
+comprovadamente inferior às opções concorrentes, e que trocar de fornecedor
+agora não traria ganho real, só custo extra de manutenção. Recomenda
+revisitar essa decisão apenas se o volume de vídeos crescer muito.
+
+---
+
 Documento técnico sobre o uso de IA generativa no projeto: onde é usada hoje, com que modelo, e se há alternativa melhor considerando custo e qualidade. Escopo restrito à IA; arquitetura geral está em `README.md` e `docs/filas.md`.
 
 ## 1. Onde a IA é usada hoje

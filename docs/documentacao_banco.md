@@ -1,5 +1,27 @@
 # Documentação do Banco de Dados
 
+## Resumo
+
+Este documento descreve a estrutura do banco de dados, ou seja, onde e como
+ficam guardadas as informações de clientes, grupos, campanhas e vídeos. As
+tabelas mais importantes: `organizations` (os clientes atendidos),
+`groups` (os grupos de WhatsApp), `campaigns` e `campaign_groups` (as
+campanhas de envio e quem participa delas), `trilhas`/`trilha_videos` (a
+organização do conteúdo educacional em sequência), `video_catalog` (o
+catálogo de vídeos vindos do Google Drive), `logs` (o histórico de cada
+tentativa de envio, a tabela mais importante para auditoria) e
+`whatsapp_instances` (os números de WhatsApp conectados ao sistema).
+
+O próprio documento avisa que está desatualizado: cobre apenas a versão
+inicial do sistema, de julho, e não reflete tudo o que foi adicionado
+depois (tabelas inteiras como `trilhas` e `settings` nem chegaram a ser
+documentadas aqui). É uma fotografia antiga, útil para entender a ideia
+geral, mas que não deve ser usada como referência para detalhes atuais —
+esse papel hoje cabe ao histórico de mudanças do próprio banco
+(`supabase/migrations`), citado no README como a fonte de verdade real.
+
+---
+
 > **Escopo desta documentação (revisado em 29/07/2026).**
 > Este documento descreve o schema inicial do MVP (migration `202607140001`) e
 > cobre apenas 7 das tabelas em uso. A fonte de verdade do schema é sempre

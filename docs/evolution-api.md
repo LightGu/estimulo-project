@@ -1,5 +1,28 @@
 # Evolution API para testes de WhatsApp
 
+## Resumo
+
+Este documento documenta a **Evolution API**, a ferramenta que efetivamente
+conversa com o WhatsApp em nome do sistema (conectar um número, enviar
+mensagens de teste, gerenciar múltiplos números). Por baixo dela roda o
+**Baileys**, a biblioteca que fala o protocolo do WhatsApp de fato — nome
+que aparece bastante quando o assunto é reenvio de mensagem ou reconexão.
+
+O ponto mais importante que o documento explica é uma limitação do próprio
+WhatsApp: para mensagens enviadas a grupos, não existe uma confirmação
+oficial de "entregue" ou "lido" (o chamado **ACK**) como existe em
+conversas individuais — lá, toda mensagem passa por uma sequência
+(`PENDING` → `SERVER_ACK` → `DELIVERY_ACK` → `READ`), mas em grupo ela fica
+parada em `PENDING` para sempre, sem significar nada de errado. Por isso o
+sistema criou seu próprio selo de confirmação no relatório, com três
+situações possíveis: **"Confirmado"** (chegou confirmação real),
+**"Sem ACK (grupo)"** (normal, grupo não confirma mesmo) e **"Não
+verificado"** (o sistema não conseguiu checar, por falha própria) — assim
+ele nunca marca como "falhou" um envio que na verdade chegou certinho ao
+grupo.
+
+---
+
 Este ambiente sobe uma instancia local da Evolution API via Docker Compose para validar, durante o MVP, conexao com WhatsApp, autenticacao, envio de mensagens e retorno de status.
 
 Use esta instancia apenas para testes controlados de integracao.

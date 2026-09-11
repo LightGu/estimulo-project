@@ -1,5 +1,31 @@
 # Deploy da API na Oracle Cloud (Ubuntu 20.04)
 
+## Resumo
+
+Este é o manual de como colocar o sistema no ar de verdade, na máquina
+(uma VM na Oracle Cloud) que hospeda a versão em uso hoje. Tudo roda dentro
+de contêineres **Docker**, organizados pelo **Docker Compose**: a API e cada
+worker de fila viram um contêiner separado, ligados ou desligados por
+"perfis" (`workers`, `evolution`, `proxy`), o que evita subir mais coisa do
+que a memória da máquina aguenta. O acesso público e seguro (HTTPS) é
+resolvido pelo **Caddy** junto com um endereço gratuito do serviço
+**sslip.io**, sem precisar comprar um domínio.
+
+Explica também a atualização automática: um serviço do GitHub chamado
+**GitHub Actions** publica sozinho a nova versão do código toda vez que uma
+mudança é aprovada, sem alguém precisar entrar manualmente no servidor. Um
+detalhe de risco real, repetido em destaque no documento: **mudanças no
+banco de dados não são aplicadas automaticamente** nesse processo, precisam
+ser coladas manualmente antes de cada atualização de código, senão o
+sistema pode recusar gravar informação nova e parar de funcionar.
+
+Por fim, registra uma particularidade da máquina atual: ela não foi criada
+como uma cópia direta do controle de versão (`git clone`), foi copiada
+manualmente (`rsync`) numa etapa anterior do projeto — isso muda a forma
+correta de atualizar o servidor quando algo precisa ser feito na mão.
+
+---
+
 Este guia sobe somente o backend deste repositorio na VM. O banco da aplicacao e o Supabase externo; Redis e obrigatorio e fica interno ao Docker. A Evolution API e opcional no mesmo host porque ela exige tambem um PostgreSQL e consome memoria significativa.
 
 ## Antes de comecar
