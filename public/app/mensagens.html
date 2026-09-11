@@ -32,6 +32,10 @@
       .preview-bubble { background: var(--surface-strong); border:1px solid var(--line); border-radius: var(--radius-lg); padding:16px; max-width:340px; }
       .preview-bubble .ptitle { font-weight:700; font-size: var(--fs-md); margin-bottom:6px; }
       .preview-bubble .pattach { font-size: var(--fs-sm); color:var(--text-muted); margin-top:8px; padding:6px 8px; background:var(--surface); border-radius:6px; border:1px solid var(--line); }
+      .preview-bubble .ptext { font-size: var(--fs-md); white-space:pre-wrap; }
+      .preview-bubble .pmedia[hidden] { display:none; }
+      .preview-bubble .pmedia-thumb { display:block; width:100%; max-height:220px; object-fit:contain; margin-top:10px; border-radius: var(--radius-md); border:1px solid var(--line); background: var(--surface-sunken); }
+      .preview-bubble .pmedia .pattach { margin-top:6px; word-break:break-word; }
       .two-col { display:grid; grid-template-columns: 1.4fr 1fr; gap:20px; align-items:start; }
       @media (max-width: 960px) { .two-col { grid-template-columns: 1fr; } }
 
@@ -222,7 +226,13 @@
 
               <div>
                 <div class="section-head" style="margin-bottom:10px;"><h2 style="font-size: var(--fs-md);">Prévia</h2></div>
-                <div class="preview-bubble" id="previewBubble"></div>
+                <div class="preview-bubble" id="previewBubble">
+                  <div class="ptitle" id="previewTitle"></div>
+                  <div class="ptext" id="previewText"></div>
+                  <div class="pmedia" id="previewMedia" hidden></div>
+                  <div id="previewGroups"></div>
+                  <div class="pattach" id="previewEnvio"></div>
+                </div>
               </div>
             </div>
           </section>
@@ -705,6 +715,51 @@
         return files && files.length ? files[0] : null;
       }
 
+      // A miniatura fica fora do innerHTML do balao: updatePreview roda a cada
+      // tecla digitada, e recriar o <img>/<video> junto com o resto vazaria um
+      // object URL por caractere e reiniciaria o video que a pessoa esta vendo.
+      let previewMediaFile = null;
+      let previewMediaUrl = null;
+
+      function renderPreviewMedia() {
+        const file = attachedMediaFile();
+        if (file === previewMediaFile) return;
+
+        if (previewMediaUrl) URL.revokeObjectURL(previewMediaUrl);
+        previewMediaFile = file;
+        previewMediaUrl = file ? URL.createObjectURL(file) : null;
+
+        const box = document.getElementById("previewMedia");
+        box.innerHTML = "";
+        box.hidden = !file;
+        if (!file) return;
+
+        const tipo = String(file.type || "");
+        const isVideo = tipo.startsWith("video/");
+
+        if (tipo.startsWith("image/")) {
+          const img = document.createElement("img");
+          img.className = "pmedia-thumb";
+          img.src = previewMediaUrl;
+          img.alt = "Prévia da imagem anexada";
+          box.appendChild(img);
+        } else if (isVideo) {
+          const video = document.createElement("video");
+          video.className = "pmedia-thumb";
+          video.src = previewMediaUrl;
+          video.controls = true;
+          video.muted = true;
+          video.playsInline = true;
+          video.preload = "metadata";
+          box.appendChild(video);
+        }
+
+        const nome = document.createElement("div");
+        nome.className = "pattach";
+        nome.textContent = (isVideo ? "🎞️ " : "🖼️ ") + file.name;
+        box.appendChild(nome);
+      }
+
       function updatePreview() {
         const titulo = document.getElementById("msgTitulo").value.trim() || "(sem título)";
         const texto = document.getElementById("msgTexto").value.trim() || "(sem texto ainda)";
@@ -712,18 +767,13 @@
         const data = document.getElementById("msgData").value;
         const inicio = document.getElementById("msgInicio").value;
         const fim = document.getElementById("msgFim").value;
-        const media = attachedMediaFile();
 
-        let envioHtml;
+        let envioTexto;
         if (data && inicio && fim) {
-          envioHtml = `Espalhado entre ${inicio} e ${fim} em ${data} (intervalo aleatório entre os grupos)`;
+          envioTexto = `Espalhado entre ${inicio} e ${fim} em ${data} (intervalo aleatório entre os grupos)`;
         } else {
-          envioHtml = "defina data/início/fim para agendar";
+          envioTexto = "defina data/início/fim para agendar";
         }
-
-        const mediaHtml = media
-          ? `<div class="pattach">${media.type.startsWith("video/") ? "🎞️" : "🖼️"} ${escapeHtml(media.name)}</div>`
-          : "";
 
         // Um grupo por linha (em vez de uma lista separada por virgula): com muitos
         // destinatarios a linha unica quebrava em qualquer ponto e ficava ilegivel.
@@ -731,13 +781,11 @@
           ? grupos.map((nome) => `<div class="pattach">👥 ${escapeHtml(nome)}</div>`).join("")
           : '<div class="pattach">👥 nenhum grupo selecionado</div>';
 
-        document.getElementById("previewBubble").innerHTML = `
-          <div class="ptitle">${escapeHtml(titulo)}</div>
-          <div style="font-size: var(--fs-md);white-space:pre-wrap;">${escapeHtml(texto)}</div>
-          ${mediaHtml}
-          ${gruposHtml}
-          <div class="pattach">🕒 ${envioHtml}</div>
-        `;
+        document.getElementById("previewTitle").textContent = titulo;
+        document.getElementById("previewText").textContent = texto;
+        renderPreviewMedia();
+        document.getElementById("previewGroups").innerHTML = gruposHtml;
+        document.getElementById("previewEnvio").textContent = "🕒 " + envioTexto;
       }
 
       // msgInicio/msgFim viraram inputs escondidos alimentados pelos time-pickers,
