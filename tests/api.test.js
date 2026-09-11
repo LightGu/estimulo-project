@@ -657,7 +657,11 @@ async function main() {
     assert.doesNotMatch(groupsAppPage, /MOCK\./);
     assert.doesNotMatch(groupsAppPage, /id="editTrilha"/);
     assert.match(groupsAppPage, /requestJson\("\/group-profiles"\)/);
-    assert.match(groupsAppPage, /requestJson\("\/groups\/search"\)/);
+    // A tela pagina no servidor: pede uma pagina de /groups/search (limit +
+    // offset com os filtros) e as facetas separadas, em vez da lista inteira.
+    assert.match(groupsAppPage, /requestJson\(`\/groups\/search\?\$\{params\.toString\(\)\}`\)/);
+    assert.match(groupsAppPage, /requestJson\("\/groups\/facets"\)/);
+    assert.match(groupsAppPage, /params\.set\("limit", String\(PAGE_SIZE\)\)/);
     assert.match(groupsAppPage, /requestJson\("\/organizations"\)/);
     assert.match(groupsAppPage, /requestJson\("\/groups\/sync"/);
     assert.match(groupsAppPage, /requestJson\(`\/groups\/\$\{encodeURIComponent\(editingGroupId\)\}`/);

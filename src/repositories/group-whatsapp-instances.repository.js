@@ -104,7 +104,43 @@ async function listInstanceIdsByGroupIds(groupIds, client) {
   return map;
 }
 
+// Quantos grupos cada numero enxerga, para os contadores das abas da tela de
+// Grupos. Uma contagem por numero (`head: true`, que devolve so o numero e nao
+// transfere linha nenhuma) em vez de baixar a tabela de vinculos e contar aqui -
+// sao poucos numeros, e assim nao ha risco de o db-max-rows cortar a leitura e
+// transformar o contador da aba numa mentira.
+async function countGroupsByInstance(whatsappInstanceIds, client) {
+  const counts = new Map();
+
+  if (!whatsappInstanceIds || whatsappInstanceIds.length === 0) {
+    return counts;
+  }
+
+  const databaseClient = getClient(client);
+  const entries = await Promise.all(
+    whatsappInstanceIds.map(async (whatsappInstanceId) => {
+      const { count, error } = await databaseClient
+        .from("group_whatsapp_instances")
+        .select("*", { count: "exact", head: true })
+        .eq("whatsapp_instance_id", whatsappInstanceId);
+
+      if (error) {
+        throw error;
+      }
+
+      return [whatsappInstanceId, count || 0];
+    })
+  );
+
+  entries.forEach(([whatsappInstanceId, count]) => {
+    counts.set(whatsappInstanceId, count);
+  });
+
+  return counts;
+}
+
 module.exports = {
+  countGroupsByInstance,
   linkGroupToInstance,
   listGroupIdsForInstance,
   listGroupIdsForInstances,

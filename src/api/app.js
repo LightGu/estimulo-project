@@ -297,6 +297,7 @@ function createApp(dependencies = {}) {
   app.get("/video-catalog/:id/captions", videoCatalogController.listCaptions);
   app.patch("/video-catalog/:id/captions/:captionId", videoCatalogController.updateCaption);
   app.get("/groups/search", groupsController.search);
+  app.get("/groups/facets", groupsController.facets);
   app.get("/groups/unclassified", groupsController.listWithoutSegment);
   app.post("/groups/sync", groupsController.syncFromEvolution);
   app.get("/groups/:id/video-progress", groupVideoProgressController.getGroupProgress);

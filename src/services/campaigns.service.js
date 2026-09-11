@@ -991,8 +991,10 @@ function createCampaignsService(dependencies = {}) {
     return cancellerByCampaignId;
   }
 
-  async function listWithSummary() {
-    const campaigns = await repository.findAll();
+  // O resumo (status + total de grupos + quem programou/cancelou) custa varias
+  // consultas por campanha. Isolado aqui porque agora e' montado so para as
+  // campanhas da pagina pedida, e nao mais para o historico inteiro.
+  async function buildSummaries(campaigns) {
     const [creatorByCampaignId, cancellerByCampaignId] = await Promise.all([
       resolveCreatorsByCampaignIds(campaigns.map((campaign) => campaign.id)),
       resolveCancellersByCampaigns(campaigns),
@@ -1012,6 +1014,39 @@ function createCampaignsService(dependencies = {}) {
         };
       })
     );
+  }
+
+  async function listWithSummary() {
+    return buildSummaries(await repository.findAll());
+  }
+
+  // Pagina do historico de campanhas, ja ordenada pelo banco (a tela ordenava
+  // em memoria, o que so funcionava enquanto ela tinha a lista inteira).
+  async function listPageWithSummary(options = {}) {
+    const page = await repository.findAllPage(options);
+
+    // Compatibilidade com repositorios injetados em teste que ainda devolvem um
+    // array puro.
+    if (Array.isArray(page)) {
+      const rows = await buildSummaries(page);
+
+      return {
+        data: rows,
+        pagination: { total: rows.length, limit: rows.length, offset: 0, has_more: false },
+      };
+    }
+
+    const rows = await buildSummaries(page.rows || []);
+
+    return {
+      data: rows,
+      pagination: {
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset,
+        has_more: page.offset + rows.length < page.total,
+      },
+    };
   }
 
   async function getGroupsDetail(campaignId) {
@@ -1071,6 +1106,7 @@ function createCampaignsService(dependencies = {}) {
     getGroupsDetail,
     list,
     listActive,
+    listPageWithSummary,
     listWithSummary,
     update,
   };

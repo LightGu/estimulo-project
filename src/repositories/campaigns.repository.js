@@ -29,6 +29,72 @@ async function findAll(client) {
   return data || [];
 }
 
+// Tamanho de pagina da tela de Campanhas. Espelha o PAGE_SIZE de campanhas.html:
+// a tela pedia o historico inteiro e o service montava o resumo de CADA campanha
+// (grupos + status, varias consultas por linha) so para exibir as primeiras.
+const DEFAULT_CAMPAIGNS_PAGE_SIZE = 30;
+const MAX_CAMPAIGNS_PAGE_SIZE = 200;
+
+function resolveCampaignsRange(params = {}) {
+  const requested = Number(params.limit);
+  const limit =
+    Number.isFinite(requested) && requested > 0
+      ? Math.min(Math.trunc(requested), MAX_CAMPAIGNS_PAGE_SIZE)
+      : DEFAULT_CAMPAIGNS_PAGE_SIZE;
+  const rawOffset = Number(params.offset);
+  const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.trunc(rawOffset) : 0;
+
+  return { limit, offset };
+}
+
+/*
+  Uma pagina do historico de campanhas, na ordem do "Periodo de envio" da tela.
+
+  A ordenacao reproduz a chave que campanhas.html montava em memoria
+  (campaignSortTimestamp: window_start, caindo para data_envio + horario_envio em
+  campanha anterior a janela de disparo). O PostgREST nao ordena por expressao
+  sem view/RPC, entao a chave vira uma cascata de colunas:
+
+  - `data_envio` primeiro, e nao window_start: e' o dia do envio e esta
+    preenchido em toda campanha, entao as poucas linhas antigas sem janela
+    continuam no meio da lista pela data delas, em vez de serem empurradas para
+    o fim junto com quem nao tem periodo nenhum;
+  - `window_start` resolve a ordem dentro do mesmo dia;
+  - `horario_envio` cobre as linhas antigas, que so tem esse horario.
+
+  `nullsFirst: false` mantem o que a tela ja fazia: campanha sem periodo definido
+  (ainda em gerando_legendas) fica no fim nos dois sentidos, em vez de encabecar
+  a lista quando a ordem e' decrescente. `id` fecha a ordem para a paginacao ser
+  estavel entre requisicoes.
+*/
+async function findAllPage(params = {}, client) {
+  const { limit, offset } = resolveCampaignsRange(params);
+  const ascending = String(params.sort || "asc").toLowerCase() !== "desc";
+
+  const { data, error, count } = await getClient(client)
+    .from("campaigns")
+    .select("*", { count: "exact" })
+    .is("hidden_at", null)
+    .order("data_envio", { ascending, nullsFirst: false })
+    .order("window_start", { ascending, nullsFirst: false })
+    .order("horario_envio", { ascending, nullsFirst: false })
+    .order("id", { ascending })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = data || [];
+
+  return {
+    rows,
+    total: typeof count === "number" ? count : rows.length,
+    limit,
+    offset,
+  };
+}
+
 async function listActive(client) {
   const { data, error } = await getClient(client)
     .from("campaigns")
@@ -213,6 +279,7 @@ module.exports = {
   create,
   delete: remove,
   findAll,
+  findAllPage,
   findById,
   hideByIds,
   listActive,

@@ -80,6 +80,13 @@
                 <tbody id="campaignsBody"></tbody>
               </table>
             </div>
+            <div class="actions-bar-end" id="pagerBar" style="justify-content:flex-start;">
+              <div class="pager" id="pagerControls" style="display:flex;align-items:center;gap:10px;">
+                <button class="btn btn-secondary" id="prevPageButton" type="button">Anterior</button>
+                <span class="text-muted" id="pageLabel"></span>
+                <button class="btn btn-secondary" id="nextPageButton" type="button">Próxima</button>
+              </div>
+            </div>
           </section>
         </main>
       </div>
@@ -137,8 +144,17 @@
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
+      // Espelha o DEFAULT_CAMPAIGNS_PAGE_SIZE de campaigns.repository.js.
+      const PAGE_SIZE = 30;
+
       const state = {
+        // `campaigns` guarda apenas a PAGINA atual. Antes guardava o historico
+        // inteiro: para exibi-lo, o servidor montava o resumo (grupos + status,
+        // varias consultas) de cada campanha ja existente.
         campaigns: [],
+        // Total de campanhas visiveis, contado no banco.
+        total: 0,
+        currentPage: 1,
         currentCampaignId: null,
         captionsByGroup: new Map(),
         sortDirection: localStorage.getItem("estimulo-campanhas-sort") === "desc" ? "desc" : "asc",
@@ -265,35 +281,12 @@
         return start || end;
       }
 
-      // Chave de ordenacao: window_start cobre data + horario juntos. Campanha
-      // ainda sem janela definida (gerando_legendas) cai sempre no fim, nas duas
-      // direcoes, em vez de se misturar com datas reais.
-      function campaignSortTimestamp(campaign) {
-        const value = campaign.window_start || (campaign.data_envio && campaign.horario_envio
-          ? `${campaign.data_envio}T${campaign.horario_envio}`
-          : campaign.data_envio);
-
-        if (!value) return null;
-
-        const date = new Date(value);
-        return Number.isNaN(date.getTime()) ? null : date.getTime();
-      }
-
-      function sortedCampaigns() {
-        const direction = state.sortDirection === "desc" ? -1 : 1;
-
-        return [...state.campaigns].sort((left, right) => {
-          const leftTs = campaignSortTimestamp(left);
-          const rightTs = campaignSortTimestamp(right);
-
-          if (leftTs === null && rightTs === null) return 0;
-          if (leftTs === null) return 1;
-          if (rightTs === null) return -1;
-
-          return (leftTs - rightTs) * direction;
-        });
-      }
-
+      // A ordenacao por periodo de envio passou a ser feita no banco (ver
+      // findAllPage em campaigns.repository.js): ordenar aqui so valia enquanto
+      // a tela tinha o historico inteiro - sobre uma pagina de 30 linhas ela
+      // reordenaria apenas o recorte, dando a impressao de lista ordenada.
+      // Campanha sem periodo definido (ainda em gerando_legendas) continua
+      // caindo no fim, nas duas direcoes.
       function captionStatusLabel(status) {
         const labels = {
           processando: "Gerando legenda…",
@@ -303,14 +296,33 @@
         return labels[status] || status || "-";
       }
 
+      function totalPages() {
+        return Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      }
+
+      function renderPager() {
+        const pages = totalPages();
+        const first = state.total === 0 ? 0 : (state.currentPage - 1) * PAGE_SIZE + 1;
+        const last = (state.currentPage - 1) * PAGE_SIZE + state.campaigns.length;
+
+        document.getElementById("pagerBar").hidden = state.total <= PAGE_SIZE;
+        document.getElementById("pageLabel").textContent = state.total === 0
+          ? "Nenhuma campanha"
+          : `Página ${state.currentPage} de ${pages} · ${first}-${last} de ${state.total}`;
+        document.getElementById("prevPageButton").disabled = state.currentPage <= 1;
+        document.getElementById("nextPageButton").disabled = state.currentPage >= pages;
+      }
+
       function renderCampaigns() {
+        renderPager();
+
         if (!state.campaigns.length) {
           document.getElementById("campaignsBody").innerHTML = `
             <tr><td colspan="5"><div class="empty-state"><strong>Nenhuma campanha encontrada</strong><span>As campanhas aparecem aqui assim que um envio automatizado for disparado.</span></div></td></tr>`;
           return;
         }
 
-        document.getElementById("campaignsBody").innerHTML = sortedCampaigns()
+        document.getElementById("campaignsBody").innerHTML = state.campaigns
           .map(
             (c) => `
               <tr class="campaign-row" data-campaign-id="${escapeHtml(c.id)}" aria-label="Ver detalhes de ${escapeHtml(campaignName(c))}">
@@ -352,12 +364,36 @@
 
       async function reloadCampaignsList() {
         try {
-          const campaigns = await requestJson("/campaigns");
-          state.campaigns = Array.isArray(campaigns) ? campaigns : [];
+          const params = new URLSearchParams();
+          params.set("limit", String(PAGE_SIZE));
+          params.set("offset", String((state.currentPage - 1) * PAGE_SIZE));
+          params.set("sort", state.sortDirection);
+
+          const payload = await requestJson(`/campaigns?${params.toString()}`);
+          state.campaigns = Array.isArray(payload.data) ? payload.data : [];
+          state.total = (payload.pagination && Number(payload.pagination.total)) || state.campaigns.length;
+
+          // Campanha removida enquanto a tela estava numa pagina do fim pode
+          // deixar o offset atual depois do ultimo registro: volta para a ultima
+          // pagina existente em vez de mostrar uma lista vazia com o contador
+          // dizendo que ha campanhas.
+          const lastPage = totalPages();
+
+          if (!state.campaigns.length && state.total > 0 && state.currentPage > lastPage) {
+            state.currentPage = lastPage;
+            await reloadCampaignsList();
+            return;
+          }
+
           renderCampaigns();
         } catch (error) {
           renderLoadError(error);
         }
+      }
+
+      function goToPage(page) {
+        state.currentPage = Math.max(1, page);
+        return reloadCampaignsList();
       }
 
       async function runCampaignAction(button, url, { confirmMessage } = {}) {
@@ -616,8 +652,13 @@
         state.sortDirection = state.sortDirection === "desc" ? "asc" : "desc";
         localStorage.setItem("estimulo-campanhas-sort", state.sortDirection);
         updateSortToggleButton();
-        renderCampaigns();
+        // Inverter a ordem muda quais campanhas caem em cada pagina, entao a
+        // navegacao recomeca do inicio em vez de manter o offset antigo.
+        goToPage(1);
       });
+
+      document.getElementById("prevPageButton").addEventListener("click", () => goToPage(state.currentPage - 1));
+      document.getElementById("nextPageButton").addEventListener("click", () => goToPage(state.currentPage + 1));
 
       async function initialize() {
         window.estimuloShowLoading();

@@ -193,6 +193,13 @@
                 <tbody id="groupsBody"></tbody>
               </table>
             </div>
+            <div class="actions-bar-end" id="pagerBar" style="justify-content:flex-start;">
+              <div class="pager" id="pagerControls" style="display:flex;align-items:center;gap:10px;">
+                <button class="btn btn-secondary" id="prevPageButton" type="button">Anterior</button>
+                <span class="text-muted" id="pageLabel"></span>
+                <button class="btn btn-secondary" id="nextPageButton" type="button">Próxima</button>
+              </div>
+            </div>
           </section>
         </main>
       </div>
@@ -256,8 +263,23 @@
     <script src="assets/js/nav.js"></script>
     <script src="assets/js/tooltip.js"></script>
     <script>
+      // Espelha o DEFAULT_GROUPS_PAGE_SIZE de groups.repository.js.
+      const PAGE_SIZE = 50;
+
       const state = {
+        // `groups` guarda apenas a PAGINA atual. Antes guardava a lista inteira,
+        // porque a rota devolvia tudo e filtro/paginacao aconteciam aqui - o
+        // custo completo era pago para exibir algumas dezenas de linhas.
         groups: [],
+        // Total do filtro inteiro, contado no banco: o cabecalho continua
+        // dizendo quantos grupos passam nos filtros, nao quantos couberam na
+        // pagina.
+        total: 0,
+        currentPage: 1,
+        // Contadores das abas de numero e lista de setores conhecidos. Vinham da
+        // lista completa carregada aqui; com a paginacao no servidor precisam ser
+        // contados sobre TODOS os grupos, e nao sobre a pagina exibida.
+        facets: { total: 0, setores: [], counts_by_instance: {} },
         organizations: [],
         profiles: [],
         whatsappInstances: [],
@@ -334,47 +356,35 @@
         return match ? match.id : "";
       }
 
+      // Sai de /groups/facets, contado sobre todos os grupos. Alimenta o filtro
+      // de setor da toolbar e o select do modal de edicao - ambos listavam so os
+      // setores presentes na lista carregada, o que com paginacao seria apenas
+      // os da pagina aberta.
       function knownSetores() {
-        const seen = new Map();
-        state.groups.forEach((group) => {
-          const value = String(group.setor || "").trim();
-          if (!value) return;
-          const key = normalizeComparable(value);
-          if (!seen.has(key)) seen.set(key, value);
-        });
-        return [...seen.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+        return Array.isArray(state.facets.setores) ? state.facets.setores : [];
       }
 
-      function matchesFilters(group) {
-        const q = document.getElementById("searchInput").value.trim().toLowerCase();
+      // Os filtros agora sao aplicados no banco: filtrar aqui, depois da pagina
+      // ja recortada, mostraria "50 grupos" dos quais poucos sobrevivem ao
+      // filtro. Esta funcao monta o que a rota precisa saber.
+      function currentFilterParams() {
+        const params = new URLSearchParams();
+        const q = document.getElementById("searchInput").value.trim();
         const statusFilter = document.getElementById("statusFilter").value;
         const organizationFilter = document.getElementById("organizationFilter").value;
         const profileFilter = document.getElementById("profileFilter").value;
         const setorFilter = document.getElementById("setorFilter").value;
         const videoFilter = document.getElementById("videoFilter").value;
 
-        if (q && !String(group.nome || "").toLowerCase().includes(q)) return false;
-        if (statusFilter === "classificados" && !group.segmento) return false;
-        if (statusFilter === "nao-classificados" && group.segmento) return false;
+        if (q) params.set("name_contains", q);
+        if (statusFilter !== "todos") params.set("classification", statusFilter);
+        if (organizationFilter !== "todos") params.set("organization_id", organizationFilter);
+        if (profileFilter !== "todos") params.set("profile_id", profileFilter);
+        if (setorFilter !== "todos") params.set("setor", setorFilter);
+        if (videoFilter !== "todos") params.set("envia_video", videoFilter);
+        if (state.activeInstanceTab !== "todos") params.set("whatsapp_instance_id", state.activeInstanceTab);
 
-        if (organizationFilter !== "todos" && group.organization_id !== organizationFilter) return false;
-
-        if (profileFilter !== "todos") {
-          const groupProfileId = group.profile_id || resolveProfileIdFromSegmento(group.segmento);
-          if (groupProfileId !== profileFilter) return false;
-        }
-
-        if (setorFilter !== "todos" && normalizeComparable(group.setor) !== normalizeComparable(setorFilter)) return false;
-
-        if (videoFilter === "sim" && group.envia_video !== true) return false;
-        if (videoFilter === "nao" && group.envia_video === true) return false;
-
-        if (state.activeInstanceTab !== "todos") {
-          const linkedIds = Array.isArray(group.whatsapp_instance_ids) ? group.whatsapp_instance_ids : [];
-          if (!linkedIds.includes(state.activeInstanceTab)) return false;
-        }
-
-        return true;
+        return params;
       }
 
       // Cada grupo pode ter mais de um numero vinculado (mesmo grupo do WhatsApp
@@ -389,11 +399,7 @@
           return;
         }
 
-        const countFor = (instanceId) => state.groups.filter((group) => {
-          if (instanceId === "todos") return true;
-          const linkedIds = Array.isArray(group.whatsapp_instance_ids) ? group.whatsapp_instance_ids : [];
-          return linkedIds.includes(instanceId);
-        }).length;
+        const countFor = (instanceId) => Number(state.facets.counts_by_instance[instanceId] || 0);
 
         const tabs = [{ id: "todos", label: "Todos" }].concat(
           state.whatsappInstances.map((instance) => ({
@@ -420,10 +426,31 @@
 
         wrap.querySelectorAll("[data-instance-tab]").forEach((button) => {
           button.addEventListener("click", () => {
+            if (state.activeInstanceTab === button.dataset.instanceTab) return;
             state.activeInstanceTab = button.dataset.instanceTab;
-            renderGroups();
+            // A aba e' mais um filtro do banco: trocar de numero recomeca na
+            // primeira pagina, senao o offset antigo cairia no meio (ou depois
+            // do fim) de um resultado diferente.
+            goToPage(1);
           });
         });
+      }
+
+      function totalPages() {
+        return Math.max(1, Math.ceil(state.total / PAGE_SIZE));
+      }
+
+      function renderPager() {
+        const pages = totalPages();
+        const first = state.total === 0 ? 0 : (state.currentPage - 1) * PAGE_SIZE + 1;
+        const last = (state.currentPage - 1) * PAGE_SIZE + state.groups.length;
+
+        document.getElementById("pagerBar").hidden = state.total <= PAGE_SIZE;
+        document.getElementById("pageLabel").textContent = state.total === 0
+          ? "Nenhum grupo"
+          : `Página ${state.currentPage} de ${pages} · ${first}-${last} de ${state.total}`;
+        document.getElementById("prevPageButton").disabled = state.currentPage <= 1;
+        document.getElementById("nextPageButton").disabled = state.currentPage >= pages;
       }
 
       function renderGroups() {
@@ -432,8 +459,10 @@
         document.getElementById("instanceColumnHeader").hidden = !showInstanceColumn;
         renderInstanceTabs();
 
-        const filtered = state.groups.filter(matchesFilters);
-        document.getElementById("resultCount").textContent = `${filtered.length} grupo(s)`;
+        // `state.groups` ja e' a pagina filtrada pelo banco.
+        const filtered = state.groups;
+        document.getElementById("resultCount").textContent = `${state.total} grupo(s)`;
+        renderPager();
 
         if (!filtered.length) {
           const activeInstance = state.whatsappInstances.find((item) => item.id === state.activeInstanceTab);
@@ -591,11 +620,11 @@
             }),
           });
 
-          const index = state.groups.findIndex((item) => item.id === updatedGroup.id);
-          if (index >= 0) state.groups[index] = updatedGroup;
-
           closeEdit();
-          renderGroups();
+          // Recarrega em vez de trocar a linha em memoria: a edicao pode criar um
+          // setor novo (lista de setores) e pode tirar o grupo do filtro atual,
+          // o que muda o total e a propria composicao da pagina.
+          await refreshCurrentPage();
         } catch (error) {
           status.textContent = window.estimuloErroEmLinha(error);
           status.className = "status-line error";
@@ -670,19 +699,75 @@
         state.profiles = Array.isArray(profiles) ? profiles : [];
       }
 
+      async function loadFacets() {
+        const facets = await requestJson("/groups/facets");
+        state.facets = {
+          total: Number(facets.total || 0),
+          setores: Array.isArray(facets.setores) ? facets.setores : [],
+          counts_by_instance: facets.counts_by_instance || {},
+        };
+      }
+
       async function loadGroups() {
         const colspan = hasMultipleInstances() ? 8 : 7;
         document.getElementById("groupsBody").innerHTML = `
           <tr><td colspan="${colspan}"><div class="empty-state"><strong>Carregando grupos</strong><span>Buscando dados reais no Supabase.</span></div></td></tr>`;
 
         try {
-          const groups = await requestJson("/groups/search");
-          state.groups = Array.isArray(groups) ? groups : [];
+          const params = currentFilterParams();
+          params.set("limit", String(PAGE_SIZE));
+          params.set("offset", String((state.currentPage - 1) * PAGE_SIZE));
+
+          const payload = await requestJson(`/groups/search?${params.toString()}`);
+          state.groups = Array.isArray(payload.data) ? payload.data : [];
+          state.total = (payload.pagination && Number(payload.pagination.total)) || state.groups.length;
+
+          // Filtro apertado depois de navegar pode deixar o offset atual alem do
+          // fim do novo resultado: em vez de exibir uma pagina vazia com o
+          // contador dizendo que ha grupos, volta para a ultima pagina que
+          // existe e busca de novo.
+          const lastPage = totalPages();
+
+          if (!state.groups.length && state.total > 0 && state.currentPage > lastPage) {
+            state.currentPage = lastPage;
+            await loadGroups();
+            return;
+          }
+
           populateToolbarFilters();
           renderGroups();
         } catch (error) {
           renderLoadError(error);
         }
+      }
+
+      // Toda mudanca de filtro recomeca na primeira pagina: manter o offset
+      // antigo cairia no meio de um resultado que nao e' mais o mesmo.
+      function goToPage(page) {
+        state.currentPage = Math.max(1, page);
+        return loadGroups();
+      }
+
+      // Recarrega pagina e facetas juntas - usada depois de qualquer escrita
+      // (edicao de grupo, sincronizacao), que pode mexer nos contadores das abas
+      // e na lista de setores tanto quanto no conteudo da pagina.
+      async function refreshCurrentPage() {
+        try {
+          await loadFacets();
+        } catch (error) {
+          // Facetas desatualizadas nao justificam derrubar a listagem.
+        }
+
+        await loadGroups();
+      }
+
+      let searchDebounceTimer = null;
+
+      function scheduleSearchReload() {
+        clearTimeout(searchDebounceTimer);
+        // A busca por nome agora vai ao banco a cada mudanca; sem a espera seria
+        // uma requisicao por tecla digitada.
+        searchDebounceTimer = setTimeout(() => goToPage(1), 300);
       }
 
       async function initialize() {
@@ -704,6 +789,12 @@
             await loadWhatsappInstances();
           } catch (error) {
             state.whatsappInstances = [];
+          }
+
+          try {
+            await loadFacets();
+          } catch (error) {
+            state.facets = { total: 0, setores: [], counts_by_instance: {} };
           }
 
           await loadGroups();
@@ -764,7 +855,11 @@
               </div>`;
           }
 
-          await loadGroups();
+          // Grupo novo entra no topo da ordenacao (created_at desc): depois da
+          // sincronizacao a tela volta para a primeira pagina, que e' onde ele
+          // esta.
+          state.currentPage = 1;
+          await refreshCurrentPage();
         } catch (error) {
           status.innerHTML = `<span class="badge badge-danger">Erro</span> ${escapeHtml(window.estimuloErroEmLinha(error))}`;
         } finally {
@@ -786,12 +881,14 @@
         newSetorField.hidden = event.target.value !== "__new__";
         if (!newSetorField.hidden) document.getElementById("newSetorInput").focus();
       });
-      document.getElementById("searchInput").addEventListener("input", renderGroups);
-      document.getElementById("statusFilter").addEventListener("change", renderGroups);
-      document.getElementById("organizationFilter").addEventListener("change", renderGroups);
-      document.getElementById("profileFilter").addEventListener("change", renderGroups);
-      document.getElementById("setorFilter").addEventListener("change", renderGroups);
-      document.getElementById("videoFilter").addEventListener("change", renderGroups);
+      document.getElementById("searchInput").addEventListener("input", scheduleSearchReload);
+      document.getElementById("statusFilter").addEventListener("change", () => goToPage(1));
+      document.getElementById("organizationFilter").addEventListener("change", () => goToPage(1));
+      document.getElementById("profileFilter").addEventListener("change", () => goToPage(1));
+      document.getElementById("setorFilter").addEventListener("change", () => goToPage(1));
+      document.getElementById("videoFilter").addEventListener("change", () => goToPage(1));
+      document.getElementById("prevPageButton").addEventListener("click", () => goToPage(state.currentPage - 1));
+      document.getElementById("nextPageButton").addEventListener("click", () => goToPage(state.currentPage + 1));
       document.getElementById("syncButton").addEventListener("click", syncGroups);
 
       initialize();

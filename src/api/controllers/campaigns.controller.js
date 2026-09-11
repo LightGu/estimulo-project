@@ -58,11 +58,27 @@ function createCampaignsController(dependencies = {}) {
     }
   }
 
+  // Com `limit`/`offset` a rota devolve uma pagina ({ data, pagination }) ja
+  // ordenada pelo `sort` pedido; sem eles, o array cru de sempre - e o que o
+  // calendario e o painel inicial consomem.
   async function list(req, res) {
     try {
-      const campaigns = await campaignService.listWithSummary();
+      const query = req.query || {};
+      const paginated = query.limit !== undefined || query.offset !== undefined;
 
-      return res.status(200).json(campaigns);
+      if (!paginated) {
+        const campaigns = await campaignService.listWithSummary();
+
+        return res.status(200).json(campaigns);
+      }
+
+      const page = await campaignService.listPageWithSummary({
+        limit: query.limit,
+        offset: query.offset,
+        sort: query.sort,
+      });
+
+      return res.status(200).json(page);
     } catch (error) {
       return res.status(500).json({ error: "Internal server error" });
     }

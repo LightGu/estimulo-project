@@ -11,11 +11,34 @@ function createGroupsController(dependencies = {}) {
     }
   }
 
+  // Com `limit`/`offset` a rota devolve uma pagina ({ data, pagination }); sem
+  // eles, o array cru de sempre. As outras telas que consomem /groups/search
+  // (relatorios, mensagens, trilhas, configuracoes...) continuam recebendo o
+  // formato antigo sem alteracao.
   async function search(req, res) {
     try {
-      const groups = await groupService.search(req.query || {});
+      const query = req.query || {};
+      const paginated = query.limit !== undefined || query.offset !== undefined;
 
-      return res.status(200).json(groups);
+      if (!paginated) {
+        const groups = await groupService.search(query);
+
+        return res.status(200).json(groups);
+      }
+
+      const page = await groupService.searchPage(query);
+
+      return res.status(200).json(page);
+    } catch (error) {
+      return res.status(500).json({ error: "Internal server error" });
+    }
+  }
+
+  async function facets(req, res) {
+    try {
+      const result = await groupService.getFacets();
+
+      return res.status(200).json(result);
     } catch (error) {
       return res.status(500).json({ error: "Internal server error" });
     }
@@ -180,6 +203,7 @@ function createGroupsController(dependencies = {}) {
 
   return {
     dispatchTestVideo,
+    facets,
     forceNextVideo,
     listWithoutSegment,
     previewNextTrilha,

@@ -393,6 +393,80 @@ function createGroupsService(dependencies = {}) {
     return attachInstanceIds(filtered);
   }
 
+  // O filtro por perfil da tela aceitava grupo legado sem profile_id cujo
+  // `segmento` bate com o nome do perfil. Para o banco poder aplicar o mesmo
+  // criterio (ver applySearchFilters), o nome do perfil escolhido viaja junto.
+  async function resolveProfileNome(profileId) {
+    if (!profileId) {
+      return null;
+    }
+
+    try {
+      const profiles = await groupProfilesRepositoryDependency.findAll();
+      const profile = (profiles || []).find((item) => item.id === profileId);
+
+      return profile ? profile.nome : null;
+    } catch (error) {
+      // Sem o nome, o filtro cai para `profile_id` puro: perde o resgate dos
+      // legados, mas nao derruba a listagem inteira.
+      return null;
+    }
+  }
+
+  async function searchPage(options = {}) {
+    const profileId = options.profile_id || options.profileId;
+    const page = await repository.searchPage({
+      ...options,
+      profile_nome: await resolveProfileNome(profileId),
+    });
+
+    // Compatibilidade com repositorios injetados em teste que ainda devolvem um
+    // array puro.
+    if (Array.isArray(page)) {
+      const rows = await attachInstanceIds(page);
+
+      return {
+        data: rows,
+        pagination: { total: rows.length, limit: rows.length, offset: 0, has_more: false },
+      };
+    }
+
+    const rows = await attachInstanceIds(page.rows || []);
+
+    return {
+      data: rows,
+      pagination: {
+        total: page.total,
+        limit: page.limit,
+        offset: page.offset,
+        has_more: page.offset + rows.length < page.total,
+      },
+    };
+  }
+
+  // Os dados que a tela derivava da lista completa de grupos e que a paginacao
+  // deixaria incorretos: o contador de cada aba de numero e a lista de setores
+  // conhecidos (filtro da toolbar e select do modal de edicao). Contados sobre
+  // TODOS os grupos, como antes - as abas nunca reagiram aos demais filtros.
+  async function getFacets() {
+    const [total, setores, instances] = await Promise.all([
+      repository.countAll(),
+      repository.listDistinctSetores(),
+      instancesRepository.findAll(),
+    ]);
+
+    const instanceIds = (instances || []).map((instance) => instance.id);
+    const countsByInstance = await groupInstancesRepository.countGroupsByInstance(instanceIds);
+
+    const counts = { todos: total };
+
+    instanceIds.forEach((instanceId) => {
+      counts[instanceId] = countsByInstance.get(instanceId) || 0;
+    });
+
+    return { total, setores, counts_by_instance: counts };
+  }
+
   async function listByInstance(whatsappInstanceId) {
     if (!whatsappInstanceId) {
       throw new Error("whatsapp_instance_id is required");
@@ -878,6 +952,7 @@ function createGroupsService(dependencies = {}) {
     delete: remove,
     forceNextVideo,
     getById,
+    getFacets,
     list,
     listByInstance,
     listByOrganization,
@@ -885,6 +960,7 @@ function createGroupsService(dependencies = {}) {
     listWithoutSegment,
     previewNextTrilha,
     search,
+    searchPage,
     dispatchTestVideo,
     syncGroupsFromEvolution,
     update,
