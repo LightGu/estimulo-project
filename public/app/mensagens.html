@@ -423,15 +423,19 @@
         const classFilter = document.getElementById("groupClassFilter").value;
         const videoFilter = document.getElementById("groupVideoFilter").value;
 
-        const filteredGroups = state.groups.filter((g) => {
-          if (query && !g.nome.toLowerCase().includes(query)) return false;
-          if (orgFilter !== "todos" && g.organization_id !== orgFilter) return false;
-          if (classFilter === "classificados" && !g.segmento) return false;
-          if (classFilter === "nao-classificados" && g.segmento) return false;
-          if (videoFilter === "sim" && g.envia_video !== true) return false;
-          if (videoFilter === "nao" && g.envia_video === true) return false;
-          return true;
-        });
+        const filteredGroups = state.groups
+          .filter((g) => {
+            if (query && !g.nome.toLowerCase().includes(query)) return false;
+            if (orgFilter !== "todos" && g.organization_id !== orgFilter) return false;
+            if (classFilter === "classificados" && !g.segmento) return false;
+            if (classFilter === "nao-classificados" && g.segmento) return false;
+            if (videoFilter === "sim" && g.envia_video !== true) return false;
+            if (videoFilter === "nao" && g.envia_video === true) return false;
+            return true;
+          })
+          // Ordem alfabetica (nao a ordem de cadastro/banco) para achar um grupo
+          // especifico numa lista longa sem precisar rolar tudo.
+          .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 
         // Guarda o que o filtro atual deixa visivel: renderSelectedGroupsSummary
         // usa isso para acusar selecao que ficou fora da tela.
