@@ -235,6 +235,13 @@
               <p class="text-faint" style="font-size: var(--fs-sm);">Define se o grupo entra nos fluxos operacionais de envio de v&iacute;deo.</p>
             </div>
           </div>
+          <div class="field" style="display:flex;align-items:center;gap:12px;margin-top:4px;">
+            <label class="switch"><input type="checkbox" id="editAtivo"><span class="track"></span></label>
+            <div>
+              <strong style="font-size: var(--fs-md);">Ativo</strong>
+              <p class="text-faint" style="font-size: var(--fs-sm);">Desligue para tirar o grupo de circula&ccedil;&atilde;o em disparos e campanhas novas, sem apagar o hist&oacute;rico. &Uacute;til para grupos duplicados (mesmo nome, WhatsApp diferente).</p>
+            </div>
+          </div>
           <div id="editStatus" class="status-line"></div>
         </div>
         <div class="modal-footer">
@@ -450,6 +457,7 @@
               <tr>
                 <td class="strong">
                   ${escapeHtml(group.nome)}
+                  ${group.ativo === false ? ' <span class="badge badge-neutral">Inativo</span>' : ""}
                   <br><span class="mono text-faint" style="font-weight:400;">${escapeHtml(group.evolution_group_id)}</span>
                   ${memberLine}
                 </td>
@@ -527,6 +535,7 @@
         document.getElementById("newSetorField").hidden = true;
         document.getElementById("newSetorInput").value = "";
         document.getElementById("editEnviaVideo").checked = group.envia_video === true;
+        document.getElementById("editAtivo").checked = group.ativo !== false;
         document.getElementById("editStatus").textContent = "";
         document.getElementById("editStatus").className = "status-line";
         document.getElementById("editOverlay").hidden = false;
@@ -578,6 +587,7 @@
               profile_id: selectedProfileId || null,
               setor: setor || null,
               envia_video: document.getElementById("editEnviaVideo").checked,
+              ativo: document.getElementById("editAtivo").checked,
             }),
           });
 

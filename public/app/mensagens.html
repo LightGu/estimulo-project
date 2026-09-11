@@ -443,12 +443,28 @@
           return;
         }
 
+        // Grupos reais do WhatsApp podem ter o mesmo nome (dois chats distintos com
+        // o mesmo título) — sem alguma pista visual, os dois checkboxes ficam
+        // idênticos e é fácil marcar o errado por engano. Quando o nome se repete
+        // na lista filtrada, mostra a quantidade de membros para diferenciar.
+        const nameCounts = new Map();
+        filteredGroups.forEach((g) => {
+          const key = g.nome.trim().toLowerCase();
+          nameCounts.set(key, (nameCounts.get(key) || 0) + 1);
+        });
+
         document.getElementById("groupCheckboxes").innerHTML = filteredGroups.length
           ? filteredGroups
-              .map(
-                (g) =>
-                  `<label><input type="checkbox" value="${g.id}" class="group-check" ${state.selectedGroupIds.has(g.id) ? "checked" : ""}> ${escapeHtml(g.nome)}${g.evolution_group_id ? "" : ' <span class="text-faint">(sem WhatsApp vinculado)</span>'}</label>`
-              )
+              .map((g) => {
+                const isDuplicateName = nameCounts.get(g.nome.trim().toLowerCase()) > 1;
+                const membersHint =
+                  isDuplicateName && Number.isFinite(g.quantidade_membros)
+                    ? ` <span class="text-faint">(${g.quantidade_membros} membros)</span>`
+                    : "";
+                const noWhatsappHint = g.evolution_group_id ? "" : ' <span class="text-faint">(sem WhatsApp vinculado)</span>';
+
+                return `<label><input type="checkbox" value="${g.id}" class="group-check" ${state.selectedGroupIds.has(g.id) ? "checked" : ""}> ${escapeHtml(g.nome)}${membersHint}${noWhatsappHint}</label>`;
+              })
               .join("")
           : '<span class="text-faint">Nenhum grupo encontrado para esses filtros.</span>';
         document.querySelectorAll(".group-check").forEach((cb) => cb.addEventListener("change", () => {
@@ -1115,7 +1131,9 @@
         try {
           try {
             const groups = await requestJson("/groups/search");
-            state.groups = groups.filter((g) => Boolean(g.segmento));
+            state.groups = groups
+              .filter((g) => Boolean(g.segmento) && g.ativo !== false)
+              .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR", { numeric: true, sensitivity: "base" }));
           } catch (error) {
             document.getElementById("groupCheckboxes").innerHTML = `<span class="text-faint">Falha ao carregar grupos: ${escapeHtml(window.estimuloErroEmLinha(error))}</span>`;
           }

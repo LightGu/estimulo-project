@@ -650,7 +650,9 @@ function createMensagensService(dependencies = {}) {
           ? "Grupo sem evolution_group_id"
           : !group.segmento
             ? "Grupo sem classificacao (segmento)"
-            : null;
+            : group.ativo === false
+              ? "Grupo inativo"
+              : null;
 
       if (group) {
         await campaignGroups.associateGroup(campaign.id, group.id, group.organization_id);
@@ -796,6 +798,12 @@ function createMensagensService(dependencies = {}) {
       throw new Error(
         `Grupo(s) sem classificacao (segmento): ${withoutSegmento.map((group) => group.nome).join(", ")}`
       );
+    }
+
+    const inactiveGroups = groups.filter((group) => group.ativo === false);
+
+    if (inactiveGroups.length) {
+      throw new Error(`Grupo(s) inativo(s): ${inactiveGroups.map((group) => group.nome).join(", ")}`);
     }
 
     await assertAnyInstanceDispatchable();
@@ -1002,6 +1010,12 @@ function createMensagensService(dependencies = {}) {
       throw new Error(
         `Grupo(s) sem classificacao (segmento): ${withoutSegmento.map((group) => group.nome).join(", ")}`
       );
+    }
+
+    const inactiveGroups = groups.filter((group) => group.ativo === false);
+
+    if (inactiveGroups.length) {
+      throw new Error(`Grupo(s) inativo(s): ${inactiveGroups.map((group) => group.nome).join(", ")}`);
     }
 
     await assertAnyInstanceDispatchable();

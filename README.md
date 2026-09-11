@@ -1,26 +1,48 @@
 # estimulo-project
 
-MVP para organizar campanhas de envio de conteudos em grupos de WhatsApp. A aplicacao combina uma API Node.js/Express, workers BullMQ, Redis, Evolution API, Google Drive, Gemini, Supabase e (opcionalmente) Sentry para rastreamento de erros.
+MVP para gerenciar campanhas de envio de conteudos (video, texto ou imagem) em
+grupos de WhatsApp, com trilhas de aprendizagem por perfil de grupo,
+agendamento recorrente e legendas geradas por IA.
 
-O fluxo principal funciona assim: campanhas sao cadastradas na API, o worker `campaign-trigger` identifica os grupos elegiveis, escolhe o proximo video conforme a trilha/perfil do grupo e cria jobs. Campanhas de video passam primeiro pelo worker `campaign-captions` (Etapa 2: gera legenda e, se a revisao humana estiver desligada, confirma o disparo sozinho) antes de virar job na fila `dispatch`; disparos pontuais da tela de Mensagens vao direto para `mensagens-dispatch`. Os workers de disparo enviam o conteudo pela Evolution API e registram historico, progresso e falhas no banco (`logs`), incluindo quem cancelou o que e quando (ver "Quem cancelou um envio, e quando" mais abaixo). Erros de producao (API e workers) sao opcionalmente reportados ao Sentry — ver `docs/SENTRY.md`.
+## Arquitetura
 
-O projeto ja possui um ambiente deployado para testes, rodando via Docker Compose numa VM Oracle Cloud (ver `docs/DEPLOY_ORACLE.md`), com HTTPS via Caddy + sslip.io:
+A aplicacao combina uma API Node.js/Express, workers BullMQ sobre Redis,
+Evolution API (gateway WhatsApp), Supabase (banco de dados), Google Drive
+(catalogo de videos) e Gemini (transcricao e geracao de legenda). Sentry e
+opcional, para rastreamento de erros (`docs/SENTRY.md`).
+
+Fluxo principal:
+
+1. Campanhas sao cadastradas na API, com envio unico ou recorrente (cron).
+2. O worker `campaign-trigger` identifica os grupos elegiveis, escolhe o
+   proximo video conforme a trilha/perfil do grupo e cria os jobs de disparo.
+3. Campanhas de video passam antes pelo worker `campaign-captions`, que gera a
+   legenda (Etapa 2) e, se a revisao humana estiver desligada, confirma o
+   disparo sozinho. Disparos pontuais da tela de Mensagens vao direto para a
+   fila `mensagens-dispatch`.
+4. Os workers de disparo enviam o conteudo pela Evolution API e registram
+   historico, progresso e falhas em `logs` (quem enviou, quem cancelou e
+   quando - detalhes em `docs/filas.md`).
+
+Ha um ambiente de testes deployado numa VM Oracle Cloud via Docker Compose
+(guia completo em `docs/DEPLOY_ORACLE.md`), com HTTPS por Caddy + sslip.io:
 
 ```text
 https://163-176-107-172.sslip.io
 ```
 
-Se o IP ou dominio mudar, atualize esta referencia antes de compartilhar o acesso.
+Se o IP ou dominio mudar, atualize esta referencia antes de compartilhar o
+acesso.
 
-## Ambiente Local
+## Executando Localmente
 
-### 1. Instalar Dependencias
+### 1. Instalar dependencias
 
 ```bash
 npm install
 ```
 
-### 2. Criar o `.env`
+### 2. Configurar o `.env`
 
 ```bash
 cp .env.example .env
@@ -59,16 +81,16 @@ SUPABASE_SERVICE_ROLE_KEY=change-me
 ESTIMULO_SESSION_TTL_HOURS=168
 ESTIMULO_SESSION_STATE_FILE=storage/sessions.json
 
-# Google Drive
+# Google Drive (opcional)
 GOOGLE_DRIVE_CREDENTIALS=
 GOOGLE_DRIVE_ROOT_FOLDER_ID=
 GOOGLE_DRIVE_VIDEO_INDEX_STATE_FILE=storage/google-drive-video-index-state.json
 GOOGLE_DRIVE_VIDEO_INDEX_CRON=0 3 * * *
 GOOGLE_DRIVE_VIDEO_INDEX_TIMEZONE=America/Bahia
 
-# Gemini / IA
+# Gemini / IA (opcional)
 GEMINI_API_KEY=change-me
-GEMINI_TRANSCRIPTION_MODEL=gemini-flash-latest
+GEMINI_TRANSCRIPTION_MODEL=gemini-3.5-flash
 GEMINI_TEXT_MODEL=gemini-flash-latest
 FFMPEG_PATH=
 TRANSCRIPTION_AUDIO_ONLY=true
@@ -78,7 +100,7 @@ ADHOC_MEDIA_MAX_UPLOAD_BYTES=524288000
 ADHOC_IMAGE_MAX_UPLOAD_BYTES=16777216
 ADHOC_VIDEO_TARGET_BYTES=67108864
 
-# Sentry (rastreamento de erros e replay de sessao) - vazio = desligado
+# Sentry (opcional) - vazio = desligado
 SENTRY_DSN=
 SENTRY_ENVIRONMENT=
 SENTRY_TRACES_SAMPLE_RATE=0
@@ -86,11 +108,21 @@ SENTRY_REPLAYS_SESSION_SAMPLE_RATE=0
 SENTRY_REPLAYS_ON_ERROR_SAMPLE_RATE=1
 ```
 
-`SENTRY_DSN` vazio desliga o Sentry por completo (backend e painel) - rodar sem configurar segue funcionando exatamente como antes. Passo a passo de criacao do projeto no Sentry e onde ver os erros capturados: `docs/SENTRY.md`.
+Google Drive, Gemini e Sentry sao opcionais: sem eles, os recursos
+correspondentes (catalogo de videos, geracao de legenda por IA e rastreamento
+de erros) ficam desativados, e o resto da aplicacao funciona normalmente.
+Passo a passo do Sentry: `docs/SENTRY.md`.
 
-A `SUPABASE_SERVICE_ROLE_KEY` deve ficar apenas no backend. Nunca exponha essa chave no frontend, em logs, prints, documentacao publica ou codigo versionado.
+A `SUPABASE_SERVICE_ROLE_KEY` deve ficar apenas no backend. Nunca a exponha no
+frontend, em logs, prints, documentacao publica ou codigo versionado.
 
-O painel exige login individual (usuario + senha) para qualquer pagina ou chamada de API - a tela `/app/access.html` e' a unica rota publica. As contas ficam na tabela `app_users` do Supabase (migracao `supabase/migrations/202608100001_create_app_users.sql`), com senha guardada como hash scrypt (nunca em texto puro). Ao autenticar, o backend emite um cookie de sessao `estimulo_session` (HttpOnly, token aleatorio de 256 bits) valido por `ESTIMULO_SESSION_TTL_HOURS` (padrao: 168h/7 dias) e persiste as sessoes ativas em `ESTIMULO_SESSION_STATE_FILE`, para sobreviver a um restart do processo. `/access/login` tem protecao contra forca bruta: apos tentativas erradas repetidas (por IP e por usuario), a chave fica temporariamente bloqueada com backoff exponencial. O botao "Sair" no topo do painel chama `POST /access/logout`, que invalida a sessao no servidor.
+O painel exige login individual (usuario + senha) para qualquer pagina ou
+chamada de API - `/app/access.html` e a unica rota publica. As contas ficam na
+tabela `app_users` do Supabase, com senha em hash scrypt. O backend emite um
+cookie de sessao HttpOnly valido por `ESTIMULO_SESSION_TTL_HOURS` (padrao:
+168h) e persiste as sessoes ativas em `ESTIMULO_SESSION_STATE_FILE`, para
+sobreviver a um restart do processo. `/access/login` tem protecao contra forca
+bruta (bloqueio temporario com backoff exponencial, por IP e por usuario).
 
 Para criar/gerenciar logins:
 
@@ -102,172 +134,98 @@ npm run users:manage -- activate <usuario>
 npm run users:manage -- list
 ```
 
-### 3. IA Para Legendas
+### 3. Escolher como rodar: Docker Compose ou processos Node locais
 
-A geracao de legenda/transcricao usa Gemini via `GeminiAdapter` em `src/services/ai`.
+`infra/docker-compose.yml` builda uma unica imagem (`Dockerfile`) e reusa a
+mesma para a API e para cada worker, so trocando o `command`. O servico `api`
+**nao tem `profiles:`**, entao ele sobe junto em qualquer `docker compose up`,
+inclusive `npm run infra:up`. Por isso as duas opcoes abaixo sao alternativas,
+nao complementares - rodar a API pelo Docker e depois `npm run api` local ao
+mesmo tempo derruba na mesma porta 3000.
 
-Para transcrever, o adapter envia ao Gemini somente o audio extraido do video (`src/services/video-audio-extraction.js`, mono/16 kHz/mp3), nao o video completo. Isso reduz upload e custo de tokens. A extracao usa o ffmpeg instalado como dependencia npm (`@ffmpeg-installer/ffmpeg`).
-
-Use:
-
-```env
-FFMPEG_PATH=
-TRANSCRIPTION_AUDIO_ONLY=true
-```
-
-As variaveis de modelo servem como valor inicial. Depois que a tela de Configuracoes for usada, os modelos, fallbacks e prompts dos agentes de IA passam a ser persistidos na tabela `settings`, coluna `ai_agents`.
-
-### 4. Subir Infraestrutura Local
-
-Para subir Redis e Evolution API:
+**Opcao A - tudo em container** (mais perto do que roda em producao):
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml up -d
+npm run infra:up          # redis + api (api ja em container aqui)
+npm run infra:workers     # + todos os workers de fila
+npm run infra:evolution   # + Evolution API (gateway WhatsApp)
+npm run infra:all         # os tres perfis de uma vez
+npm run infra:ps          # status
+npm run infra:logs        # logs de tudo
+npm run infra:down        # para e remove
 ```
 
-Para subir apenas o Redis:
+Nao ha volume de codigo montado - depois de alterar um `.js`, rebuilde antes
+de subir de novo (o `docker compose build` sozinho nao reinicia o container):
+
+```bash
+docker compose --env-file .env -f infra/docker-compose.yml build api dispatch-worker
+npm run infra:workers
+```
+
+**Opcao B - API e workers como processos Node locais** (mais rapido durante o
+desenvolvimento, sem rebuild de imagem a cada mudanca). Suba so os servicos de
+terceiros no Docker:
 
 ```bash
 docker compose --env-file .env -f infra/docker-compose.yml up -d redis
+docker compose --env-file .env -f infra/docker-compose.yml --profile evolution up -d evolution-postgres evolution-api
 ```
 
-Para verificar os containers:
+E rode a API e cada worker num terminal separado:
 
 ```bash
-docker compose --env-file .env -f infra/docker-compose.yml ps
+npm run api                                    # API HTTP + painel
+npm run queue:campaign-trigger:worker          # campanhas agendadas
+npm run queue:campaign-captions:worker         # geracao de legendas (Etapa 2)
+npm run queue:dispatch:worker                  # disparo de conteudo
+npm run queue:dispatch-review-timeout:worker   # timeout/revisao de disparos
+npm run queue:dispatch-failure-retry:worker    # retry de falhas de disparo
+npm run queue:mensagens-dispatch:worker        # mensagens pontuais
+npm run queue:group-sync:worker                # sincronizacao de grupos
+npm run queue:drive-video-index:worker         # indexacao de videos do Drive
 ```
 
-Para parar:
-
-```bash
-docker compose --env-file .env -f infra/docker-compose.yml down
-```
-
-Para parar e remover volumes locais:
-
-```bash
-docker compose --env-file .env -f infra/docker-compose.yml down -v
-```
-
-## Como Iniciar
-
-Abra um terminal separado para cada processo.
-
-API HTTP:
-
-```bash
-npm run api
-```
-
-Worker de campanhas agendadas:
-
-```bash
-npm run queue:campaign-trigger:worker
-```
-
-Worker de geracao de legendas (Etapa 2):
-
-```bash
-npm run queue:campaign-captions:worker
-```
-
-Worker de disparo de conteudo:
-
-```bash
-npm run queue:dispatch:worker
-```
-
-Worker de timeout/revisao de disparos:
-
-```bash
-npm run queue:dispatch-review-timeout:worker
-```
-
-Worker de retry de falhas de disparo:
-
-```bash
-npm run queue:dispatch-failure-retry:worker
-```
-
-Worker de mensagens pontuais:
-
-```bash
-npm run queue:mensagens-dispatch:worker
-```
-
-Worker de sincronizacao de grupos:
-
-```bash
-npm run queue:group-sync:worker
-```
-
-Worker de indexacao de videos do Google Drive:
-
-```bash
-npm run queue:drive-video-index:worker
-```
-
-Com a API rodando, acesse o painel:
-
-```text
-http://127.0.0.1:3000/app/index.html
-```
-
-Telas principais:
-
-```text
-http://127.0.0.1:3000/app/grupos.html
-http://127.0.0.1:3000/app/organizacoes.html
-http://127.0.0.1:3000/app/trilhas.html
-http://127.0.0.1:3000/app/envio-automatizado.html
-http://127.0.0.1:3000/app/mensagens.html
-http://127.0.0.1:3000/app/campanhas.html
-http://127.0.0.1:3000/app/relatorios.html
-http://127.0.0.1:3000/app/configuracoes.html
-```
+Em qualquer uma das duas opcoes, com a API no ar, acesse o painel em
+`http://127.0.0.1:3000/app/index.html`. Telas principais: `grupos.html`,
+`organizacoes.html`, `trilhas.html`, `envio-automatizado.html`,
+`mensagens.html`, `campanhas.html`, `relatorios.html`, `configuracoes.html`.
 
 ## Verificacao Rapida
 
-Teste se a API subiu:
-
 ```bash
-curl http://127.0.0.1:3000/health
+curl http://127.0.0.1:3000/health   # unico endpoint publico, sem login
+npm run db:test                     # conexao com Supabase, fora da API
 ```
 
-Teste a conexao com Supabase:
+Todo o resto da API exige sessao - `src/api/auth-gate.js` aplica o login a
+qualquer rota que nao seja `/health` ou `/access/*`, entao chamar os endpoints
+sem cookie responde 401, nao os dados. Para testar via curl, autentique
+primeiro com um usuario criado no passo 2 e reaproveite o cookie:
 
 ```bash
-npm run db:test
-```
+curl -c cookie.txt -X POST http://127.0.0.1:3000/access/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"<usuario>","password":"<senha>"}'
 
-Teste endpoints basicos:
-
-```bash
-curl http://127.0.0.1:3000/organizations
-curl http://127.0.0.1:3000/groups/search
-curl http://127.0.0.1:3000/trilhas/overview
-curl http://127.0.0.1:3000/settings
+curl -b cookie.txt http://127.0.0.1:3000/organizations
+curl -b cookie.txt http://127.0.0.1:3000/groups/search
+curl -b cookie.txt http://127.0.0.1:3000/trilhas/overview
+curl -b cookie.txt http://127.0.0.1:3000/settings/schedule
 ```
 
 ## Banco de Dados
 
-As migrations ficam em `supabase/migrations` e devem ser aplicadas em ordem cronologica no projeto Supabase.
-
-Para validar conexao:
-
-```bash
-npm run db:test
-```
-
-Para popular dados de exemplo:
+As migrations ficam em `supabase/migrations` e devem ser aplicadas em ordem
+cronologica no projeto Supabase - e sao a fonte de verdade sobre o schema
+(a documentacao em `docs/documentacao_banco.md` cobre apenas o schema
+inicial e esta desatualizada; o diagrama abaixo reflete o estado atual).
 
 ```bash
-npm run seed
+npm run db:test    # valida conexao
+npm run seed       # popula dados de exemplo (organizacoes, grupos, campanhas,
+                   # videos, progresso e logs), de forma idempotente
 ```
-
-O seed cria dados iniciais de forma idempotente, incluindo organizacoes, grupos, campanhas, videos, progresso e logs.
-
-### Arquitetura Atual
 
 ```mermaid
 erDiagram
@@ -407,6 +365,8 @@ erDiagram
         text texto_mensagem
         text link_conteudo
         boolean ativo
+        boolean possui_midia
+        text link_conteudo_tipo
         date data_envio
         time horario_envio
         timestamptz window_start
@@ -414,6 +374,10 @@ erDiagram
         timestamptz status_changed_at
         integer jitter_delay_min_ms
         integer jitter_delay_max_ms
+        timestamptz paused_at
+        bigint total_paused_ms
+        timestamptz trigger_fired_at
+        text campaign_trigger_job_id
         timestamptz hidden_at
         uuid cancelado_por FK
         timestamptz created_at
@@ -459,6 +423,9 @@ erDiagram
         varchar status
         text mensagem_erro
         text dispatch_ref
+        text provider_message_id
+        text provider_status
+        text dispatch_job_id
         integer retry_count
         timestamptz horario_envio_planejado
         timestamptz enviado_em
@@ -549,8 +516,6 @@ erDiagram
     }
 ```
 
-O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes, incluindo `app_users` (login do painel) e as colunas de `logs`/`campaigns`/`whatsapp_instances` adicionadas em agosto e setembro/2026 (pausa de numero, instancia responsavel pelo envio, ocultar registros, auditoria de cancelamento - ver "Quem cancelou um envio, e quando" abaixo - e `dispatch_ref` para correlacao de log). Para o historico completo coluna a coluna, `supabase/migrations/` continua sendo a fonte de verdade.
-
 ## Filas e Workers
 
 | Comando | Responsabilidade |
@@ -559,180 +524,70 @@ O Mermaid acima foi atualizado com as tabelas criadas nas migrations recentes, i
 | `npm run queue:campaign-trigger:worker` | Processa campanhas agendadas e cria jobs de disparo. |
 | `npm run queue:campaign-captions:worker` | Gera as legendas da Etapa 2 de uma campanha e, se a revisao humana estiver desligada, confirma o disparo. |
 | `npm run queue:dispatch:worker` | Executa envio de videos/conteudos pela Evolution API. |
-| `npm run queue:dispatch-review-timeout:worker` | Trata campanhas aguardando revisao/manual timeout de legendas. |
+| `npm run queue:dispatch-review-timeout:worker` | Trata campanhas aguardando revisao/timeout manual de legendas. |
 | `npm run queue:dispatch-failure-retry:worker` | Reprocessa falhas elegiveis de dispatch. |
-| `npm run queue:mensagens-dispatch:worker` | Executa disparos pontuais da tela de Mensagens (texto, video/imagem de anexo direto ou video da trilha). |
+| `npm run queue:mensagens-dispatch:worker` | Executa disparos pontuais da tela de Mensagens (texto, anexo direto ou video da trilha). |
 | `npm run queue:group-sync:worker` | Sincroniza grupos da Evolution API. |
 | `npm run queue:drive-video-index:worker` | Indexa videos do Google Drive no catalogo. |
 
-Sem o worker de `mensagens-dispatch`, a tela de Disparador Pontual pode enfileirar envio sem que nada execute. Sem `dispatch-review-timeout`, campanhas que dependem de revisao/timeout automatico podem ficar paradas. Sem `campaign-captions`, campanhas de video despachadas ficam paradas em `gerando_legendas` - a geracao deixou de rodar dentro do processo da API justamente para sobreviver a restart, e agora depende desse worker estar de pe.
+Todos os workers acima sao necessarios para a operacao completa: sem
+`mensagens-dispatch`, o Disparador Pontual enfileira sem que nada execute; sem
+`dispatch-review-timeout`, campanhas que dependem de revisao/timeout automatico
+ficam paradas; sem `campaign-captions`, campanhas de video ficam paradas em
+`gerando_legendas`.
 
-### Reenvio no boot: por que existem travas de atraso
-
-O Redis da infra sobe com `--appendonly yes` e volume persistente, entao **todo job de envio que nao terminou continua gravado entre um `docker compose down` e o proximo `up`**. Quando os workers voltam, a BullMQ:
-
-- promove de uma vez todos os jobs `delayed` cujo horario ja passou (rajada, todos com delay 0);
-- reentrega os jobs que ficaram `active` no shutdown (stalled recovery);
-- re-registra os agendamentos recorrentes (`dispatch-failure-retry`, `dispatch-review-timeout`), que voltam a rodar no instante do boot.
-
-Sem trava, isso reenvia para os grupos de WhatsApp campanhas e mensagens agendadas dias antes. As protecoes atuais:
-
-| Trava | Onde | O que barra |
-|---|---|---|
-| Atraso do job (falha fechado) | `queues/dispatch.js`, `queues/mensagens-dispatch.js` | Job cujo `scheduled_at` passou do teto, ou que nao tem horario nenhum. |
-| Atraso do trigger | `queues/campaign-trigger.js` | Trigger vencido virando dezenas de jobs com delay 0 (nao vale para campanha recorrente). |
-| Campanha pausada/cancelada | `services/dispatch-consistency.service.js` + portao de `dispatch.js` | Job que sobreviveu no Redis depois de o operador pausar/cancelar. |
-| Horario original preservado | `services/dispatch-staleness.js` (`resolveLogScheduledAt`) | Requeue/retry reestampando `scheduled_at` com "agora" e apagando a evidencia de atraso. |
-| Teto de idade do auto-confirm | `queues/dispatch-review-timeout.js` | Campanha abandonada em `gerando_legendas` sendo ressuscitada e disparada inteira. |
-
-Tetos configuraveis (ver `.env.example`): `MAX_DISPATCH_DELAY_MS` (30 min, pontual), `MAX_VIDEO_DISPATCH_DELAY_MS` (6 h, video) e `MAX_AUTO_CONFIRM_AGE_MS` (24 h). Aumentar demais reabre o risco de spam; diminuir demais cancela envio legitimo de campanha grande, porque o worker de video processa em serie.
-
-Regressao coberta por `tests/dispatch-boot-replay.test.js` (`npm run test:boot-replay`).
-
-### Quem cancelou um envio, e quando
-
-Um envio pode virar "Cancelado" por caminhos muito diferentes - o operador clicando em cancelar, a trava de atraso barrando um job vencido, a cascata de uma campanha cancelada - e na tabela `logs` os tres ficavam identicos. Em 03/09/2026 uma campanha apareceu com 34 grupos cancelados sem que o banco soubesse dizer de onde partiu nem por quem. As colunas que respondem isso hoje:
-
-| Coluna | Onde | Resposta que ela da |
-|---|---|---|
-| `logs.cancelado_em` | `202609020002` | Quando aquele envio foi cancelado (a tabela nao tem `updated_at`). |
-| `logs.cancelado_origem` | `202609020002` | `usuario` \| `atraso` \| `campanha_cancelada` \| `sistema` - vocabulario fechado por CHECK. |
-| `logs.cancelado_por` / `campaigns.cancelado_por` | `202609030001` | A conta que pediu o cancelamento no painel. **Nula em cancelamento automatico**, onde nao existe responsavel. |
-| `logs.atualizado_em` | `202609030002` | Instante da ultima alteracao do envio, mantido pelo trigger `trg_logs_atualizado_em`. |
-
-`atualizado_em` existe porque a coluna "Atualizado em" do painel mostrava `criado_em`, o horario em que o envio foi **agendado**. No caso de 03/09 a tela exibia 02:34 (agendamento) para um cancelamento das 12:16 - quem lia o relatorio via um horario que nunca aconteceu. O carimbo fica no trigger, e nao na aplicacao, porque os envios sao atualizados por muitos caminhos (workers de video e de texto, retry, confirmacao de entrega, cascata de cancelamento) e basta um esquecer para o buraco voltar.
-
-Onde isso aparece: o modal de campanha traz "Campanha cancelada em … por …"; o relatorio ganhou a coluna **Atualizado em** e o badge "Cancelado" carrega na dica o motivo, a origem, o responsavel e o horario (`Detalhe do cancelamento` no CSV, ja que planilha nao tem tooltip). O relatorio embeda o responsavel com `app_users!logs_cancelado_por_fkey` - o nome da FK e' obrigatorio, porque `logs` referencia `app_users` por duas colunas (`usuario_responsavel_id` e `cancelado_por`) e sem desambiguar o Postgrest recusa o embed inteiro, derrubando a tela toda em vez de so a coluna.
-
-Linhas anteriores a cada migration ficam **nulas de proposito**: o dado nunca foi gravado e um backfill so trocaria um valor errado por outro. As telas tratam esse nulo explicitamente - o modal de campanha mostra a data de criacao dizendo que e' a de criacao, e a dica do relatorio omite o trecho de autoria em vez de escrever "sem responsavel" (que soaria como "foi automatico", justamente a conclusao errada).
-
-Regressao coberta por `tests/cancel-audit.test.js` (`npm run test:cancel-audit`).
-
-### ATENCAO: use sempre `--env-file` (ou os scripts npm) para subir o compose
-
-`docker compose -f infra/docker-compose.yml ...` rodado da raiz do projeto **nao le o `.env`**. O CLI do compose procura o `.env` relativo ao arquivo passado em `-f` (ou seja `infra/.env`, que nao existe), e a interpolacao `${VAR}` do proprio YAML resolve para **string vazia**, em silencio - apenas warnings soltos. O `env_file: [../.env]` declarado dentro do YAML nao cobre isso: ele alimenta o container depois de criado, nao a interpolacao do YAML.
-
-O sintoma e traicoeiro: os containers sobem com `POSTGRES_USER=""`, `REDIS_PASSWORD=""`, `AUTHENTICATION_API_KEY=""`, o Postgres recusa toda conexao (`no PostgreSQL user name specified in startup packet`) e a Evolution API entra em crash-loop.
-
-Use os scripts npm, que ja passam o flag correto:
-
-```bash
-npm run infra:up          # redis + api
-npm run infra:workers     # + workers de fila
-npm run infra:evolution   # + Evolution API (gateway WhatsApp)
-npm run infra:all         # tudo
-npm run infra:ps          # status
-npm run infra:logs        # logs de tudo
-npm run infra:stop        # para sem remover
-npm run infra:down        # para e remove
-```
-
-Manualmente, o equivalente e sempre: `docker compose --env-file .env -f infra/docker-compose.yml ...`
-
-### Reenvio automatico do Baileys (nao e a nossa fila)
-
-Se mensagens sairem para grupos **sem que nada esteja nas nossas filas** (`logs` com `falhou=0`/`pendente=0`, filas do Redis vazias), o envio provavelmente nao veio da aplicacao. Procure no log da Evolution:
-
-```bash
-docker logs <container-evolution> 2>&1 | grep "sending message again"
-```
-
-`sendMessagesAgain` e o retry automatico do Baileys: quando um aparelho do destinatario nao consegue descriptografar uma mensagem, ele pede reenvio ao WhatsApp. Esses pedidos ficam acumulados **no servidor do WhatsApp** e sao entregues quando a instancia reconecta - o Baileys entao reenvia a mensagem, buscando o conteudo na tabela `Message` do Postgres da Evolution.
-
-**Nao tente resolver apagando a tabela `Message`.** Sem o conteudo, o Baileys nao pula o reenvio: ele envia uma **mensagem vazia** no lugar (testado em 2026-08-21 - 3 mensagens vazias chegaram a um grupo de cliente). As duas pontas sao ruins: com conteudo, reenvia mensagem antiga; sem conteudo, envia vazio.
-
-A unica forma de encerrar o ciclo e **invalidar a sessao** que e dona daqueles ids de mensagem (logout da instancia + novo pareamento por QR Code). Ai os pedidos de reenvio pendentes passam a referenciar um dispositivo que nao existe mais e sao descartados pelo WhatsApp.
-
-### Inspecionar / limpar as filas antes de subir os workers
-
-```bash
-node scripts/inspect-dispatch-queues.js                  # so mostra o que esta armado
-node scripts/inspect-dispatch-queues.js --purge          # remove os jobs vencidos
-node scripts/inspect-dispatch-queues.js --purge --repeat # remove tambem os agendamentos recorrentes
-```
-
-Use antes de subir os workers quando houver suspeita de backlog antigo no Redis. Dentro do compose (Redis nao publicado no host):
-
-```bash
-docker compose -f infra/docker-compose.yml run --rm --entrypoint node api scripts/inspect-dispatch-queues.js
-```
+Documentacao tecnica das filas (formato dos jobs, resolucao de proximo video,
+media-spool, indexacao do Drive) e o runbook operacional (reenvio no boot,
+auditoria de cancelamento, uso correto do `--env-file`, reenvio automatico do
+Baileys): `docs/filas.md`.
 
 ## Testes
 
-Suite completa:
-
 ```bash
-npm test
-```
-
-Testes especificos (lista curada - o `package.json` tem um `test:<nome>` para cada arquivo de `tests/`, use `npm run` sem argumento pra ver todos):
-
-```bash
-npm run test:api
-npm run test:integration
-npm run test:repositories
-npm run test:group-video-flow
-npm run test:dispatch-drive-video
-npm run test:campaign-trigger-processor
-npm run test:campaign-dispatch-window-shift
-npm run test:group-sync-schedule
-npm run test:drive-indexer
-npm run test:drive-download
-npm run test:drive-index-schedule
-npm run test:drive
-npm run test:evolution
-npm run test:campaign-video-captions
-npm run test:dispatch-media-limit
-npm run test:audio-extraction
-npm run test:video-compression
-npm run test:ai-http-utils
-npm run test:boot-replay        # regressao do incidente de spam no boot do Docker
-npm run test:cancel-audit       # quem cancelou um envio, e quando
+npm test                        # suite completa
 npm run db:test
 npm run sentry:test             # valida SENTRY_DSN antes de configurar em producao
+npm run test:boot-replay        # regressao do incidente de spam no boot do Docker
+npm run test:cancel-audit       # quem cancelou um envio, e quando
 ```
+
+O `package.json` tem um `test:<nome>` dedicado para cada arquivo em `tests/`;
+rode `npm run` sem argumento para ver a lista completa.
 
 ## Deploy
 
-O projeto esta deployado para testes numa VM Oracle Cloud, via Docker Compose (`infra/docker-compose.yml`) com Caddy fazendo HTTPS automatico (Let's Encrypt) por tras de um hostname `sslip.io` gratuito - guia completo em `docs/DEPLOY_ORACLE.md`. A API e os workers rodam como containers (perfis `workers`, `evolution`, `proxy`), nao como processos soltos com `npm run`.
+O projeto esta deployado para testes numa VM Oracle Cloud, via Docker Compose,
+com Caddy fazendo HTTPS automatico (Let's Encrypt) atras de um hostname
+`sslip.io` gratuito. A API e os workers rodam como containers, nao como
+processos soltos com `npm run`. Guia completo (provisionamento, `.env` de
+producao, deploy manual e automatico via GitHub Actions):
+`docs/DEPLOY_ORACLE.md`.
 
-Para atualizar o servidor existente:
+Pontos que valem atencao em qualquer atualizacao do servidor:
 
-1. Sincronize o codigo com a VM. O servidor atual **nao e um checkout git** (foi copiado, nao clonado) - a forma usada e `rsync` a partir de uma maquina com a chave SSH:
-   ```bash
-   rsync -avz --delete \
-     --exclude ".git" --exclude "node_modules" --exclude ".tmp_preview" \
-     --exclude "coverage" --exclude "logs" --exclude ".env" --exclude ".env.*" \
-     --exclude "storage/*" --exclude "credentials" \
-     -e "ssh -i /caminho/da/chave.key" \
-     ./ ubuntu@SEU_IP:~/estimulo-project/
-   ```
-   Se o servidor for um checkout git de verdade, `git fetch && git reset --hard origin/main` (ou `git pull --ff-only`) substitui esse passo.
-2. `package-lock.json` mudou? A imagem roda `npm ci` no build (passo 4), entao normalmente nao precisa de acao manual - so confira que o lockfile foi commitado junto do `package.json`.
-3. As migrations novas foram aplicadas no Supabase (`supabase/migrations`, em ordem cronologica - aplique via SQL Editor do projeto, ja que nao ha CLI do Supabase linkado ao projeto). **Antes do rebuild, nao depois**: o codigo escreve nas colunas novas, e o Postgrest recusa um payload com coluna inexistente (`PGRST204`). Subir a aplicacao na frente da migration quebra a acao correspondente - `202609030001`, por exemplo, deixa `POST /campaigns/:id/cancel` respondendo 500 ate o SQL rodar.
-4. Rebuild e recrie so os containers que rodam codigo da aplicacao (nao mexe em Redis/Evolution/Caddy):
-   ```bash
-   cd infra
-   docker compose --env-file ../.env build api campaign-trigger-worker dispatch-worker \
-     dispatch-review-timeout-worker dispatch-failure-retry-worker mensagens-dispatch-worker \
-     group-sync-worker drive-video-index-worker
-   docker compose --env-file ../.env up -d --no-deps api campaign-trigger-worker dispatch-worker \
-     dispatch-review-timeout-worker dispatch-failure-retry-worker mensagens-dispatch-worker \
-     group-sync-worker drive-video-index-worker
-   ```
-   Sempre use `--env-file ../.env` (ou rode da raiz com `--env-file .env`) - sem isso o compose nao acha o `.env` e sobe os containers de Evolution/Redis com credenciais vazias (ver aviso na secao "Filas e Workers" abaixo).
-5. Confira: `docker compose ps` (todos `healthy`/`Up`) e `docker compose logs --tail=30 <servico>` sem erro.
-6. O `.env` do servidor contem Redis, Supabase, Evolution API, Google Drive, Gemini e as variaveis de sessao do login (`ESTIMULO_SESSION_TTL_HOURS`, `ESTIMULO_SESSION_STATE_FILE`); e ha pelo menos um usuario criado via `npm run users:manage -- create`.
-
-Detalhes de rede, firewall, HTTPS sem dominio proprio e configuracao completa do `.env` de producao: `docs/DEPLOY_ORACLE.md`.
+- A VM de producao atual **nao e um checkout git** (foi copiada por
+  `rsync`, nao clonada) - sincronize o codigo por `rsync` a menos que o
+  servidor seja de fato um checkout git.
+- Migrations novas em `supabase/migrations` **nao sao aplicadas
+  automaticamente** (nao ha CLI do Supabase linkado ao projeto) - aplique via
+  SQL Editor **antes** do rebuild, nao depois: o codigo novo pode escrever em
+  colunas que ainda nao existem, e o Postgrest recusa o payload inteiro
+  (`PGRST204`).
+- Ao rodar `docker compose` manualmente, sempre use `--env-file .env` - sem
+  isso os containers de Evolution/Redis sobem com credenciais vazias (ver
+  `docs/filas.md`).
 
 ## Referencias Internas
 
-- `docs/filas.md`: detalhes das filas BullMQ e operacao dos workers.
+- `docs/filas.md`: filas BullMQ, operacao dos workers e runbook de incidentes
+  conhecidos (reenvio no boot, auditoria de cancelamento, `--env-file`,
+  reenvio automatico do Baileys).
 - `docs/evolution-api.md`: integracao local com Evolution API.
 - `docs/estrutura.md`: estrutura do projeto.
-- `docs/documentacao_banco.md`: documentacao detalhada do banco.
-- `docs/DEPLOY_ORACLE.md`: guia completo de deploy na VM Oracle Cloud (manual e automatico via GitHub Actions).
-- `docs/SENTRY.md`: como criar o projeto no Sentry, preencher o `.env` e onde ver os erros capturados.
-- `docs/ERROS_E_APRENDIZADOS.md`: incidentes de producao ja enfrentados, causa raiz e o que ficou como trava contra repeticao.
+- `docs/documentacao_banco.md`: documentacao do banco (schema inicial,
+  desatualizada - ver diagrama acima para o estado atual).
+- `docs/DEPLOY_ORACLE.md`: guia completo de deploy na VM Oracle Cloud.
+- `docs/SENTRY.md`: configuracao do Sentry e onde ver os erros capturados.
+- `docs/ERROS_E_APRENDIZADOS.md`: incidentes de producao ja enfrentados,
+  causa raiz e o que ficou como trava contra repeticao.
 - `supabase/migrations`: historico da evolucao do schema.

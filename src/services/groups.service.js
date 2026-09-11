@@ -218,7 +218,16 @@ function createGroupsService(dependencies = {}) {
       throw new Error("Group id is required");
     }
 
-    const allowedFields = ["organization_id", "profile_id", "segmento", "setor", "envia_video", "trilha_override", "trilha_id"];
+    const allowedFields = [
+      "organization_id",
+      "profile_id",
+      "segmento",
+      "setor",
+      "envia_video",
+      "trilha_override",
+      "trilha_id",
+      "ativo",
+    ];
     const hasAllowedField = allowedFields.some((field) => Object.prototype.hasOwnProperty.call(payload, field));
 
     if (!hasAllowedField) {
@@ -298,6 +307,19 @@ function createGroupsService(dependencies = {}) {
       }
 
       nextPayload.envia_video = payload.envia_video;
+    }
+
+    // Tira o grupo de circulacao para disparos NOVOS (pontual e futuras
+    // campanhas) sem apagar a linha nem o historico ja gravado em
+    // logs/campaign_groups. Usado para grupos duplicados de verdade no
+    // WhatsApp (mesmo nome, JID diferente) que ja tem envio real registrado
+    // dos dois lados, onde apagar deixaria de ser seguro.
+    if (Object.prototype.hasOwnProperty.call(payload, "ativo")) {
+      if (typeof payload.ativo !== "boolean") {
+        throw new Error("Ativo must be boolean");
+      }
+
+      nextPayload.ativo = payload.ativo;
     }
 
     return repository.update(id, nextPayload);

@@ -600,6 +600,146 @@ await contentDistributionQueue.add(
 );
 ```
 
+## Operacao em producao
+
+### Reenvio no boot: por que existem travas de atraso
+
+O Redis da infra sobe com `--appendonly yes` e volume persistente, entao **todo
+job de envio que nao terminou continua gravado entre um `docker compose down`
+e o proximo `up`**. Quando os workers voltam, a BullMQ:
+
+- promove de uma vez todos os jobs `delayed` cujo horario ja passou (rajada,
+  todos com delay 0);
+- reentrega os jobs que ficaram `active` no shutdown (stalled recovery);
+- re-registra os agendamentos recorrentes (`dispatch-failure-retry`,
+  `dispatch-review-timeout`), que voltam a rodar no instante do boot.
+
+Sem trava, isso reenvia para os grupos de WhatsApp campanhas e mensagens
+agendadas dias antes. As protecoes atuais:
+
+| Trava | Onde | O que barra |
+|---|---|---|
+| Atraso do job (falha fechado) | `queues/dispatch.js`, `queues/mensagens-dispatch.js` | Job cujo `scheduled_at` passou do teto, ou que nao tem horario nenhum. |
+| Atraso do trigger | `queues/campaign-trigger.js` | Trigger vencido virando dezenas de jobs com delay 0 (nao vale para campanha recorrente). |
+| Campanha pausada/cancelada | `services/dispatch-consistency.service.js` + portao de `dispatch.js` | Job que sobreviveu no Redis depois de o operador pausar/cancelar. |
+| Horario original preservado | `services/dispatch-staleness.js` (`resolveLogScheduledAt`) | Requeue/retry reestampando `scheduled_at` com "agora" e apagando a evidencia de atraso. |
+| Teto de idade do auto-confirm | `queues/dispatch-review-timeout.js` | Campanha abandonada em `gerando_legendas` sendo ressuscitada e disparada inteira. |
+
+Tetos configuraveis (ver `.env.example`): `MAX_DISPATCH_DELAY_MS` (30 min,
+pontual), `MAX_VIDEO_DISPATCH_DELAY_MS` (6 h, video) e
+`MAX_AUTO_CONFIRM_AGE_MS` (24 h). Aumentar demais reabre o risco de spam;
+diminuir demais cancela envio legitimo de campanha grande, porque o worker de
+video processa em serie.
+
+Regressao coberta por `tests/dispatch-boot-replay.test.js`
+(`npm run test:boot-replay`).
+
+### Quem cancelou um envio, e quando
+
+Um envio pode virar "Cancelado" por caminhos muito diferentes - o operador
+clicando em cancelar, a trava de atraso barrando um job vencido, a cascata de
+uma campanha cancelada - e na tabela `logs` os tres ficavam identicos. As
+colunas que respondem isso hoje:
+
+| Coluna | Onde | Resposta que ela da |
+|---|---|---|
+| `logs.cancelado_em` | `202609020002` | Quando aquele envio foi cancelado (a tabela nao tem `updated_at`). |
+| `logs.cancelado_origem` | `202609020002` | `usuario` \| `atraso` \| `campanha_cancelada` \| `sistema` - vocabulario fechado por CHECK. |
+| `logs.cancelado_por` / `campaigns.cancelado_por` | `202609030001` | A conta que pediu o cancelamento no painel. **Nula em cancelamento automatico**, onde nao existe responsavel. |
+| `logs.atualizado_em` | `202609030002` | Instante da ultima alteracao do envio, mantido pelo trigger `trg_logs_atualizado_em`, ja que os envios sao atualizados por muitos caminhos diferentes (workers de video e de texto, retry, confirmacao de entrega, cascata de cancelamento) para um unico esquecimento nao reabrir o buraco. |
+
+Onde isso aparece: o modal de campanha traz "Campanha cancelada em ... por
+...''; o relatorio tem a coluna **Atualizado em** e o badge "Cancelado" carrega
+na dica o motivo, a origem, o responsavel e o horario (`Detalhe do
+cancelamento` no CSV, ja que planilha nao tem tooltip). O relatorio embeda o
+responsavel com `app_users!logs_cancelado_por_fkey` - o nome da FK e'
+obrigatorio, porque `logs` referencia `app_users` por duas colunas
+(`usuario_responsavel_id` e `cancelado_por`) e sem desambiguar o Postgrest
+recusa o embed inteiro.
+
+Linhas anteriores a cada migration ficam **nulas de proposito**: o dado nunca
+foi gravado e um backfill so trocaria um valor errado por outro. As telas
+tratam esse nulo explicitamente - o modal de campanha mostra a data de criacao
+dizendo que e' a de criacao, e a dica do relatorio omite o trecho de autoria
+em vez de escrever "sem responsavel" (que soaria como "foi automatico",
+justamente a conclusao errada).
+
+Origem do problema e historico completo em
+`docs/ERROS_E_APRENDIZADOS.md` ("Cancelamento sem auditoria"). Regressao
+coberta por `tests/cancel-audit.test.js` (`npm run test:cancel-audit`).
+
+### Suba o compose sempre com `--env-file`
+
+`docker compose -f infra/docker-compose.yml ...` rodado da raiz do projeto
+**nao le o `.env`**. O CLI do compose procura o `.env` relativo ao arquivo
+passado em `-f` (ou seja `infra/.env`, que nao existe), e a interpolacao
+`${VAR}` do proprio YAML resolve para **string vazia**, em silencio - apenas
+warnings soltos. O `env_file: [../.env]` declarado dentro do YAML nao cobre
+isso: ele alimenta o container depois de criado, nao a interpolacao do YAML.
+
+O sintoma e traicoeiro: os containers sobem com `POSTGRES_USER=""`,
+`REDIS_PASSWORD=""`, `AUTHENTICATION_API_KEY=""`, o Postgres recusa toda
+conexao (`no PostgreSQL user name specified in startup packet`) e a Evolution
+API entra em crash-loop.
+
+Use os scripts npm, que ja passam o flag correto:
+
+```bash
+npm run infra:up          # redis + api
+npm run infra:workers     # + workers de fila
+npm run infra:evolution   # + Evolution API (gateway WhatsApp)
+npm run infra:all         # tudo
+npm run infra:ps          # status
+npm run infra:logs        # logs de tudo
+npm run infra:stop        # para sem remover
+npm run infra:down        # para e remove
+```
+
+Manualmente, o equivalente e sempre:
+`docker compose --env-file .env -f infra/docker-compose.yml ...`
+
+### Reenvio automatico do Baileys (nao e a nossa fila)
+
+Se mensagens sairem para grupos **sem que nada esteja nas nossas filas**
+(`logs` com `falhou=0`/`pendente=0`, filas do Redis vazias), o envio
+provavelmente nao veio da aplicacao. Procure no log da Evolution:
+
+```bash
+docker logs <container-evolution> 2>&1 | grep "sending message again"
+```
+
+`sendMessagesAgain` e o retry automatico do Baileys: quando um aparelho do
+destinatario nao consegue descriptografar uma mensagem, ele pede reenvio ao
+WhatsApp. Esses pedidos ficam acumulados **no servidor do WhatsApp** e sao
+entregues quando a instancia reconecta - o Baileys entao reenvia a mensagem,
+buscando o conteudo na tabela `Message` do Postgres da Evolution.
+
+**Nao tente resolver apagando a tabela `Message`.** Sem o conteudo, o Baileys
+nao pula o reenvio: ele envia uma **mensagem vazia** no lugar (testado em
+2026-08-21 - 3 mensagens vazias chegaram a um grupo de cliente). As duas
+pontas sao ruins: com conteudo, reenvia mensagem antiga; sem conteudo, envia
+vazio.
+
+A unica forma de encerrar o ciclo e **invalidar a sessao** que e dona daqueles
+ids de mensagem (logout da instancia + novo pareamento por QR Code). Ai os
+pedidos de reenvio pendentes passam a referenciar um dispositivo que nao
+existe mais e sao descartados pelo WhatsApp.
+
+### Inspecionar / limpar as filas antes de subir os workers
+
+```bash
+node scripts/inspect-dispatch-queues.js                  # so mostra o que esta armado
+node scripts/inspect-dispatch-queues.js --purge          # remove os jobs vencidos
+node scripts/inspect-dispatch-queues.js --purge --repeat # remove tambem os agendamentos recorrentes
+```
+
+Use antes de subir os workers quando houver suspeita de backlog antigo no
+Redis. Dentro do compose (Redis nao publicado no host):
+
+```bash
+docker compose -f infra/docker-compose.yml run --rm --entrypoint node api scripts/inspect-dispatch-queues.js
+```
+
 ## Encerramento
 
 Em processos longos, registre handlers de encerramento para fechar workers,
