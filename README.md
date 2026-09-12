@@ -617,4 +617,7 @@ Pontos que valem atencao em qualquer atualizacao do servidor:
 - `docs/SENTRY.md`: configuracao do Sentry e onde ver os erros capturados.
 - `docs/ERROS_E_APRENDIZADOS.md`: incidentes de producao ja enfrentados,
   causa raiz e o que ficou como trava contra repeticao.
+- `docs/MANUTENCAO_E_ESCALA.md`: onde o sistema tem teto (grupos por
+  campanha, numeros de WhatsApp, cota de IA, volume de log), o que quebra em
+  cada caso, em que arquivo se mexe e quanto tempo de dev isso custa.
 - `supabase/migrations`: historico da evolucao do schema.

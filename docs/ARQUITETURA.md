@@ -109,6 +109,8 @@ sequenceDiagram
     participant CCQ as fila campaign-captions
     participant CCW as campaign-captions worker
     participant CVCS as campaign-video-captions.service.js
+    participant VCS as video-captions.service.js
+    participant CR as caption-review.service.js
     participant AI as gemini-adapter.js (Gemini)
     participant CTQ as fila campaign-trigger
     participant CTW as campaign-trigger worker
@@ -124,22 +126,34 @@ sequenceDiagram
     CS->>CCQ: enqueueCampaignCaptions(campaign_id)
     CCQ->>CCW: job "captions|<campaign_id>"
     CCW->>CVCS: generateCaptionsForCampaign(campaign_id)
-    CVCS->>AI: transcricao (agente transcription)\n+ geracao de legenda (agente caption_generation)
-    AI-->>CVCS: texto da legenda
-    CVCS->>CVCS: caption-review.service.js\n(agente caption_review, revisao factual)
+    CVCS->>VCS: resolveGeneratedCaption(video)\n(por grupo, dentro do laco)
+    VCS->>AI: transcricao (agente transcription)\n+ geracao de legenda (agente caption_generation)
+    AI-->>VCS: texto da legenda
+    VCS->>CR: reviewCaption(caption, transcript)
+    CR->>AI: revisao factual (agente caption_review,\ntambem chama o Gemini, nao e so algoritmo)
+    AI-->>CR: aprovado / reprovado
+    CR-->>VCS: resultado da revisao
+    VCS-->>CVCS: legenda final
     CVCS-->>CCW: campaign_video_captions (status=gerado)
     alt revisao humana desligada
         CCW->>CS: confirmDispatch(campaign_id)
-        CS->>CS: cria logs (status=pendente)\n+ agenda janela/jitter
-        CS->>CTQ: enqueueCampaignTrigger(campaign_id)
     else revisao humana ligada
-        Note over CCW,CS: campanha fica em espera na tela\n(Etapa 2), ate alguem confirmar\nou dispatch-review-timeout agir
+        Note over CCW: campanha fica em espera na tela\n(Etapa 2), com o botao\nde confirmar manual
+        UI->>API: POST /campaigns/:id/dispatch/confirm
+        API->>CS: confirmDispatch(campaign_id)
+        Note over CS: dispatch-review-timeout tambem\npode chamar confirmDispatch sozinho\nse ninguem confirmar a tempo
     end
+    CS->>CS: cria logs (status=pendente)\n+ pre-sorteia janela/jitter por grupo\n(precomputed_schedule)
+    CS->>CTQ: enqueueCampaignTrigger(campaign_id, precomputed_schedule)
     CTQ->>CTW: job da campanha
     CTW->>GVF: resolveGroupsVideoFlow(groups)
     GVF-->>CTW: proximo video elegivel por grupo\n(baseado em trilha_videos + group_video_progress)
-    CTW->>DQ: addJitteredDispatchJobs(...)
-    DQ->>DW: job por grupo (com atraso randomico)
+    alt precomputed_schedule ainda cobre todos os grupos (caminho comum)
+        CTW->>DQ: addDispatchJob por grupo\n(reaproveita o horario ja sorteado na confirmacao)
+    else lista de grupos mudou entre confirmacao e disparo
+        CTW->>DQ: addJitteredDispatchJobs(...)\n(sorteia horario novo agora)
+    end
+    DQ->>DW: job por grupo
     DW->>EV: sendToEvolution(payload)
     EV->>WA: POST /message/sendMedia
     WA-->>EV: aceite (PENDING)
@@ -165,8 +179,9 @@ sequenceDiagram
 
 ## 4. Fluxo 2: Disparo Pontual (tela de Mensagens)
 
-Este é o caminho manual, para comunicações fora da trilha (eventos, avisos,
-pesquisas). Tem três variantes, todas partindo da mesma tela:
+Existem três variantes no código, mas **a tela de Mensagens só usa duas
+delas** — a rota síncrona (`POST /mensagens/dispatch`) existe na API para
+uso por script/integração externa, não é chamada pelo painel:
 
 ```mermaid
 sequenceDiagram
@@ -179,18 +194,18 @@ sequenceDiagram
     participant EV as evolution.js
     participant WA as Evolution API / WhatsApp
 
-    alt Envio imediato (POST /mensagens/dispatch)
-        UI->>API: dispatch(payload)
+    alt Envio imediato SINCRONO (POST /mensagens/dispatch) — nao usado pela tela,\nso por script/API externa
         API->>MS: dispatchAdHoc(payload)
-        MS->>MS: valida grupos (segmento, ativo,\nevolution_group_id, cobertura de instancia)
+        MS->>MS: valida grupo a grupo, dentro do laco\n(falha so aquele grupo, nao aborta o lote)
         MS->>MS: cria campaigns (ancora) + logs (pendente)
         MS->>EV: sendToEvolution(payload) — sincrono,\ndentro da propria requisicao HTTP
         EV->>WA: POST /message/sendText ou /sendMedia
         MS->>MS: atualiza logs (enviado/falhou)
-        MS-->>UI: resposta HTTP com o resultado final
-    else Envio imediato assincrono (POST /mensagens/dispatch/async)
+        MS-->>API: resposta HTTP com o resultado final
+    else Envio imediato assincrono (POST /mensagens/dispatch/async) — usado pela tela\nno botao "Enviar agora"
         UI->>API: dispatchAsync(payload)
         API->>MS: dispatchAdHocAsync(payload)
+        MS->>MS: valida o lote inteiro de uma vez\n(segmento, ativo, evolution_group_id;\naborta tudo se algum grupo for invalido)
         MS->>MS: cria campaigns + logs (pendente)
         MS->>MDQ: job sem delay
         MS-->>UI: 202 Accepted (a tela consulta\nGET /mensagens/dispatch/status/:campaignId)
@@ -198,9 +213,10 @@ sequenceDiagram
         MDW->>EV: sendToEvolution(payload)
         EV->>WA: envio
         MDW->>MDW: atualiza logs
-    else Agendado (POST /mensagens/dispatch/schedule)
+    else Agendado (POST /mensagens/dispatch/schedule) — usado pela tela\nquando ha data/hora futura
         UI->>API: schedule(payload)
         API->>MS: scheduleAdHoc(payload)
+        MS->>MS: valida o lote + cobertura de instancia\n(unica das 3 variantes que checa se\nTODOS os numeros ativos alcancam o grupo)
         MS->>MS: cria campaigns + logs (pendente)
         opt tem anexo (imagem/video)
             MS->>MSpool: guarda o arquivo 1x, chaveado por SHA-256\n(TTL, nao vai dentro do job)
@@ -247,13 +263,13 @@ sequenceDiagram
     DW->>DC: confirmProviderDelivery(provider_message_id)
     loop ate o timeout (curto para grupo, mais longo fora de grupo)
         DC->>EPG: SELECT status FROM "Message" WHERE key->>'id' = ...
-        EPG-->>DC: status (PENDING / SERVER_ACK / DELIVERY_ACK / READ / ERROR)
+        EPG-->>DC: status (PENDING / SERVER_ACK / DELIVERY_ACK /\nREAD / PLAYED / ERROR / SERVER_ERROR)
     end
-    alt ACK confirmado (qualquer destino)
+    alt ACK confirmado (SERVER_ACK, DELIVERY_ACK, READ ou PLAYED)
         DC-->>DW: enviado / Confirmado
     else grupo, sem ACK ate o prazo
         DC-->>DW: enviado / Sem ACK (grupo) — normal, grupo nao confirma
-    else fora de grupo, PENDING ate o prazo
+    else fora de grupo, PENDING ate o prazo, ou ACK = ERROR/SERVER_ERROR\nem qualquer destino
         DC-->>DW: falhou
     else banco da Evolution inalcancavel
         DC-->>DW: enviado / Nao verificado
@@ -611,10 +627,37 @@ erDiagram
 
 ## 10. Metodologia e verificação
 
-Os diagramas acima foram construídos lendo `src/api/app.js` (rotas),
+Os diagramas foram construídos lendo `src/api/app.js` (rotas),
 `src/api/controllers/*`, `src/services/*`, `src/queues/*` e os arquivos
 `.html` de `public/app/` diretamente, seguindo a cadeia real de `require()`
-entre os arquivos, não a documentação de terceiros. Uma verificação
-independente (agente separado, sem acesso a este texto durante a checagem)
-conferiu cada diagrama contra o código antes da publicação; o resultado está
-registrado no final deste documento.
+entre os arquivos, não a documentação de terceiros.
+
+Um agente de verificação independente conferiu cada seção deste documento
+contra o código antes da publicação. Achados que geraram correção:
+
+- A Seção 2 (mapa de telas → endpoints) tinha duas imprecisões factuais:
+  `campanhas.html` não chama `POST /campaigns` nem `GET /campaigns/:id`
+  (quem chama é `envio-automatizado.html`), e `mensagens.html` nunca chama
+  `POST /mensagens/dispatch` (a variante síncrona é só para uso externo,
+  fora do painel). Também faltava o endpoint mais importante do fluxo da
+  Seção 3, `POST /campaigns/:id/dispatch/confirm`, na linha de
+  `envio-automatizado.html`. As três correções já estão aplicadas acima.
+- A Seção 3 simplificava demais a geração de legenda (o Gemini é chamado
+  através de `video-captions.service.js`, não direto por
+  `campaign-video-captions.service.js`, e a revisão factual também chama o
+  Gemini, não é só uma checagem algorítmica) e descrevia o disparo como
+  sempre sorteando horário novo, quando o caminho comum reaproveita os
+  horários já sorteados na confirmação. Corrigido acima.
+- A Seção 4 tratava as três variantes de disparo pontual como se
+  validassem os grupos do mesmo jeito; na prática só `scheduleAdHoc` checa
+  cobertura de instância, e `dispatchAdHoc` (síncrono) falha grupo a grupo
+  em vez de abortar o lote inteiro como `dispatchAdHocAsync`. Corrigido
+  acima.
+- A Seção 1 desenhava as filas como se sempre passassem por um service
+  antes de tocar num repository; vários workers acessam repository direto.
+  Corrigido acima.
+
+O diagrama ER (Seção 9), a tabela das 8 filas (Seção 8), a confirmação de
+entrega (Seção 5) e os fluxos de sincronização de grupos e indexação do
+Drive (Seções 6 e 7) foram conferidos e não tiveram nenhuma imprecisão
+apontada.
